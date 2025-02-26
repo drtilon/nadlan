@@ -1,0 +1,17 @@
+/* src/index.css */
+body {
+  margin: 0;
+  background: linear-gradient(135deg, #0f0f0f, #1a1a1a, #0f0f0f);
+  color: #fff;
+  font-family: 'Orbitron', sans-serif;
+}
+
+.cyberpunk-header {
+  text-shadow: 0 0 10px #0ff, 0 0 20px #f0f;
+}
+
+.cyberpunk-paper {
+  background: rgba(20, 20, 20, 0.8);
+  border: 1px solid #0ff;
+}
+

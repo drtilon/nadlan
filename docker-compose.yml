@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: your_root_password
+      MYSQL_DATABASE: your_database_name
+      MYSQL_USER: your_mysql_user
+      MYSQL_PASSWORD: your_mysql_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
+
+  backend:
+    build: ./backend
+    container_name: flask_backend
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mysql
+    environment:
+      - DB_HOST=mysql
+      - DB_USER=your_mysql_user
+      - DB_PASSWORD=your_mysql_password
+      - DB_NAME=your_database_name
+
+  
+  
+  frontend:
+    build: ./frontend
+    container_name: react_frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app  # Mount local project for live updates
+      - /app/node_modules  # Prevent overwriting dependencies
+      - /app/node_modules/.cache  # Fix ESLint permission issue
+    environment:
+      - CHOKIDAR_USEPOLLING=true  # Helps file watching work properly in Docker
+      - ESLINT_NO_CACHE=true  # Prevents ESLint from trying to create .cache
+    command: ["npm", "start"]
+
+volumes:
+  mysql_data:
+

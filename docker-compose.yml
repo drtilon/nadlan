@@ -5,16 +5,21 @@ services:
     image: mysql:8.0
     container_name: mysql_db
     restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: your_root_password
-      MYSQL_DATABASE: your_database_name
-      MYSQL_USER: your_mysql_user
-      MYSQL_PASSWORD: your_mysql_password
     ports:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql-init:/docker-entrypoint-initdb.d
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: mydatabase
+      MYSQL_USER: myuser
+      MYSQL_PASSWORD: mypassword
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      retries: 5
+      start_period: 20s
 
   backend:
     build: ./backend
@@ -24,12 +29,15 @@ services:
     volumes:
       - ./backend:/app
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     environment:
-      - DB_HOST=mysql
-      - DB_USER=your_mysql_user
-      - DB_PASSWORD=your_mysql_password
-      - DB_NAME=your_database_name
+      - FLASK_ENV=development
+      - DB_USER=myuser
+      - DB_PASSWORD=mypassword
+      - DB_HOST=mysql_db
+      - DB_NAME=mydatabase
+      - SECRET_KEY=mysecret
 
   frontend:
     build: ./frontend
@@ -38,10 +46,11 @@ services:
       - "3001:3001"
     volumes:
       - ./frontend:/app
-      - /app/node_modules  # Use this volume to preserve container node_modules
+      - /app/node_modules
     environment:
       - CHOKIDAR_USEPOLLING=true
     command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3001"]
 
 volumes:
   mysql_data:
+

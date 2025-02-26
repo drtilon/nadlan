@@ -14,6 +14,7 @@ import {
 
 const ApartmentDetailsForm = ({
   formData,
+  tenantData,
   handleChange,
   handleTenantChange,
   addTenant,
@@ -52,7 +53,7 @@ const ApartmentDetailsForm = ({
             label="מספר חדרים"
             name="rooms"
             value={formData.rooms}
-            onChange={handleChange}
+            onChange={(e)=>handleChange(e,true)}
             required
             variant="outlined"
           />
@@ -61,9 +62,10 @@ const ApartmentDetailsForm = ({
           <TextField
             fullWidth
             label="גודל במ״ר"
+            type="number"
             name="size"
             value={formData.size}
-            onChange={handleChange}
+            onChange={(e)=>handleChange(e,true)}
             required
             variant="outlined"
           />
@@ -77,7 +79,7 @@ const ApartmentDetailsForm = ({
           <Divider sx={{ mb: 2 }} />
         </Grid>
 
-        {formData.tenants.map((tenant, index) => (
+        {tenantData.map((tenant, index) => (
           <Grid container spacing={2} key={index} sx={{ mb: 2 }}>
             <Grid item xs={12} sm={4}>
               <TextField
@@ -196,9 +198,9 @@ const ApartmentDetailsForm = ({
             fullWidth
             type="number"
             label="שכירות חודשית (₪)"
+            onChange={(e)=>handleChange(e,true)}
             name="rent"
             value={formData.rent}
-            onChange={handleChange}
             variant="outlined"
           />
         </Grid>
@@ -207,9 +209,9 @@ const ApartmentDetailsForm = ({
             fullWidth
             type="number"
             label="פיקדון (₪)"
+            onChange={(e)=>handleChange(e,true)}
             name="deposit"
             value={formData.deposit}
-            onChange={handleChange}
             variant="outlined"
           />
         </Grid>
@@ -260,7 +262,7 @@ const ApartmentDetailsForm = ({
               label="דמי ניהול (%)"
               name="managementFee"
               value={formData.managementFee}
-              onChange={handleChange}
+              onChange={(e)=>handleChange(e,true)}
               variant="outlined"
             />
           </Grid>
@@ -273,7 +275,7 @@ const ApartmentDetailsForm = ({
               label="עלות שכירות (₪)"
               name="rentCost"
               value={formData.rentCost}
-              onChange={handleChange}
+              onChange={(e)=>handleChange(e,true)}
               variant="outlined"
             />
           </Grid>

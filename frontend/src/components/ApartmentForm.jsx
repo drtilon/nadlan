@@ -7,64 +7,59 @@ import ApartmentDetailsForm from './ApartmentDetailsForm';
 function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotification }) {
   const emptyForm = {
     address: '',
-    rooms: '',
-    size: '',
-    tenants: [{ name: '', email: '', phone: '' }],  // Array for multiple tenants
+    rooms: 0,
+    size: 0,
     landlordName: '',
     landlordEmail: '',
     landlordPhone: '',
     moveInDate: '',
     contractEndDate: '',
-    rent: '',
-    deposit: '',
+    rent: 0,
+    deposit: 0,
     notes: '',
     IBAN: '',
     status: '',
     model: '',
-    managementFee: '',
-    rentCost: ''
+    managementFee: 0,
+    rentCost: 0
   };
+  const [tenantData,setTenantData]  = useState([])
 
   const [formData, setFormData] = useState(isEdit ? initialData : emptyForm);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modelChosen, setModelChosen] = useState(isEdit ? true : false);
 
   // Handle input changes for the main form fields
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+  const handleChange = (e,isNumber) => {
+    setFormData({ ...formData, [e.target.name]:isNumber?parseInt(e.target.value): e.target.value });
   };
 
   // Handle changes for tenant fields
   const handleTenantChange = (index, field, value) => {
-    const updatedTenants = [...formData.tenants];
-    updatedTenants[index][field] = value;
-    setFormData({ ...formData, tenants: updatedTenants });
-  };
+    setTenantData(prev=>prev.map((tenant,i) => i==index?{...tenant,[field]:value}:tenant))
+      };
 
   // Add a new empty tenant row
   const addTenant = () => {
-    setFormData({
-      ...formData,
-      tenants: [...formData.tenants, { name: '', email: '', phone: '' }]
-    });
+    setTenantData([
+      ...tenantData,
+      { name: '', email: '', phone: '' }
+    ]);
   };
 
   // Remove a tenant
   const removeTenant = (index) => {
-    const updatedTenants = formData.tenants.filter((_, i) => i !== index);
-    setFormData({ ...formData, tenants: updatedTenants });
+    setTenantData(prev=>prev.filter((item,i) => i != index))
   };
 
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
+    console.log(formData,tenantData)
 
     try {
-      const payload = {
-        ...formData,
-        tenants: JSON.stringify(formData.tenants) // Convert array to JSON before sending
-      };
+      const payload = {new_apartment:formData,new_tenants:tenantData}
 
       if (isEdit) {
         await api.put(`/edit/${initialData.id}`, payload);
@@ -115,6 +110,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       ) : (
         <ApartmentDetailsForm
           formData={formData}
+          tenantData={tenantData}
           handleChange={handleChange}
           handleTenantChange={handleTenantChange}
           addTenant={addTenant}

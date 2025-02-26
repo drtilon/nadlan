@@ -52,8 +52,8 @@ def init_db():
         IBAN VARCHAR(100),
         status VARCHAR(50),
         model VARCHAR(50) DEFAULT 'management',  -- 'management' or 'rental'
-        management_fee DECIMAL(5,2) DEFAULT 0,   -- if management model
-        rent_cost DECIMAL(10,2) DEFAULT 0,       -- if rental model
+        managementFee DECIMAL(5,2) DEFAULT 0,   -- if management model
+        rentCost DECIMAL(10,2) DEFAULT 0,       -- if rental model
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )

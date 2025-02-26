@@ -7,3 +7,5 @@ pandas
 xlsxwriter
 PyJWT
 pydantic
+pymysql
+cryptography

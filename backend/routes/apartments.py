@@ -7,6 +7,8 @@ from auth import token_required, role_required
 from models import Apartment, Tenant, db
 from typing import Tuple, List
 from schemas import ApartmentData, TenantData
+from flasgger import swag_from
+from pydantic import ValidationError
 
 apartments_bp = Blueprint("apartments_bp", __name__)
 
@@ -14,13 +16,35 @@ apartments_bp = Blueprint("apartments_bp", __name__)
 @apartments_bp.route("/add", methods=["POST"])
 @token_required
 @role_required("admin")
-def add_apartment_route(
-    new_apartment: ApartmentData, new_tenants: List[TenantData]
-) -> Tuple[Response, int]:
+def add_apartment_route() -> Tuple[Response, int]:
     try:
-        db.session.add(Apartment(new_apartment.model_dump()))
-        for tenants in new_tenants:
-            db.session.add(Tenant(tenants.model_dump()))
+        # ✅ Get and validate request data
+        data = request.get_json()
+        if not data:
+            return jsonify({"message": "Invalid request: No data provided"}), 400
+
+        # ✅ Validate request body using Pydantic
+        try:
+            new_apartment = ApartmentData(**data["new_apartment"])
+            new_tenants = [
+                TenantData(**tenant) for tenant in data.get("new_tenants", [])
+            ]
+        except ValidationError as e:
+            return jsonify({"message": "Invalid data", "errors": e.errors()}), 400
+
+        # ✅ Add Apartment to DB
+        current_app.logger.error(new_apartment)
+        apartment = Apartment(**new_apartment.model_dump(exclude={"tenants"}))
+
+        db.session.add(apartment)
+        db.session.flush()  # Ensure apartment ID is assigned before adding tenants
+
+        # ✅ Add Tenants to DB
+        tenants = [
+            Tenant(**tenant.dict(), apartment_id=apartment.id) for tenant in new_tenants
+        ]
+        db.session.add_all(tenants)
+
         db.session.commit()
         return jsonify({"message": "Apartment added successfully"}), 201
 
@@ -84,19 +108,16 @@ def list_apartments() -> Tuple[Response, int]:
     try:
         apartments = Apartment.query.all()
         apartments_data = [apt.to_dict() for apt in apartments]
-
         # For non-admin users, remove sensitive fields
         role = g.user.get("role", "limited")
         if role != "admin":
             for apt in apartments_data:
-                apt.pop("tenantEmail", None)
-                apt.pop("tenantPhone", None)
                 apt.pop("landlordEmail", None)
                 apt.pop("landlordPhone", None)
                 apt.pop("IBAN", None)
                 apt.pop("notes", None)
-                apt.pop("management_fee", None)
-                apt.pop("rent_cost", None)
+                apt.pop("managementFee", None)
+                apt.pop("rentCost", None)
 
         return jsonify(apartments_data), 200
 

@@ -1,6 +1,7 @@
 # config.py
 import os
 
+
 class Config:
     DB_CONFIG = {
         "user": os.environ.get("DB_USER", "default_user"),
@@ -10,4 +11,8 @@ class Config:
     }
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev_secret_key_change_in_production")
     TOKEN_EXPIRATION = 24  # hours
-
+    SQLALCHEMY_DATABASE_URI = (
+        os.environ.get("DATABASE_URL")
+        or "mysql+pymysql://user:password@localhost/your_database_name"
+    )
+    SQLALCHEMY_TRACK_MODIFICATIONS = False

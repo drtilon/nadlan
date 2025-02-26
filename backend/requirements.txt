@@ -1,6 +1,9 @@
 flask
+flasgger
 flask-cors
+Flask-SQLAlchemy
 mysql-connector-python
 pandas
 xlsxwriter
 PyJWT
+pydantic

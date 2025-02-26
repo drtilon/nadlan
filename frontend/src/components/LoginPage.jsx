@@ -17,6 +17,7 @@ function LoginPage({ onLogin, showNotification }) {
 
     try {
       const response = await api.post('/login', credentials);
+      localStorage.setItem('token', response.data.token);
       setAuthToken(response.data.token);
       onLogin();
       showNotification('התחברת בהצלחה');

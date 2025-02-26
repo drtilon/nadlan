@@ -1,4 +1,4 @@
-// components/AuthenticatedApp.js
+// components/AuthenticatedApp.jsx
 import React from 'react';
 import { AppBar, Toolbar, Typography, IconButton, Container } from '@mui/material';
 import HomeIcon from '@mui/icons-material/Home';
@@ -87,4 +87,3 @@ function AuthenticatedApp({
 }
 
 export default AuthenticatedApp;
-

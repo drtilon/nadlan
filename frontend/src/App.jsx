@@ -26,6 +26,7 @@ function App() {
   const handleLogout = () => {
     setAuthToken(null);
     setIsAuthenticated(false);
+    localStorage.removeItem('token');
   };
 
   const showNotification = (message, severity = 'success') => {

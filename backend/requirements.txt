@@ -2,6 +2,9 @@ flask
 flasgger
 flask-cors
 Flask-SQLAlchemy
+flask-bcrypt
+flask_limiter
+flask-jwt-extended
 mysql-connector-python
 pandas
 xlsxwriter

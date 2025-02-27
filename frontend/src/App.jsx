@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Box, CircularProgress, Snackbar, Alert } from '@mui/material';
 import { ThemeProvider } from '@mui/material/styles';
 import LoginPage from './components/LoginPage';
+import RegisterPage from './components/RegisterPage'; // Import RegisterPage
 import AuthenticatedApp from './components/AuthenticatedApp';
 import theme from './theme';
 import { setAuthToken } from './utils/api';
@@ -12,6 +13,7 @@ function App() {
   const [activeView, setActiveView] = useState('list'); // 'list', 'add', 'edit'
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' });
   const [editingApartment, setEditingApartment] = useState(null);
+  const [isRegistering, setIsRegistering] = useState(false); // New state for handling register page
 
   // Check for existing token on load
   useEffect(() => {
@@ -45,22 +47,31 @@ function App() {
     <ThemeProvider theme={theme}>
       <Box dir="rtl" sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
         {isAuthenticated ? (
-          <AuthenticatedApp 
-            onLogout={handleLogout} 
+          <AuthenticatedApp
+            onLogout={handleLogout}
             activeView={activeView}
             setActiveView={setActiveView}
             showNotification={showNotification}
             editingApartment={editingApartment}
             setEditingApartment={setEditingApartment}
           />
+        ) : isRegistering ? (
+          <RegisterPage
+            showNotification={showNotification}
+            onSwitchToLogin={() => setIsRegistering(false)} // Allow switching back to login
+          />
         ) : (
-          <LoginPage onLogin={() => setIsAuthenticated(true)} showNotification={showNotification} />
+          <LoginPage
+            onLogin={() => setIsAuthenticated(true)}
+            showNotification={showNotification}
+            onSwitchToRegister={() => setIsRegistering(true)} // Switch to register
+          />
         )}
-        
-        <Snackbar 
-          open={notification.open} 
-          autoHideDuration={6000} 
-          onClose={() => setNotification({...notification, open: false})}
+
+        <Snackbar
+          open={notification.open}
+          autoHideDuration={6000}
+          onClose={() => setNotification({ ...notification, open: false })}
           anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         >
           <Alert severity={notification.severity} variant="filled">

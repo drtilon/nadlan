@@ -3,12 +3,13 @@ import pandas as pd
 from io import BytesIO
 from datetime import datetime
 from flask import Blueprint, request, jsonify, g, current_app, send_file, Response
-from auth import token_required, role_required
-from models import Apartment, Tenant, db
+from models.models import Apartment, Tenant
+from extentions import db
 from typing import Tuple, List
 from schemas import ApartmentData, TenantData
 from flasgger import swag_from
 from pydantic import ValidationError
+from auth import token_required, role_required
 
 apartments_bp = Blueprint("apartments_bp", __name__)
 
@@ -88,8 +89,8 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
         apartment.notes = data.get("notes", apartment.notes)
         apartment.IBAN = data.get("IBAN", apartment.IBAN)
         apartment.status = data.get("status", apartment.status)
-        apartment.management_fee = (
-            data.get("managementFee", apartment.management_fee) or 0
+        apartment.managementFee = (
+            data.get("managementFee", apartment.managementFee) or 0
         )
         apartment.rent_cost = data.get("rentCost", apartment.rent_cost) or 0
 

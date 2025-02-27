@@ -4,10 +4,12 @@ import datetime
 from functools import wraps
 from flask import request, jsonify, g, current_app
 
+
 def token_required(f):
     """
     Decorator to check for a valid JWT in the Authorization header.
     """
+
     @wraps(f)
     def decorated(*args, **kwargs):
         token = None
@@ -17,27 +19,37 @@ def token_required(f):
         if not token:
             return jsonify({"message": "Token is missing!"}), 401
         try:
-            decoded = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
-            g.user = decoded  # attach the decoded token (including 'role') to Flask global
+            decoded = jwt.decode(
+                token, current_app.config["SECRET_KEY"], algorithms=["HS256"]
+            )
+            g.user = (
+                decoded  # attach the decoded token (including 'role') to Flask global
+            )
         except jwt.ExpiredSignatureError:
             return jsonify({"message": "Token has expired!"}), 401
         except jwt.InvalidTokenError:
             return jsonify({"message": "Invalid token!"}), 401
         return f(*args, **kwargs)
+
     return decorated
+
 
 def role_required(required_role):
     """
     Decorator to ensure the user has a specific role.
     """
+
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
             if g.user.get("role") != required_role:
                 return jsonify({"message": "Insufficient permissions"}), 403
             return f(*args, **kwargs)
+
         return decorated_function
+
     return decorator
+
 
 def create_token(username, role, expiration_hours):
     """
@@ -47,8 +59,7 @@ def create_token(username, role, expiration_hours):
         "sub": username,
         "role": role,
         "iat": datetime.datetime.utcnow(),
-        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=expiration_hours)
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=expiration_hours),
     }
-    token = jwt.encode(payload, current_app.config['SECRET_KEY'], algorithm="HS256")
+    token = jwt.encode(payload, current_app.config["SECRET_KEY"], algorithm="HS256")
     return token
-

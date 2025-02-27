@@ -3,31 +3,77 @@ from flask import Flask
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from config import Config
-from models import db
 from flasgger import Swagger
+from extentions import db, jwt, bcrypt
+from sqlalchemy.exc import OperationalError
+from flask import current_app
+import time
+from models.models import Apartment, Tenant, User
+from initalized.init_user import ensure_admin_user_exists
+from initalized.init_apartment import ensure_default_apartment_exists
+
+
+def wait_for_mysql(app):
+    """Retry MySQL connection until it's available."""
+    max_retries = 10
+    retries = 0
+    while retries < max_retries:
+        try:
+            with app.app_context():
+                app.logger.info("Running db.create_all()...")
+                db.create_all()
+                current_app.logger.info("Database connection successful!")
+            return
+        except OperationalError as e:
+            current_app.logger.error(
+                f"MySQL not ready yet ({e}). Retrying in 5 seconds..."
+            )
+            time.sleep(5)
+            retries += 1
+
+    current_app.logger.error("Failed to connect to MySQL after multiple attempts.")
+    exit(1)
 
 
 def create_app():
-    app = Flask(__name__)
-    app.config.from_object(Config)
-    CORS(app, resources={r"/*": {"origins": "*", "supports_credentials": True}})
+    try:
+        app = Flask(__name__)
+        app.config.from_object(Config)
 
-    db.init_app(app)
-    Swagger(app)  # Initialize Flasgger
+        try:
+            CORS(app, resources={r"/*": {"origins": "*", "supports_credentials": True}})
+        except Exception as e:
+            app.logger.error(f"Error initializing CORS: {e}")
 
-    with app.app_context():
-        db.create_all()
+        try:
+            db.init_app(app)
+            jwt.init_app(app)
+            bcrypt.init_app(app)
+            Swagger(app)
+        except Exception as e:
+            app.logger.error(f"Error initializing extensions: {e}")
 
-    # Register blueprints
-    from routes.apartments import apartments_bp
-    from routes.auth_routes import auth_bp
-    from routes.payments import payments_bp
+        with app.app_context():
+            wait_for_mysql(app)
+            ensure_admin_user_exists()
+            ensure_default_apartment_exists()
 
-    app.register_blueprint(auth_bp, url_prefix="/api")
-    app.register_blueprint(apartments_bp, url_prefix="/api")
-    app.register_blueprint(payments_bp, url_prefix="/api")
+        try:
+            from routes.auth_routes import auth_bp
 
-    return app
+            app.register_blueprint(auth_bp, url_prefix="/api/auth")
+            print("Blueprints registered")
+        except Exception as e:
+            app.logger.error(f"Error registering blueprints: {e}")
+
+        return app
+
+    except Exception as e:
+        # If the app hasn't been created, fall back to using Python's logging
+        import logging
+
+        logging.error(f"Critical error creating the Flask app: {e}")
+        return None
 
 
 if __name__ == "__main__":

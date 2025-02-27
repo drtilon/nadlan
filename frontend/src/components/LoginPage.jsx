@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { Container, Paper, Typography, TextField, Button, CircularProgress } from '@mui/material';
 import api from '../utils/api';
-import { setAuthToken } from '../utils/api';
 
-function LoginPage({ onLogin, showNotification }) {
+function LoginPage({ onLogin, showNotification, onSwitchToRegister }) {
   const [credentials, setCredentials] = useState({ username: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
 
@@ -16,14 +15,18 @@ function LoginPage({ onLogin, showNotification }) {
     setIsLoading(true);
 
     try {
-      const response = await api.post('/login', credentials);
-      localStorage.setItem('token', response.data.token);
-      setAuthToken(response.data.token);
+      const response = await api.post('/auth/login', credentials);
+      localStorage.setItem('token', response.data.access_token);
       onLogin();
-      showNotification('התחברת בהצלחה');
+      showNotification('Successful login', 'success');
     } catch (error) {
       console.error(error);
-      showNotification('שם משתמש או סיסמה שגויים', 'error');
+      const message = error.response?.data?.message;
+      if (message === "Your account is pending admin approval.") {
+        showNotification('Your account is pending admin approval.', 'error');
+      } else {
+        showNotification('Username or Password incorrect', 'error');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -31,9 +34,9 @@ function LoginPage({ onLogin, showNotification }) {
 
   return (
     <Container component="main" maxWidth="xs" sx={{ mt: 8 }}>
-      <Paper elevation={3} sx={{ p: 4, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <Typography component="h1" variant="h4" sx={{ mb: 3 }}>
-          ניהול דירות להשכרה
+      <Paper elevation={3} sx={{ p: 3, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <Typography component="h1" variant="h5" sx={{ mb: 3 }}>
+          Nadlan Management App
         </Typography>
         <form onSubmit={handleSubmit} style={{ width: '100%' }}>
           <TextField
@@ -42,7 +45,7 @@ function LoginPage({ onLogin, showNotification }) {
             required
             fullWidth
             id="username"
-            label="שם משתמש"
+            label="Username"
             name="username"
             autoComplete="username"
             autoFocus
@@ -55,7 +58,7 @@ function LoginPage({ onLogin, showNotification }) {
             required
             fullWidth
             name="password"
-            label="סיסמה"
+            label="Password"
             type="password"
             id="password"
             autoComplete="current-password"
@@ -70,7 +73,16 @@ function LoginPage({ onLogin, showNotification }) {
             sx={{ mt: 3, mb: 2, py: 1.5 }}
             disabled={isLoading}
           >
-            {isLoading ? <CircularProgress size={24} /> : 'התחבר'}
+            {isLoading ? <CircularProgress size={24} /> : 'Sign in'}
+          </Button>
+          <Button
+            fullWidth
+            variant="outlined"
+            color="secondary"
+            sx={{ mt: 1 }}
+            onClick={onSwitchToRegister}
+          >
+            Register
           </Button>
         </form>
       </Paper>

@@ -8,6 +8,7 @@ from flask_limiter.util import get_remote_address
 from datetime import timedelta
 from models.models import User
 from extentions import db
+from .auth import token_required, role_required
 
 auth_bp = Blueprint("auth_bp", __name__)
 bcrypt = Bcrypt()
@@ -80,14 +81,3 @@ def register():
     return jsonify(
         {"message": "User registered successfully. Awaiting admin approval."}
     ), 201
-
-
-@auth_bp.route("/approve_user/<int:user_id>", methods=["PUT"])
-def approve_user(user_id):
-    user = User.query.get(user_id)
-    if not user:
-        return jsonify({"message": "User not found"}), 404
-
-    user.is_approved = True
-    db.session.commit()
-    return jsonify({"message": f"User '{user.username}' approved."}), 200

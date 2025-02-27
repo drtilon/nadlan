@@ -1,0 +1,84 @@
+from ..auth import token_required, role_required
+from extentions import db
+from models.models import User
+from flask import Blueprint, request, jsonify, current_app
+
+adminPanel_bp = Blueprint("adminPanel_bp", __name__)
+
+
+@adminPanel_bp.route("/approve_user/<int:user_id>", methods=["PUT"])
+@token_required
+@role_required("admin")
+def approve_user(user_id):
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"message": "User not found"}), 404
+
+    user.is_approved = True
+    db.session.commit()
+    return jsonify({"message": f"User '{user.username}' approved."}), 200
+
+
+@adminPanel_bp.route("/pending-users", methods=["GET"])
+@token_required
+@role_required("admin")
+def pending_users():
+    pending = User.query.filter_by(is_approved=False).all()
+    return jsonify([user.to_dict() for user in pending]), 200
+
+
+# GET /auth/users - Return all users (admin only)
+@adminPanel_bp.route("/users", methods=["GET"])
+@token_required
+@role_required("admin")
+def get_all_users():
+    try:
+        users = User.query.all()
+        return jsonify([user.to_dict() for user in users]), 200
+    except Exception as e:
+        current_app.logger.error(f"Error fetching users: {e}")
+        return jsonify({"message": "Error fetching users", "error": str(e)}), 500
+
+
+# PUT /auth/users/<user_id> - Update a user's role (or other fields if needed)
+@adminPanel_bp.route("/users/<int:user_id>", methods=["PUT"])
+@token_required
+@role_required("admin")
+def update_user(user_id):
+    try:
+        data = request.get_json()
+        if not data or "role" not in data:
+            return jsonify({"message": "No role provided"}), 400
+
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"message": "User not found"}), 404
+
+        user.role = data["role"]
+        db.session.commit()
+        return jsonify(
+            {"message": "User updated successfully", "user": user.to_dict()}
+        ), 200
+    except Exception as e:
+        current_app.logger.error(f"Error updating user: {e}")
+        db.session.rollback()
+        return jsonify({"message": "Error updating user", "error": str(e)}), 500
+
+
+# DELETE /auth/users/<user_id> - Delete a user
+@adminPanel_bp.route("/users/<int:user_id>", methods=["DELETE"])
+@token_required
+@role_required("admin")
+def delete_user(user_id):
+    try:
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"message": "User not found"}), 404
+
+        db.session.delete(user)
+        db.session.commit()
+        return jsonify({"message": "User deleted successfully"}), 200
+    except Exception as e:
+        current_app.logger.error(f"Error deleting user: {e}")
+        db.session.rollback()
+        return jsonify({"message": "Error deleting user", "error": str(e)}), 500

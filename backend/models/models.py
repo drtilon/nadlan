@@ -62,3 +62,12 @@ class User(db.Model):
     def check_password(self, password):
         """Checks if password matches the hashed password"""
         return bcrypt.check_password_hash(self.password, password)
+
+    def to_dict(self):
+        """Convert User object to a dictionary"""
+        return {
+            "id": self.id,
+            "username": self.username,
+            "role": self.role,
+            "is_approved": self.is_approved,
+        }

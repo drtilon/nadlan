@@ -9,7 +9,7 @@ from typing import Tuple, List
 from schemas import ApartmentData, TenantData
 from flasgger import swag_from
 from pydantic import ValidationError
-from auth import token_required, role_required
+from .auth import token_required, role_required
 
 apartments_bp = Blueprint("apartments_bp", __name__)
 

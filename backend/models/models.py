@@ -1,6 +1,7 @@
 from datetime import date
 from flask_bcrypt import Bcrypt
 from extentions import db, bcrypt
+from datetime import datetime
 
 
 class Apartment(db.Model):
@@ -71,3 +72,18 @@ class User(db.Model):
             "role": self.role,
             "is_approved": self.is_approved,
         }
+
+
+class Payment(db.Model):
+    __tablename__ = "payments"
+    id = db.Column(db.Integer, primary_key=True)
+    apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=False)
+    month = db.Column(db.String(20), nullable=False)
+    status = db.Column(db.String(50), nullable=False, default="not_paid")
+    tenants = db.Column(db.Text, nullable=True)  # stored as JSON
+    internet = db.Column(db.Float, nullable=True, default=0.0)
+    electricity = db.Column(db.Float, nullable=True, default=0.0)
+    other = db.Column(db.Float, nullable=True, default=0.0)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )

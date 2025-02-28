@@ -1,5 +1,5 @@
 // components/AuthenticatedApp.jsx
-import React from 'react';
+import React, { useState } from 'react';
 import {
   AppBar,
   Toolbar,
@@ -26,15 +26,21 @@ function AuthenticatedApp({
   editingApartment,
   setEditingApartment
 }) {
-  // If you have the user role in localStorage or passed down as a prop, you could do:
-  // const userRole = localStorage.getItem('role') || 'user'; // or pass as prop
+  // New state to hold the default apartment for payments
+  const [defaultPaymentApartment, setDefaultPaymentApartment] = useState(null);
+
+  // Callback for navigating to the payment screen from ApartmentList
+  const handleGoToPayments = (apartmentId) => {
+    setDefaultPaymentApartment(apartmentId);
+    setActiveView('payments');
+  };
 
   return (
-    <>
+    <div dir="ltr">
       <AppBar position="static" color="primary">
         <Toolbar>
-          <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            ניהול דירות להשכרה
+          <Typography variant="h6" sx={{ flexGrow: 1, direction: 'ltr' }}>
+            Apartment Rental Management
           </Typography>
 
           {/* List view */}
@@ -59,14 +65,6 @@ function AuthenticatedApp({
           </IconButton>
 
           {/* Admin panel icon */}
-          {/*
-            If you only want to show this for admins:
-            {userRole === 'admin' && (
-              <IconButton color="inherit" onClick={() => setActiveView('admin')}>
-                <AdminPanelSettingsIcon />
-              </IconButton>
-            )}
-          */}
           <IconButton color="inherit" onClick={() => setActiveView('admin')}>
             <AdminPanelSettingsIcon />
           </IconButton>
@@ -78,13 +76,15 @@ function AuthenticatedApp({
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="lg" sx={{ mt: 4, mb: 4, flexGrow: 1 }}>
+      <Container maxWidth="lg" sx={{ mt: 4, mb: 4, flexGrow: 1, direction: 'ltr' }}>
         {activeView === 'list' && (
           <ApartmentList
             onEdit={(apartment) => {
               setEditingApartment(apartment);
               setActiveView('edit');
             }}
+            // Pass the new callback to navigate to payments
+            onGoToPayments={handleGoToPayments}
             showNotification={showNotification}
           />
         )}
@@ -93,7 +93,7 @@ function AuthenticatedApp({
           <ApartmentForm
             onSuccess={() => {
               setActiveView('list');
-              showNotification('דירה נוספה בהצלחה');
+              showNotification('Apartment added successfully');
             }}
             showNotification={showNotification}
           />
@@ -105,14 +105,18 @@ function AuthenticatedApp({
             initialData={editingApartment}
             onSuccess={() => {
               setActiveView('list');
-              showNotification('דירה עודכנה בהצלחה');
+              showNotification('Apartment updated successfully');
             }}
             showNotification={showNotification}
           />
         )}
 
         {activeView === 'payments' && (
-          <PaymentScreen showNotification={showNotification} />
+          // Pass the defaultPaymentApartment to PaymentScreen as initialApartment
+          <PaymentScreen
+            showNotification={showNotification}
+            initialApartment={defaultPaymentApartment}
+          />
         )}
 
         {/* Render AdminPanel when activeView = 'admin' */}
@@ -120,7 +124,7 @@ function AuthenticatedApp({
           <AdminPanel showNotification={showNotification} />
         )}
       </Container>
-    </>
+    </div>
   );
 }
 

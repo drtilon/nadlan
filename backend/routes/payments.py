@@ -1,161 +1,171 @@
 # routes/payments.py
 import json
 from flask import Blueprint, request, jsonify, current_app
-from auth import token_required
-from db import get_db_connection
+from .auth import token_required
+from extentions import db
+from models.models import (
+    Apartment,
+    Payment,
+)  # Ensure these models are correctly imported
 
 payments_bp = Blueprint("payments_bp", __name__)
+
 
 @payments_bp.route("/payments/<int:apartment_id>", methods=["GET"])
 @token_required
 def get_payments(apartment_id):
+    """
+    Returns a dictionary of months (January to December) with payment details for the given apartment.
+    If no payment record exists for a month, returns default values.
+    """
     month_list = [
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December"
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
     ]
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM payments WHERE apartment_id = %s", (apartment_id,))
-        rows = cursor.fetchall()
+        payments_records = Payment.query.filter_by(apartment_id=apartment_id).all()
+        # Create a mapping: month -> Payment record
+        payments_by_month = {payment.month: payment for payment in payments_records}
         payments = {}
         for month in month_list:
-            payment = next((row for row in rows if row['month'] == month), None)
-            if payment:
-                if isinstance(payment.get("tenants"), str):
-                    payment["tenants"] = json.loads(payment["tenants"])
-                
-                # Convert tenant payment data if using old format
-                if payment["tenants"] and all(isinstance(t, dict) and "amountDue" not in t for t in payment["tenants"]):
-                    for tenant in payment["tenants"]:
+            if month in payments_by_month:
+                payment = payments_by_month[month]
+                # Load tenants JSON if available
+                tenants = json.loads(payment.tenants) if payment.tenants else []
+                # Convert tenant payment data if using an old format
+                if tenants and all(
+                    isinstance(t, dict) and "amountDue" not in t for t in tenants
+                ):
+                    for tenant in tenants:
                         tenant["amountDue"] = 0
                         tenant["amountPaid"] = 0
-                
-                # Structure extraPayments from flat fields
-                payment["extraPayments"] = {
-                    "internet": payment.get("internet", 0),
-                    "electricity": payment.get("electricity", 0),
-                    "other": payment.get("other", 0)
+                extraPayments = {
+                    "internet": payment.internet if payment.internet is not None else 0,
+                    "electricity": payment.electricity
+                    if payment.electricity is not None
+                    else 0,
+                    "other": payment.other if payment.other is not None else 0,
                 }
-                
-                payments[month] = payment
+                payments[month] = {
+                    "id": payment.id,
+                    "apartment_id": payment.apartment_id,
+                    "month": payment.month,
+                    "status": payment.status,
+                    "tenants": tenants,
+                    "extraPayments": extraPayments,
+                    "updated_at": payment.updated_at.isoformat()
+                    if payment.updated_at
+                    else None,
+                }
             else:
                 payments[month] = {
                     "status": "not_paid",
                     "tenants": [],
-                    "extraPayments": {
-                        "internet": 0,
-                        "electricity": 0,
-                        "other": 0
-                    }
+                    "extraPayments": {"internet": 0, "electricity": 0, "other": 0},
                 }
         return jsonify(payments), 200
     except Exception as e:
         current_app.logger.error(f"Error getting payments: {e}")
         return jsonify({"message": "Error getting payments", "error": str(e)}), 500
-    finally:
-        if conn.is_connected():
-            cursor.close()
-            conn.close()
+
 
 @payments_bp.route("/payments/<int:apartment_id>", methods=["POST"])
 @token_required
 def update_payments(apartment_id):
-    data = request.json  # Expected JSON with month keys
+    """
+    Expects a JSON object with keys for each month (e.g., "January", "February", ...)
+    containing payment data. For each month, updates the record if it exists or creates a new record.
+    """
+    data = request.json
     month_list = [
-        "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December"
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
     ]
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
         for month in month_list:
             month_data = data.get(month)
             if month_data:
-                # Extract extra payments from nested structure
+                # Extract extra payments from nested structure, or fallback to flat keys
                 internet = month_data.get("extraPayments", {}).get("internet", 0)
                 electricity = month_data.get("extraPayments", {}).get("electricity", 0)
                 other = month_data.get("extraPayments", {}).get("other", 0)
-                
-                # Fall back to flat structure if nested isn't available
                 if internet == 0 and "internet" in month_data:
                     internet = month_data["internet"]
                 if electricity == 0 and "electricity" in month_data:
                     electricity = month_data["electricity"]
                 if other == 0 and "other" in month_data:
                     other = month_data["other"]
-                
-                # Ensure tenant data has the expected structure
+
+                # Ensure tenant data has expected fields
                 tenants = month_data.get("tenants", [])
                 for tenant in tenants:
                     if "amountDue" not in tenant:
                         tenant["amountDue"] = 0
                     if "amountPaid" not in tenant:
                         tenant["amountPaid"] = 0
-                
                 tenants_json = json.dumps(tenants)
-                
-                cursor.execute("SELECT id FROM payments WHERE apartment_id=%s AND month=%s", (apartment_id, month))
-                result = cursor.fetchone()
-                if result:
-                    update_query = """
-                    UPDATE payments
-                    SET status=%s, tenants=%s, internet=%s, electricity=%s, other=%s, updated_at=CURRENT_TIMESTAMP
-                    WHERE apartment_id=%s AND month=%s
-                    """
-                    values = (
-                        month_data.get("status", "not_paid"),
-                        tenants_json,
-                        internet,
-                        electricity,
-                        other,
-                        apartment_id,
-                        month
-                    )
-                    cursor.execute(update_query, values)
+
+                payment = Payment.query.filter_by(
+                    apartment_id=apartment_id, month=month
+                ).first()
+                if payment:
+                    payment.status = month_data.get("status", "not_paid")
+                    payment.tenants = tenants_json
+                    payment.internet = internet
+                    payment.electricity = electricity
+                    payment.other = other
                 else:
-                    insert_query = """
-                    INSERT INTO payments (apartment_id, month, status, tenants, internet, electricity, other)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    """
-                    values = (
-                        apartment_id,
-                        month,
-                        month_data.get("status", "not_paid"),
-                        tenants_json,
-                        internet,
-                        electricity,
-                        other
+                    new_payment = Payment(
+                        apartment_id=apartment_id,
+                        month=month,
+                        status=month_data.get("status", "not_paid"),
+                        tenants=tenants_json,
+                        internet=internet,
+                        electricity=electricity,
+                        other=other,
                     )
-                    cursor.execute(insert_query, values)
-        conn.commit()
+                    db.session.add(new_payment)
+        db.session.commit()
         return jsonify({"message": "Payments updated successfully"}), 200
     except Exception as e:
+        db.session.rollback()
         current_app.logger.error(f"Error updating payments: {e}")
         return jsonify({"message": "Error updating payments", "error": str(e)}), 500
-    finally:
-        if conn.is_connected():
-            cursor.close()
-            conn.close()
 
-# Endpoint to get apartment details including rent amount
+
 @payments_bp.route("/apartment/<int:apartment_id>", methods=["GET"])
 @token_required
 def get_apartment_details(apartment_id):
+    """
+    Returns details of the apartment using the ORM.
+    """
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT * FROM apartments WHERE id = %s", (apartment_id,))
-        apartment = cursor.fetchone()
-        
+        apartment = Apartment.query.get(apartment_id)
         if not apartment:
             return jsonify({"message": "Apartment not found"}), 404
-            
-        return jsonify(apartment), 200
+        return jsonify(apartment.to_dict()), 200
     except Exception as e:
         current_app.logger.error(f"Error getting apartment details: {e}")
-        return jsonify({"message": "Error getting apartment details", "error": str(e)}), 500
-    finally:
-        if conn.is_connected():
-            cursor.close()
-            conn.close()
+        return jsonify(
+            {"message": "Error getting apartment details", "error": str(e)}
+        ), 500

@@ -1,10 +1,32 @@
 import React, { useState } from 'react';
-import { Container, Paper, Typography, TextField, Button, CircularProgress } from '@mui/material';
-import api from '../utils/api';
-
+import {
+  Container,
+  Paper,
+  Typography,
+  TextField,
+  Button,
+  CircularProgress,
+  Box,
+  InputAdornment,
+  IconButton,
+  Divider,
+  Card,
+  CardContent,
+  alpha
+} from '@mui/material';
+import {
+  Visibility,
+  VisibilityOff,
+  Person as PersonIcon,
+  Lock as LockIcon,
+  Login as LoginIcon,
+  Home as HomeIcon
+} from '@mui/icons-material';
+import api, { setAuthToken } from '../utils/api';
 function LoginPage({ onLogin, showNotification, onSwitchToRegister }) {
   const [credentials, setCredentials] = useState({ username: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleChange = (e) => {
     setCredentials({ ...credentials, [e.target.name]: e.target.value });
@@ -16,7 +38,8 @@ function LoginPage({ onLogin, showNotification, onSwitchToRegister }) {
 
     try {
       const response = await api.post('/auth/login', credentials);
-      localStorage.setItem('token', response.data.access_token);
+      // Use setAuthToken instead of just localStorage
+      setAuthToken(response.data.access_token);
       onLogin();
       showNotification('Successful login', 'success');
     } catch (error) {
@@ -32,61 +55,174 @@ function LoginPage({ onLogin, showNotification, onSwitchToRegister }) {
     }
   };
 
+  const handleTogglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
+
   return (
-    <Container component="main" maxWidth="xs" sx={{ mt: 8 }}>
-      <Paper elevation={3} sx={{ p: 3, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <Typography component="h1" variant="h5" sx={{ mb: 3 }}>
-          Nadlan Management App
-        </Typography>
-        <form onSubmit={handleSubmit} style={{ width: '100%' }}>
-          <TextField
-            variant="outlined"
-            margin="normal"
-            required
-            fullWidth
-            id="username"
-            label="Username"
-            name="username"
-            autoComplete="username"
-            autoFocus
-            value={credentials.username}
-            onChange={handleChange}
-          />
-          <TextField
-            variant="outlined"
-            margin="normal"
-            required
-            fullWidth
-            name="password"
-            label="Password"
-            type="password"
-            id="password"
-            autoComplete="current-password"
-            value={credentials.password}
-            onChange={handleChange}
-          />
-          <Button
-            type="submit"
-            fullWidth
-            variant="contained"
-            color="primary"
-            sx={{ mt: 3, mb: 2, py: 1.5 }}
-            disabled={isLoading}
+    <Box
+      sx={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundImage: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+        padding: 3
+      }}
+    >
+      <Card
+        elevation={8}
+        sx={{
+          maxWidth: 450,
+          width: '100%',
+          borderRadius: 2,
+          overflow: 'hidden',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.1)'
+        }}
+      >
+        <Box
+          sx={{
+            padding: 3,
+            bgcolor: 'primary.main',
+            color: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 1
+          }}
+        >
+          <HomeIcon fontSize="large" />
+          <Typography variant="h4" component="h1" fontWeight="bold">
+            Nadlan
+          </Typography>
+        </Box>
+
+        <CardContent sx={{ padding: 4 }}>
+          <Typography
+            variant="h5"
+            align="center"
+            gutterBottom
+            color="text.primary"
+            fontWeight="medium"
+            sx={{ mb: 3 }}
           >
-            {isLoading ? <CircularProgress size={24} /> : 'Sign in'}
-          </Button>
-          <Button
-            fullWidth
-            variant="outlined"
-            color="secondary"
-            sx={{ mt: 1 }}
-            onClick={onSwitchToRegister}
+            Welcome Back
+          </Typography>
+          <Typography
+            variant="body2"
+            align="center"
+            color="text.secondary"
+            sx={{ mb: 4 }}
           >
-            Register
-          </Button>
-        </form>
-      </Paper>
-    </Container>
+            Sign in to your account to continue
+          </Typography>
+
+          <form onSubmit={handleSubmit}>
+            <TextField
+              variant="outlined"
+              margin="normal"
+              required
+              fullWidth
+              id="username"
+              label="Username"
+              name="username"
+              autoComplete="username"
+              autoFocus
+              value={credentials.username}
+              onChange={handleChange}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <PersonIcon color="primary" />
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ mb: 3 }}
+            />
+            <TextField
+              variant="outlined"
+              margin="normal"
+              required
+              fullWidth
+              name="password"
+              label="Password"
+              type={showPassword ? 'text' : 'password'}
+              id="password"
+              autoComplete="current-password"
+              value={credentials.password}
+              onChange={handleChange}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <LockIcon color="primary" />
+                  </InputAdornment>
+                ),
+                endAdornment: (
+                  <InputAdornment position="end">
+                    <IconButton
+                      onClick={handleTogglePasswordVisibility}
+                      edge="end"
+                      size="large"
+                    >
+                      {showPassword ? <VisibilityOff /> : <Visibility />}
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
+              sx={{ mb: 2 }}
+            />
+
+            <Button
+              type="submit"
+              fullWidth
+              variant="contained"
+              color="primary"
+              size="large"
+              sx={{
+                mt: 3,
+                mb: 3,
+                py: 1.5,
+                borderRadius: 2,
+                textTransform: 'none',
+                fontSize: '1rem',
+                fontWeight: 'bold',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+              }}
+              disabled={isLoading}
+              startIcon={isLoading ? null : <LoginIcon />}
+            >
+              {isLoading ? <CircularProgress size={24} /> : 'Sign In'}
+            </Button>
+
+            <Divider sx={{ my: 2 }}>
+              <Typography variant="body2" color="text.secondary">
+                New User?
+              </Typography>
+            </Divider>
+
+            <Button
+              fullWidth
+              variant="outlined"
+              color="secondary"
+              sx={{
+                mt: 1,
+                py: 1.5,
+                borderRadius: 2,
+                textTransform: 'none',
+                fontSize: '1rem',
+                bgcolor: alpha('#f3f4f6', 0.5),
+                '&:hover': {
+                  bgcolor: alpha('#f3f4f6', 0.8),
+                }
+              }}
+              onClick={onSwitchToRegister}
+            >
+              Create New Account
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </Box>
   );
 }
 

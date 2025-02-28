@@ -42,13 +42,28 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
 
   const fetchApartments = async () => {
     setIsLoading(true);
+
+    // Check for token before making the request
+    const token = localStorage.getItem('token');
+    if (!token) {
+      console.error('No authentication token found');
+      showNotification('Authentication required. Please log in again.', 'error');
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const response = await api.get('/list');
       setApartments(response.data);
       setFilteredApartments(response.data);
     } catch (error) {
       console.error(error);
-      showNotification('Error loading apartment list', 'error');
+      // If we get a 401, the token might be expired or invalid
+      if (error.response && error.response.status === 401) {
+        showNotification('Your session has expired. Please log in again.', 'error');
+      } else {
+        showNotification('Error loading apartment list', 'error');
+      }
     } finally {
       setIsLoading(false);
     }

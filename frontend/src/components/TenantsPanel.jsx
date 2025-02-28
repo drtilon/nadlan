@@ -39,9 +39,11 @@ import {
   Home as HomeIcon,
   Phone as PhoneIcon,
   Email as EmailIcon,
-  Person as PersonIcon
+  Person as PersonIcon,
+  Visibility as ViewIcon
 } from '@mui/icons-material';
 import api from '../utils/api';
+import TenantDetails from './TenantDetails';
 
 function TenantsPanel({ showNotification }) {
   const [tenants, setTenants] = useState([]);
@@ -60,6 +62,7 @@ function TenantsPanel({ showNotification }) {
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [tenantToDelete, setTenantToDelete] = useState(null);
+  const [selectedTenant, setSelectedTenant] = useState(null);
 
   // Fetch tenants and apartments data
   useEffect(() => {
@@ -188,11 +191,27 @@ function TenantsPanel({ showNotification }) {
     }
   };
 
+  // Handle view tenant details
+  const handleViewTenant = (tenant) => {
+    setSelectedTenant(tenant.id);
+  };
+
   // Get apartment address by ID
   const getApartmentAddress = (apartmentId) => {
     const apartment = apartments.find(apt => apt.id === apartmentId);
     return apartment ? apartment.address : 'Not Assigned';
   };
+
+  // If a tenant is selected, show tenant details
+  if (selectedTenant) {
+    return (
+      <TenantDetails
+        tenantId={selectedTenant}
+        onBack={() => setSelectedTenant(null)}
+        showNotification={showNotification}
+      />
+    );
+  }
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -260,7 +279,15 @@ function TenantsPanel({ showNotification }) {
                   </TableHead>
                   <TableBody>
                     {filteredTenants.map((tenant) => (
-                      <TableRow key={tenant.id} hover>
+                      <TableRow
+                        key={tenant.id}
+                        hover
+                        sx={{
+                          cursor: 'pointer',
+                          '&:hover': { bgcolor: 'action.hover' }
+                        }}
+                        onClick={() => handleViewTenant(tenant)}
+                      >
                         <TableCell>
                           <Box sx={{ display: 'flex', alignItems: 'center' }}>
                             <PersonIcon sx={{ mr: 1, color: 'primary.main' }} />
@@ -303,11 +330,26 @@ function TenantsPanel({ showNotification }) {
                             />
                           )}
                         </TableCell>
-                        <TableCell align="right">
+                        <TableCell align="right" onClick={(e) => e.stopPropagation()}>
+                          <Tooltip title="View Details">
+                            <IconButton
+                              color="info"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleViewTenant(tenant);
+                              }}
+                              size="small"
+                            >
+                              <ViewIcon />
+                            </IconButton>
+                          </Tooltip>
                           <Tooltip title="Edit Tenant">
                             <IconButton
                               color="primary"
-                              onClick={() => handleOpenDialog(tenant)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenDialog(tenant);
+                              }}
                               size="small"
                             >
                               <EditIcon />
@@ -316,7 +358,10 @@ function TenantsPanel({ showNotification }) {
                           <Tooltip title="Delete Tenant">
                             <IconButton
                               color="error"
-                              onClick={() => openDeleteConfirmation(tenant)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openDeleteConfirmation(tenant);
+                              }}
                               size="small"
                             >
                               <DeleteIcon />

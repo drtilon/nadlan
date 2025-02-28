@@ -7,7 +7,8 @@ import {
   IconButton,
   Container,
   Tooltip,
-  Badge
+  Badge,
+  Divider
 } from '@mui/material';
 import HomeIcon from '@mui/icons-material/Home';
 import AddCircleIcon from '@mui/icons-material/AddCircle';
@@ -15,12 +16,14 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import InsightsIcon from '@mui/icons-material/Insights';
+import PersonIcon from '@mui/icons-material/Person';
 
 import ApartmentList from './ApartmentList';
 import ApartmentForm from './ApartmentForm';
 import PaymentScreen from './PaymentScreen';
 import AdminPanel from './AdminPanel';
-import AnalyticsPanel from './AnalyticsPanel'; // Import the new Analytics panel
+import AnalyticsPanel from './AnalyticsPanel';
+import TenantsPanel from './TenantsPanel'; // Import the new TenantsPanel
 
 function AuthenticatedApp({
   onLogout,
@@ -67,12 +70,21 @@ function AuthenticatedApp({
             </IconButton>
           </Tooltip>
 
+          {/* Tenants panel */}
+          <Tooltip title="Tenant Management">
+            <IconButton color="inherit" onClick={() => setActiveView('tenants')}>
+              <PersonIcon />
+            </IconButton>
+          </Tooltip>
+
           {/* Payment screen */}
           <Tooltip title="Payments">
             <IconButton color="inherit" onClick={() => setActiveView('payments')}>
               <AttachMoneyIcon />
             </IconButton>
           </Tooltip>
+
+          <Divider orientation="vertical" flexItem sx={{ mx: 0.5, bgcolor: 'rgba(255,255,255,0.3)' }} />
 
           {/* Analytics panel icon */}
           <Tooltip title="Analytics Dashboard">
@@ -89,6 +101,8 @@ function AuthenticatedApp({
               <AdminPanelSettingsIcon />
             </IconButton>
           </Tooltip>
+
+          <Divider orientation="vertical" flexItem sx={{ mx: 0.5, bgcolor: 'rgba(255,255,255,0.3)' }} />
 
           {/* Logout */}
           <Tooltip title="Logout">
@@ -140,6 +154,11 @@ function AuthenticatedApp({
             showNotification={showNotification}
             initialApartment={defaultPaymentApartment}
           />
+        )}
+
+        {/* Render TenantsPanel when activeView = 'tenants' */}
+        {activeView === 'tenants' && (
+          <TenantsPanel showNotification={showNotification} />
         )}
 
         {/* Render AdminPanel when activeView = 'admin' */}

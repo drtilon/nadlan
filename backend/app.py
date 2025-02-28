@@ -61,6 +61,7 @@ def create_app():
         try:
             from routes.auth_routes import auth_bp
             from routes.apartments import apartments_bp
+            from routes.tenants import tenants_bp
             from routes.adminPanel.user_actions import adminPanel_bp
             from routes.payments import payments_bp
             from routes.analytics import analytics_bp
@@ -68,6 +69,7 @@ def create_app():
             app.register_blueprint(auth_bp, url_prefix="/api/auth")
             app.register_blueprint(adminPanel_bp, url_prefix="/api/adminPanel")
             app.register_blueprint(apartments_bp, url_prefix="/api/")
+            app.register_blueprint(tenants_bp, url_prefix="/api/")
             app.register_blueprint(payments_bp, url_prefix="/api/")
             app.register_blueprint(analytics_bp, url_prefix="/api/")
             print("Blueprints registered")

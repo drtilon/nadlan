@@ -22,6 +22,10 @@ import {
   createTheme,
 } from '@mui/material';
 import EditIcon from '@mui/icons-material/Edit';
+import HomeIcon from '@mui/icons-material/Home';
+import PhoneIcon from '@mui/icons-material/Phone';
+import EmailIcon from '@mui/icons-material/Email';
+import PersonIcon from '@mui/icons-material/Person';
 import PaymentIcon from '@mui/icons-material/Payment';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import SearchIcon from '@mui/icons-material/Search';
@@ -261,18 +265,197 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
           {selectedApartment && (
             <>
               <DialogTitle>
-                <Typography variant="h6">{selectedApartment.address}</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <HomeIcon color="primary" />
+                  <Typography variant="h6">{selectedApartment.address}</Typography>
+                </Box>
               </DialogTitle>
-
               <DialogContent dividers>
-                {/* Additional apartment details can go here */}
-                <Typography variant="body1">
-                  {selectedApartment.rooms} rooms | {selectedApartment.size} sqm
-                </Typography>
-              </DialogContent>
+                <Grid container spacing={3}>
+                  {/* Property Information */}
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" color="primary" fontWeight="medium">
+                      Property Information
+                    </Typography>
+                    <Divider sx={{ mb: 2 }} />
+                  </Grid>
 
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Property Size
+                      </Typography>
+                      <Typography variant="body1" fontWeight="medium">
+                        {selectedApartment.size} square meters
+                      </Typography>
+                    </Box>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Number of Rooms
+                      </Typography>
+                      <Typography variant="body1" fontWeight="medium">
+                        {selectedApartment.rooms} rooms
+                      </Typography>
+                    </Box>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Status
+                      </Typography>
+                      <Chip
+                        label={selectedApartment.status || 'Not specified'}
+                        color={selectedApartment.status === 'occupied' ? 'success' : 'default'}
+                        size="small"
+                      />
+                    </Box>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Property Model
+                      </Typography>
+                      <Typography variant="body1">
+                        {selectedApartment.model === 'management' ? 'Property Management' :
+                          selectedApartment.model === 'rental' ? 'Rental Property' :
+                            selectedApartment.model || 'Not specified'}
+                      </Typography>
+                    </Box>
+                  </Grid>
+
+                  {/* Contract Details */}
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" color="primary" fontWeight="medium" sx={{ mt: 2 }}>
+                      Contract Information
+                    </Typography>
+                    <Divider sx={{ mb: 2 }} />
+                  </Grid>
+
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Move-In Date
+                      </Typography>
+                      <Typography variant="body1">
+                        {selectedApartment.moveInDate ? new Date(selectedApartment.moveInDate).toLocaleDateString() : 'Not set'}
+                      </Typography>
+                    </Box>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Contract End Date
+                      </Typography>
+                      <Typography variant="body1">
+                        {selectedApartment.contractEndDate ? new Date(selectedApartment.contractEndDate).toLocaleDateString() : 'Not set'}
+                      </Typography>
+                    </Box>
+                  </Grid>
+
+                  {/* Landlord Information */}
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" color="primary" fontWeight="medium" sx={{ mt: 2 }}>
+                      Landlord Information
+                    </Typography>
+                    <Divider sx={{ mb: 2 }} />
+                  </Grid>
+
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Landlord Name
+                      </Typography>
+                      <Typography variant="body1">
+                        {selectedApartment.landlordName || 'Not specified'}
+                      </Typography>
+                    </Box>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ mb: 2 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Landlord Contact
+                      </Typography>
+                      {selectedApartment.landlordPhone ? (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <PhoneIcon fontSize="small" color="action" />
+                          <Typography variant="body1">{selectedApartment.landlordPhone}</Typography>
+                        </Box>
+                      ) : (
+                        <Typography variant="body1">Not specified</Typography>
+                      )}
+                      {selectedApartment.landlordEmail && (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5 }}>
+                          <EmailIcon fontSize="small" color="action" />
+                          <Typography variant="body1">{selectedApartment.landlordEmail}</Typography>
+                        </Box>
+                      )}
+                    </Box>
+                  </Grid>
+
+                  {/* Tenants */}
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" color="primary" fontWeight="medium" sx={{ mt: 2 }}>
+                      Current Tenants
+                    </Typography>
+                    <Divider sx={{ mb: 2 }} />
+                  </Grid>
+
+                  <Grid item xs={12}>
+                    {selectedApartment.tenants ? (
+                      <Box>
+                        {selectedApartment.tenants.split(',').map((tenant, index) => (
+                          <Chip
+                            key={index}
+                            label={tenant.trim()}
+                            icon={<PersonIcon />}
+                            variant="outlined"
+                            color="primary"
+                            sx={{ m: 0.5 }}
+                          />
+                        ))}
+                      </Box>
+                    ) : (
+                      <Typography variant="body1" color="text.secondary">
+                        No tenants assigned to this apartment
+                      </Typography>
+                    )}
+                  </Grid>
+
+                  {/* Notes */}
+                  {selectedApartment.notes && (
+                    <>
+                      <Grid item xs={12}>
+                        <Typography variant="subtitle1" color="primary" fontWeight="medium" sx={{ mt: 2 }}>
+                          Additional Notes
+                        </Typography>
+                        <Divider sx={{ mb: 2 }} />
+                      </Grid>
+
+                      <Grid item xs={12}>
+                        <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
+                          <Typography variant="body1">
+                            {selectedApartment.notes}
+                          </Typography>
+                        </Paper>
+                      </Grid>
+                    </>
+                  )}
+                </Grid>
+              </DialogContent>
               <DialogActions>
-                <Button onClick={() => setDetailsOpen(false)}>Close</Button>
+                <Button
+                  onClick={() => setDetailsOpen(false)}
+                  variant="contained"
+                >
+                  Close
+                </Button>
               </DialogActions>
             </>
           )}

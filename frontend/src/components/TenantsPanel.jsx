@@ -4,14 +4,9 @@ import {
   Container,
   Paper,
   Typography,
-  Grid,
-  Card,
-  CardContent,
   Button,
   TextField,
   Dialog,
-  DialogActions,
-  DialogContent,
   DialogTitle,
   IconButton,
   Table,
@@ -25,7 +20,6 @@ import {
   LinearProgress,
   Tooltip,
   InputAdornment,
-  Divider,
   Alert,
   Stack
 } from '@mui/material';
@@ -40,10 +34,13 @@ import {
   Phone as PhoneIcon,
   Email as EmailIcon,
   Person as PersonIcon,
-  Visibility as ViewIcon
+  Visibility as ViewIcon,
+  CreditCard as IbanIcon,
+  Cake as BirthdayIcon
 } from '@mui/icons-material';
 import api from '../utils/api';
 import TenantDetails from './TenantDetails';
+import EnhancedTenantForm from './EnhancedTenantForm';
 
 function TenantsPanel({ showNotification }) {
   const [tenants, setTenants] = useState([]);
@@ -56,6 +53,8 @@ function TenantsPanel({ showNotification }) {
     name: '',
     email: '',
     phone: '',
+    bornOn: '',
+    refundIban: '',
     apartment_id: ''
   });
   const [filteredTenants, setFilteredTenants] = useState([]);
@@ -81,7 +80,9 @@ function TenantsPanel({ showNotification }) {
       tenant.name.toLowerCase().includes(query) ||
       (tenant.email && tenant.email.toLowerCase().includes(query)) ||
       (tenant.phone && tenant.phone.toLowerCase().includes(query)) ||
-      (tenant.apartment_address && tenant.apartment_address.toLowerCase().includes(query))
+      (tenant.apartment_address && tenant.apartment_address.toLowerCase().includes(query)) ||
+      (tenant.bornOn && tenant.bornOn.includes(query)) ||
+      (tenant.refundIban && tenant.refundIban.toLowerCase().includes(query))
     );
     setFilteredTenants(filtered);
   }, [searchQuery, tenants]);
@@ -113,6 +114,8 @@ function TenantsPanel({ showNotification }) {
         name: tenant.name || '',
         email: tenant.email || '',
         phone: tenant.phone || '',
+        bornOn: tenant.bornOn || '',
+        refundIban: tenant.refundIban || '',
         apartment_id: tenant.apartment_id || ''
       });
     } else {
@@ -122,6 +125,8 @@ function TenantsPanel({ showNotification }) {
         name: '',
         email: '',
         phone: '',
+        bornOn: '',
+        refundIban: '',
         apartment_id: ''
       });
     }
@@ -131,14 +136,6 @@ function TenantsPanel({ showNotification }) {
   const handleCloseDialog = () => {
     setOpenDialog(false);
     setFormSubmitting(false);
-  };
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData({
-      ...formData,
-      [name]: value
-    });
   };
 
   const handleSubmit = async () => {
@@ -200,6 +197,18 @@ function TenantsPanel({ showNotification }) {
   const getApartmentAddress = (apartmentId) => {
     const apartment = apartments.find(apt => apt.id === apartmentId);
     return apartment ? apartment.address : 'Not Assigned';
+  };
+
+  // Format date for display
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString();
+    } catch (e) {
+      return dateString;
+    }
   };
 
   // If a tenant is selected, show tenant details
@@ -273,6 +282,7 @@ function TenantsPanel({ showNotification }) {
                     <TableRow>
                       <TableCell>Tenant Name</TableCell>
                       <TableCell>Contact Information</TableCell>
+                      <TableCell>Personal Details</TableCell>
                       <TableCell>Assigned Property</TableCell>
                       <TableCell align="right">Actions</TableCell>
                     </TableRow>
@@ -308,6 +318,26 @@ function TenantsPanel({ showNotification }) {
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                 <PhoneIcon fontSize="small" color="action" />
                                 <Typography variant="body2">{tenant.phone}</Typography>
+                              </Box>
+                            )}
+                          </Stack>
+                        </TableCell>
+                        <TableCell>
+                          <Stack spacing={1}>
+                            {tenant.bornOn && (
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <BirthdayIcon fontSize="small" color="action" />
+                                <Typography variant="body2">
+                                  {formatDate(tenant.bornOn)}
+                                </Typography>
+                              </Box>
+                            )}
+                            {tenant.refundIban && (
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <IbanIcon fontSize="small" color="action" />
+                                <Typography variant="body2">
+                                  {tenant.refundIban}
+                                </Typography>
                               </Box>
                             )}
                           </Stack>
@@ -388,93 +418,15 @@ function TenantsPanel({ showNotification }) {
         <DialogTitle>
           {editingTenant ? 'Edit Tenant' : 'Add New Tenant'}
         </DialogTitle>
-        <DialogContent>
-          <Grid container spacing={3} sx={{ mt: 0 }}>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Tenant Name"
-                name="name"
-                value={formData.name}
-                onChange={handleInputChange}
-                required
-                variant="filled"
-                InputLabelProps={{
-                  sx: { fontSize: '1rem', fontWeight: 'medium' }
-                }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Email Address"
-                name="email"
-                type="email"
-                value={formData.email}
-                onChange={handleInputChange}
-                variant="filled"
-                InputLabelProps={{
-                  sx: { fontSize: '1rem', fontWeight: 'medium' }
-                }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Phone Number"
-                name="phone"
-                value={formData.phone}
-                onChange={handleInputChange}
-                variant="filled"
-                InputLabelProps={{
-                  sx: { fontSize: '1rem', fontWeight: 'medium' }
-                }}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                select
-                fullWidth
-                label="Assigned Apartment"
-                name="apartment_id"
-                value={formData.apartment_id}
-                onChange={handleInputChange}
-                variant="filled"
-                InputLabelProps={{
-                  sx: { fontSize: '1rem', fontWeight: 'medium' }
-                }}
-                SelectProps={{
-                  native: true,
-                }}
-              >
-                <option value=""></option>
-                {apartments.map((apartment) => (
-                  <option key={apartment.id} value={apartment.id}>
-                    {apartment.address}
-                  </option>
-                ))}
-              </TextField>
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 3 }}>
-          <Button
-            onClick={handleCloseDialog}
-            color="inherit"
-            disabled={formSubmitting}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            variant="contained"
-            color="primary"
-            disabled={formSubmitting}
-            startIcon={formSubmitting ? <LinearProgress size={20} /> : null}
-          >
-            {editingTenant ? 'Update Tenant' : 'Add Tenant'}
-          </Button>
-        </DialogActions>
+        <EnhancedTenantForm
+          formData={formData}
+          setFormData={setFormData}
+          editingTenant={editingTenant}
+          apartments={apartments}
+          formSubmitting={formSubmitting}
+          handleCloseDialog={handleCloseDialog}
+          handleSubmit={handleSubmit}
+        />
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
@@ -483,30 +435,30 @@ function TenantsPanel({ showNotification }) {
         onClose={() => setConfirmDeleteOpen(false)}
       >
         <DialogTitle>Confirm Deletion</DialogTitle>
-        <DialogContent>
+        <Box sx={{ px: 3, pb: 3 }}>
           <Typography>
             Are you sure you want to delete the tenant "{tenantToDelete?.name}"?
             This action cannot be undone.
           </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={() => setConfirmDeleteOpen(false)}
-            color="inherit"
-            disabled={formSubmitting}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleDeleteTenant}
-            color="error"
-            variant="contained"
-            disabled={formSubmitting}
-            startIcon={formSubmitting ? <LinearProgress size={20} /> : <DeleteIcon />}
-          >
-            Delete
-          </Button>
-        </DialogActions>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3, gap: 2 }}>
+            <Button
+              onClick={() => setConfirmDeleteOpen(false)}
+              color="inherit"
+              disabled={formSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleDeleteTenant}
+              color="error"
+              variant="contained"
+              disabled={formSubmitting}
+              startIcon={formSubmitting ? <LinearProgress size={20} /> : <DeleteIcon />}
+            >
+              Delete
+            </Button>
+          </Box>
+        </Box>
       </Dialog>
     </Container>
   );

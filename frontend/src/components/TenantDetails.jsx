@@ -37,7 +37,9 @@ import {
   AttachMoney as MoneyIcon,
   CheckCircle as PaidIcon,
   Cancel as UnpaidIcon,
-  Error as PartialIcon
+  Error as PartialIcon,
+  Cake as BirthdayIcon,
+  AccountBalance as BankIcon
 } from '@mui/icons-material';
 import api from '../utils/api';
 
@@ -146,6 +148,22 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
     }).format(amount);
   };
 
+  // Format date
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Not provided';
+
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        // If not a valid date object, return as is
+        return dateString;
+      }
+      return date.toLocaleDateString();
+    } catch (error) {
+      return dateString;
+    }
+  };
+
   // Render payment status chip
   const renderPaymentStatusChip = (status) => {
     switch (status) {
@@ -243,6 +261,18 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
                       <Typography variant="body1">{tenant.phone}</Typography>
                     </Box>
                   )}
+                  {tenant.bornOn && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <BirthdayIcon color="action" />
+                      <Typography variant="body1">Born: {formatDate(tenant.bornOn)}</Typography>
+                    </Box>
+                  )}
+                  {tenant.refundIban && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <BankIcon color="action" />
+                      <Typography variant="body1">IBAN: {tenant.refundIban}</Typography>
+                    </Box>
+                  )}
                   {apartment && (
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <HomeIcon color="action" />
@@ -318,6 +348,7 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
           >
             <Tab icon={<ReceiptIcon />} label="Payment History" />
             <Tab icon={<HomeIcon />} label="Property Details" />
+            <Tab icon={<PersonIcon />} label="Personal Details" />
             <Tab icon={<MoneyIcon />} label="Financial Summary" />
           </Tabs>
         </Box>
@@ -435,8 +466,82 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
           </>
         )}
 
-        {/* Financial Summary Tab */}
+        {/* Personal Details Tab */}
         {activeTab === 2 && (
+          <Card variant="outlined">
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Personal Information
+              </Typography>
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={6}>
+                  <Stack spacing={2}>
+                    <Box>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        Full Name
+                      </Typography>
+                      <Typography variant="body1">
+                        {tenant.name || 'Not provided'}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        Email Address
+                      </Typography>
+                      <Typography variant="body1">
+                        {tenant.email || 'Not provided'}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        Phone Number
+                      </Typography>
+                      <Typography variant="body1">
+                        {tenant.phone || 'Not provided'}
+                      </Typography>
+                    </Box>
+                  </Stack>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Stack spacing={2}>
+                    <Box>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        Date of Birth
+                      </Typography>
+                      <Typography variant="body1" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <BirthdayIcon fontSize="small" color="action" />
+                        {formatDate(tenant.bornOn) || 'Not provided'}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        Refund Bank Account (IBAN)
+                      </Typography>
+                      <Typography variant="body1" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <BankIcon fontSize="small" color="action" />
+                        {tenant.refundIban || 'Not provided'}
+                      </Typography>
+                    </Box>
+                    <Box>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        Tenant ID
+                      </Typography>
+                      <Chip
+                        label={tenant.id}
+                        size="small"
+                        color="primary"
+                        variant="outlined"
+                      />
+                    </Box>
+                  </Stack>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Financial Summary Tab */}
+        {activeTab === 3 && (
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
               <Card variant="outlined" sx={{ height: '100%' }}>

@@ -202,3 +202,60 @@ def search_tenants() -> Tuple[Response, int]:
     except Exception as e:
         current_app.logger.error(f"Error searching tenants: {e}")
         return jsonify({"message": "Error searching tenants", "error": str(e)}), 500
+
+
+@tenants_bp.route("/tenants/apartment/<int:apartment_id>", methods=["GET"])
+@token_required
+def get_apartment_tenants(apartment_id: int) -> Tuple[Response, int]:
+    """
+    Returns all tenants for a specific apartment.
+    """
+    try:
+        # Query tenants associated with this apartment
+        tenants = Tenant.query.filter_by(apartment_id=apartment_id).all()
+
+        if not tenants:
+            return jsonify([]), 200
+
+        # Convert to dictionary format
+        tenants_data = []
+        for tenant in tenants:
+            # Split name into first/last name parts if needed
+            name_parts = tenant.name.split(" ", 1) if tenant.name else ["", ""]
+            first_name = (
+                tenant.first_name if hasattr(tenant, "first_name") else name_parts[0]
+            )
+            last_name = (
+                tenant.last_name
+                if hasattr(tenant, "last_name")
+                else (name_parts[1] if len(name_parts) > 1 else "")
+            )
+
+            tenant_dict = {
+                "id": tenant.id,
+                "name": tenant.name,
+                "firstName": first_name,
+                "lastName": last_name,
+                "email": tenant.email,
+                "phone": tenant.phone,
+                "apartment_id": tenant.apartment_id,
+                "isPrimary": tenant.is_primary
+                if hasattr(tenant, "is_primary")
+                else False,
+            }
+
+            tenants_data.append(tenant_dict)
+
+        # Sort by is_primary (if available) to put primary tenants first
+        tenants_data = sorted(
+            tenants_data,
+            key=lambda x: (not x.get("isPrimary", False), x.get("name", "")),
+        )
+
+        return jsonify(tenants_data), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error getting apartment tenants: {e}")
+        return jsonify(
+            {"message": "Error retrieving apartment tenants", "error": str(e)}
+        ), 500

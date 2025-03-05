@@ -79,6 +79,79 @@ function PaymentScreen({ showNotification, initialApartment }) {
     fetchApartments();
   }, [showNotification]);
 
+  // Parse tenant names from apartment details
+  const parseTenantNames = (apartmentData) => {
+    if (!apartmentData?.tenants) return [];
+
+    // Handle both string and array formats for tenant names
+    if (typeof apartmentData.tenants === 'string') {
+      return apartmentData.tenants
+        .split(',')
+        .map((name) => name.trim())
+        .filter((name) => name);
+    } else if (Array.isArray(apartmentData.tenants)) {
+      return apartmentData.tenants.map(tenant => {
+        // If tenant is an object, extract the name properly
+        if (typeof tenant === 'object' && tenant !== null) {
+          return tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim() || '';
+        }
+        // If tenant is a string, use it directly
+        return typeof tenant === 'string' ? tenant : '';
+      }).filter(name => name);
+    }
+
+    return [];
+  };
+
+  // Automatically load tenants for all months based on apartment details
+  const autoLoadTenantsForAllMonths = (apartmentData, currentPaymentData, rentAmount) => {
+    const tenantNames = parseTenantNames(apartmentData);
+    if (tenantNames.length === 0) {
+      showNotification('No tenants found for this apartment. Please add tenants first.', 'warning');
+      return currentPaymentData;
+    }
+
+    const updatedPaymentData = { ...currentPaymentData };
+
+    // Calculate default amount due per tenant
+    const amountPerTenant = tenantNames.length > 0 ? rentAmount / tenantNames.length : 0;
+
+    // Update all months with tenant data
+    for (const month of MONTH_LIST) {
+      const existingMonthData = updatedPaymentData[month] || {
+        status: 'not_paid',
+        extraPayments: {
+          internet: 0,
+          electricity: 0,
+          other: 0
+        }
+      };
+
+      // Get existing tenants for this month
+      const existingTenants = existingMonthData.tenants || [];
+
+      // Create or update tenant entries
+      const updatedTenants = tenantNames.map((name) => {
+        const foundTenant = existingTenants.find((t) => t.name === name);
+        return foundTenant || {
+          name,
+          paid: false,
+          amountDue: amountPerTenant,
+          amountPaid: 0
+        };
+      });
+
+      // Update the month data with the new tenant information
+      updatedPaymentData[month] = {
+        ...existingMonthData,
+        tenants: updatedTenants,
+        status: determinePaymentStatus(updatedTenants)
+      };
+    }
+
+    return updatedPaymentData;
+  };
+
   // When an apartment is selected, fetch its details and payment data
   useEffect(() => {
     if (!selectedApartment) return;
@@ -132,7 +205,15 @@ function PaymentScreen({ showNotification, initialApartment }) {
           }
           processedData[month] = monthData;
         }
-        setPaymentData(processedData);
+
+        // Automatically load tenants for all months
+        const updatedData = autoLoadTenantsForAllMonths(
+          apartmentResponse.data,
+          processedData,
+          rentValue
+        );
+
+        setPaymentData(updatedData);
         setLoading(false);
       } catch (error) {
         console.error('Error fetching data:', error);
@@ -150,7 +231,19 @@ function PaymentScreen({ showNotification, initialApartment }) {
               }
             };
           });
-          setPaymentData(defaultData);
+
+          // Still try to add tenants even for the default data
+          if (apartmentDetails) {
+            const updatedData = autoLoadTenantsForAllMonths(
+              apartmentDetails,
+              defaultData,
+              totalRent
+            );
+            setPaymentData(updatedData);
+          } else {
+            setPaymentData(defaultData);
+          }
+
           setInitializedDefaults(true);
           showNotification('Initialized new payment data for this apartment', 'info');
         }
@@ -206,54 +299,31 @@ function PaymentScreen({ showNotification, initialApartment }) {
     return anyPaid ? 'partial' : 'not_paid';
   };
 
-  // Parse tenant names from apartment details (assumes comma-separated names)
-  const parseTenantNames = () => {
-    if (!apartmentDetails?.tenants) return [];
+  // Format the tenant list for display
+  const formatTenantList = () => {
+    if (!apartmentDetails?.tenants) return 'None registered';
 
-    // Handle both string and array formats for tenant names
-    if (typeof apartmentDetails.tenants === 'string') {
-      return apartmentDetails.tenants
-        .split(',')
-        .map((name) => name.trim())
-        .filter((name) => name);
-    } else if (Array.isArray(apartmentDetails.tenants)) {
-      return apartmentDetails.tenants.map(t =>
-        typeof t === 'string' ? t : (t.name || '')
-      ).filter(name => name);
-    }
-
-    return [];
-  };
-
-  // Load tenants for a given month from apartment details
-  const loadTenantsForMonth = (month) => {
-    const tenantNames = parseTenantNames();
-    if (tenantNames.length === 0) {
-      showNotification('No tenants found for this apartment. Please add tenants first.', 'warning');
-      return;
-    }
-    setPaymentData((prev) => {
-      const existingTenants = prev[month]?.tenants || [];
-      const updatedTenants = tenantNames.map((name) => {
-        const foundTenant = existingTenants.find((t) => t.name === name);
-        return foundTenant || { name, paid: false, amountDue: 0, amountPaid: 0 };
-      });
-      return {
-        ...prev,
-        [month]: {
-          ...prev[month],
-          tenants: updatedTenants
+    // If tenants is an array of objects, extract and join names
+    if (Array.isArray(apartmentDetails.tenants)) {
+      return apartmentDetails.tenants.map(tenant => {
+        if (typeof tenant === 'object' && tenant !== null) {
+          return tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim();
         }
-      };
-    });
-    showNotification('Tenants loaded successfully!', 'success');
+        return typeof tenant === 'string' ? tenant : '';
+      }).filter(name => name).join(', ') || 'None registered';
+    }
+
+    // If tenants is a string, return it directly
+    return typeof apartmentDetails.tenants === 'string'
+      ? apartmentDetails.tenants
+      : 'None registered';
   };
 
   // Evenly split rent among the tenants for a month
   const splitRentEvenly = (month) => {
     const tenants = paymentData[month]?.tenants || [];
     if (tenants.length === 0) {
-      showNotification('Please load tenants first', 'warning');
+      showNotification('No tenants available for this month', 'warning');
       return;
     }
     const amountPerTenant = totalRent / tenants.length;
@@ -457,7 +527,7 @@ function PaymentScreen({ showNotification, initialApartment }) {
                       Model: {apartmentDetails.model || 'Not specified'}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Tenants: {apartmentDetails.tenants || 'None registered'}
+                      Tenants: {formatTenantList()}
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={4}>
@@ -543,16 +613,8 @@ function PaymentScreen({ showNotification, initialApartment }) {
                 <Collapse in={isExpanded}>
                   <Divider />
                   <CardContent>
-                    {/* Quick actions */}
+                    {/* Quick actions - Removed the "Load Tenants" button since it's automatic now */}
                     <Stack direction="row" spacing={2} sx={{ mb: 3 }}>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        startIcon={<RefreshIcon />}
-                        onClick={() => loadTenantsForMonth(month)}
-                      >
-                        Load Tenants
-                      </Button>
                       <Button
                         variant="outlined"
                         size="small"
@@ -663,7 +725,7 @@ function PaymentScreen({ showNotification, initialApartment }) {
                       <Card variant="outlined" sx={{ mb: 3, bgcolor: 'rgba(0,0,0,0.02)' }}>
                         <CardContent sx={{ textAlign: 'center', p: 3 }}>
                           <Typography variant="body2" color="text.secondary">
-                            No tenants registered. Click "Load Tenants" to add tenants for this month.
+                            No tenants available for this month. Please add tenants to the apartment first.
                           </Typography>
                         </CardContent>
                       </Card>

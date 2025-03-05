@@ -97,7 +97,7 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
         >
           <HomeIcon fontSize="large" />
           <Typography variant="h4" component="h1" fontWeight="bold">
-            Nadlan
+            Shefa UG
           </Typography>
         </Box>
 

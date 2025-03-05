@@ -59,40 +59,67 @@ def add_apartment_route() -> Tuple[Response, int]:
 @token_required
 @role_required("admin")
 def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
-    data = request.json
     try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"message": "Invalid request: No data provided"}), 400
+
+        # Extract apartment and tenant data
+        apartment_data = data.get("new_apartment", {})
+        tenants_data = data.get("new_tenants", [])
+
+        if not apartment_data:
+            return jsonify({"message": "No apartment data provided"}), 400
+
+        # Get the apartment
         apartment = Apartment.query.get(apartment_id)
         if not apartment:
             return jsonify({"message": "Apartment not found"}), 404
 
-        apartment.address = data.get("address", apartment.address)
-        apartment.rooms = data.get("rooms", apartment.rooms)
-        apartment.size = data.get("size", apartment.size)
-        apartment.tenants = data.get("tenants", apartment.tenants)
-        apartment.tenantEmail = data.get("tenantEmail", apartment.tenantEmail)
-        apartment.tenantPhone = data.get("tenantPhone", apartment.tenantPhone)
-        apartment.landlordName = data.get("landlordName", apartment.landlordName)
-        apartment.landlordEmail = data.get("landlordEmail", apartment.landlordEmail)
-        apartment.landlordPhone = data.get("landlordPhone", apartment.landlordPhone)
+        # Update apartment fields
+        for field, value in apartment_data.items():
+            # Handle date fields separately
+            if field == "moveInDate" and value:
+                try:
+                    apartment.moveInDate = datetime.strptime(value, "%Y-%m-%d").date()
+                except (ValueError, TypeError):
+                    current_app.logger.error(f"Invalid moveInDate format: {value}")
+            elif field == "contractEndDate" and value:
+                try:
+                    apartment.contractEndDate = datetime.strptime(
+                        value, "%Y-%m-%d"
+                    ).date()
+                except (ValueError, TypeError):
+                    current_app.logger.error(f"Invalid contractEndDate format: {value}")
+            # Skip tenants field as we'll handle it separately
+            elif field != "tenants" and hasattr(apartment, field):
+                setattr(apartment, field, value)
 
-        if data.get("moveInDate"):
-            apartment.moveInDate = datetime.strptime(
-                data["moveInDate"], "%Y-%m-%d"
-            ).date()
-        if data.get("contractEndDate"):
-            apartment.contractEndDate = datetime.strptime(
-                data["contractEndDate"], "%Y-%m-%d"
-            ).date()
+        # Handle tenants - first unassign all tenants from this apartment
+        existing_tenants = Tenant.query.filter_by(apartment_id=apartment_id).all()
+        for tenant in existing_tenants:
+            tenant.apartment_id = None  # Set to NULL instead of deleting the tenant
 
-        apartment.rent = data.get("rent", apartment.rent)
-        apartment.deposit = data.get("deposit", apartment.deposit)
-        apartment.notes = data.get("notes", apartment.notes)
-        apartment.IBAN = data.get("IBAN", apartment.IBAN)
-        apartment.status = data.get("status", apartment.status)
-        apartment.managementFee = (
-            data.get("managementFee", apartment.managementFee) or 0
-        )
-        apartment.rent_cost = data.get("rentCost", apartment.rent_cost) or 0
+        # Then assign the selected tenants to this apartment
+        for tenant_data in tenants_data:
+            tenant_id = tenant_data.get("id")
+
+            if tenant_id:
+                # If tenant has an ID, find and update
+                tenant = Tenant.query.get(tenant_id)
+                if tenant:
+                    tenant.apartment_id = apartment_id
+                    continue
+
+            # If tenant doesn't exist or has no ID, create a new one
+            tenant = Tenant(
+                name=tenant_data.get("name")
+                or f"{tenant_data.get('firstName', '')} {tenant_data.get('lastName', '')}".strip(),
+                email=tenant_data.get("email", ""),
+                phone=tenant_data.get("phone", ""),
+                apartment_id=apartment_id,
+            )
+            db.session.add(tenant)
 
         db.session.commit()
         return jsonify({"message": "Apartment updated successfully"}), 200
@@ -108,14 +135,30 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
 def list_apartments() -> Tuple[Response, int]:
     try:
         apartments = Apartment.query.all()
-        apartments_data = [apt.to_dict() for apt in apartments]
+        apartments_data = []
+
+        for apt in apartments:
+            apt_dict = apt.to_dict()
+
+            # Get tenants for this apartment
+            tenants = Tenant.query.filter_by(apartment_id=apt.id).all()
+            tenants_list = [tenant.to_dict() for tenant in tenants]
+
+            # Convert tenants to comma-separated string for backward compatibility
+            tenant_names = ", ".join(
+                [tenant.get("name", "") for tenant in tenants_list]
+            )
+
+            apt_dict["tenants"] = tenant_names if not tenants_list else tenants_list
+            apartments_data.append(apt_dict)
+
         # For non-admin users, remove sensitive fields
         role = g.user.get("role", "limited")
         if role != "admin":
             for apt in apartments_data:
                 apt.pop("landlordEmail", None)
                 apt.pop("landlordPhone", None)
-                apt.pop("IBAN", None)
+                apt.pop("iban", None)
                 apt.pop("notes", None)
                 apt.pop("managementFee", None)
                 apt.pop("rentCost", None)

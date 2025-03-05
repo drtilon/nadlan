@@ -14,21 +14,40 @@ function App() {
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' });
   const [editingApartment, setEditingApartment] = useState(null);
   const [isRegistering, setIsRegistering] = useState(false); // New state for handling register page
+  const [userData, setUserData] = useState(null); // Store user data including role
 
-  // Check for existing token on load
+  // Check for existing token and user data on load
   useEffect(() => {
     const token = localStorage.getItem('token');
+    const storedUserData = localStorage.getItem('userData');
+
     if (token) {
       setAuthToken(token);
       setIsAuthenticated(true);
+
+      // Try to get stored user data
+      if (storedUserData) {
+        try {
+          setUserData(JSON.parse(storedUserData));
+        } catch (e) {
+          console.error('Error parsing user data:', e);
+        }
+      }
     }
     setIsLoading(false);
   }, []);
 
+  const handleLogin = (user) => {
+    setIsAuthenticated(true);
+    setUserData(user);
+  };
+
   const handleLogout = () => {
     setAuthToken(null);
     setIsAuthenticated(false);
+    setUserData(null);
     localStorage.removeItem('token');
+    localStorage.removeItem('userData');
   };
 
   const showNotification = (message, severity = 'success') => {
@@ -48,6 +67,7 @@ function App() {
       <Box dir="rtl" sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
         {isAuthenticated ? (
           <AuthenticatedApp
+            user={userData}
             onLogout={handleLogout}
             activeView={activeView}
             setActiveView={setActiveView}
@@ -62,7 +82,7 @@ function App() {
           />
         ) : (
           <LoginPage
-            onLogin={() => setIsAuthenticated(true)}
+            onLogin={handleLogin}
             showNotification={showNotification}
             onSwitchToRegister={() => setIsRegistering(true)} // Switch to register
           />

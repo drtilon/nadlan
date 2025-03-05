@@ -10,23 +10,42 @@ class Apartment(db.Model):
     address = db.Column(db.String(255), nullable=False)
     rooms = db.Column(db.Integer, nullable=False)
     size = db.Column(db.Float, nullable=False)
+    landlordCompanyName = db.Column(db.String(255), nullable=False)
     landlordName = db.Column(db.String(255), nullable=False)
     landlordEmail = db.Column(db.String(255), nullable=False)
     landlordPhone = db.Column(db.String(255), nullable=False)
+    landlordIban = db.Column(db.String(255), nullable=False)
+    landlordCompanyAddress = db.Column(db.String(255), nullable=False)
     moveInDate = db.Column(db.Date, nullable=True)
     contractEndDate = db.Column(db.Date, nullable=True)
     rent = db.Column(db.Float, nullable=False)
+    rentInSentance = db.Column(db.Float, nullable=False)
     deposit = db.Column(db.Float, nullable=False)
     notes = db.Column(db.Text, nullable=True)
-    IBAN = db.Column(db.String(255), nullable=False)
     status = db.Column(db.String(50), nullable=False)
     managementFee = db.Column(db.Numeric(5, 2), nullable=True, default=0.00)
     rentCost = db.Column(db.Numeric(10, 2), nullable=True, default=0.00)
+    model = db.Column(db.String(50), nullable=True)  # Management or Rental model
 
     tenants = db.relationship("Tenant", backref="apartment", lazy=True)
 
     def to_dict(self):
-        return {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        tenant_data = []
+        for tenant in self.tenants:
+            tenant_data.append(tenant.to_dict())
+
+        result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        # Convert date objects to string format
+        if self.moveInDate:
+            result["moveInDate"] = self.moveInDate.isoformat()
+        if self.contractEndDate:
+            result["contractEndDate"] = self.contractEndDate.isoformat()
+
+        # Add tenants data if there are any
+        if tenant_data:
+            result["tenants"] = tenant_data
+
+        return result
 
 
 class Tenant(db.Model):
@@ -36,14 +55,26 @@ class Tenant(db.Model):
     name = db.Column(db.String(255), nullable=False)
     email = db.Column(db.String(255), nullable=True)
     phone = db.Column(db.String(50), nullable=True)
-    apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=False)
+    bornOn = db.Column(db.String(50), nullable=True)
+    refundIban = db.Column(db.String(50), nullable=True)
+    apartment_id = db.Column(
+        db.Integer, db.ForeignKey("apartments.id"), nullable=True
+    )  # Nullable for unassigned tenants
 
     def to_dict(self):
+        # Split name into first and last name for frontend
+        name_parts = self.name.split(" ", 1) if self.name else ["", ""]
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+
         return {
             "id": self.id,
             "name": self.name,
+            "firstName": first_name,
+            "lastName": last_name,
             "email": self.email,
             "phone": self.phone,
+            "apartment_id": self.apartment_id,
         }
 
 

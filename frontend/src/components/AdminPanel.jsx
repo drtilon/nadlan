@@ -135,7 +135,7 @@ function AdminPanel({ showNotification }) {
   const handleApprove = async (userId) => {
     setApprovingUserId(userId);
     try {
-      await api.put(`/auth/approve_user/${userId}`);
+      await api.put(`/adminPanel/approve_user/${userId}`);
       showNotification('User approved successfully', 'success');
       // Update the local state for the approved user
       setUsers((prevUsers) =>

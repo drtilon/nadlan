@@ -23,6 +23,7 @@ import {
   Home as HomeIcon
 } from '@mui/icons-material';
 import api, { setAuthToken } from '../utils/api';
+
 function LoginPage({ onLogin, showNotification, onSwitchToRegister }) {
   const [credentials, setCredentials] = useState({ username: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
@@ -38,9 +39,35 @@ function LoginPage({ onLogin, showNotification, onSwitchToRegister }) {
 
     try {
       const response = await api.post('/auth/login', credentials);
-      // Use setAuthToken instead of just localStorage
+
+      // Store token
       setAuthToken(response.data.access_token);
-      onLogin();
+
+      // Extract user data from response
+      let userData = null;
+
+      // Check various possible locations of user data in the response
+      if (response.data.user) {
+        userData = response.data.user;
+      } else {
+        // Create a default user object
+        userData = {
+          username: credentials.username,
+          // For testing/development - set all users as admin
+          // In production, this should come from the backend
+          role: 'admin'
+        };
+      }
+
+      // For debugging - log the response and extracted user data
+      console.log('Login response:', response.data);
+      console.log('Extracted user data:', userData);
+
+      // Store user data
+      localStorage.setItem('userData', JSON.stringify(userData));
+
+      // Notify parent component
+      onLogin(userData);
       showNotification('Successful login', 'success');
     } catch (error) {
       console.error(error);
@@ -93,7 +120,7 @@ function LoginPage({ onLogin, showNotification, onSwitchToRegister }) {
         >
           <HomeIcon fontSize="large" />
           <Typography variant="h4" component="h1" fontWeight="bold">
-            Nadlan
+            Shefa UG
           </Typography>
         </Box>
 

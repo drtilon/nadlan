@@ -11,7 +11,12 @@ import {
   Divider,
   CircularProgress,
   Box,
-  Paper
+  Paper,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemAvatar,
+  Avatar
 } from '@mui/material';
 import {
   Home as HomeIcon,
@@ -32,6 +37,42 @@ const ApartmentDetailsForm = ({
   isSubmitting,
   tenantSelection
 }) => {
+  // Function to display current tenants if they exist
+  const renderCurrentTenants = () => {
+    if (!tenantData || tenantData.length === 0) {
+      return (
+        <Typography variant="body2" color="text.secondary">
+          No tenants currently assigned to this apartment.
+        </Typography>
+      );
+    }
+
+    return (
+      <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
+        {tenantData.map((tenant, index) => (
+          <ListItem key={tenant.id || index} alignItems="flex-start">
+            <ListItemAvatar>
+              <Avatar>
+                <PersonIcon />
+              </Avatar>
+            </ListItemAvatar>
+            <ListItemText
+              primary={tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim()}
+              secondary={
+                <>
+                  <Typography component="span" variant="body2" color="text.primary">
+                    {tenant.email}
+                  </Typography>
+                  {tenant.phone && ` — ${tenant.phone}`}
+                </>
+              }
+            />
+          </ListItem>
+        ))}
+      </List>
+    );
+  };
+
   return (
     <form onSubmit={handleSubmit}>
       <Grid container spacing={3}>
@@ -124,8 +165,19 @@ const ApartmentDetailsForm = ({
           </Paper>
         </Grid>
 
+        {/* Current Tenants Section */}
+        <Grid item xs={12}>
+          <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'medium', ml: 2 }}>
+            Current Tenants:
+          </Typography>
+          {renderCurrentTenants()}
+        </Grid>
+
         {/* Tenant Selection Component */}
         <Grid item xs={12}>
+          <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'medium', ml: 2 }}>
+            Assign Tenants:
+          </Typography>
           {tenantSelection}
         </Grid>
 
@@ -292,7 +344,7 @@ const ApartmentDetailsForm = ({
               labelId="status-label"
               label="Status"
               name="status"
-              value={formData.status}
+              value={['occupied', 'vacant', 'contract_sent', ''].includes(formData.status) ? formData.status : ''}
               onChange={handleChange}
             >
               <MenuItem value="occupied">Occupied</MenuItem>

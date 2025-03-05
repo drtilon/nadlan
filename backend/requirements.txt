@@ -12,3 +12,5 @@ PyJWT
 pydantic
 pymysql
 cryptography
+python-docx
+num2words

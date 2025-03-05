@@ -58,8 +58,31 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
 
     try {
       const response = await api.get('/list');
-      setApartments(response.data);
-      setFilteredApartments(response.data);
+
+      // Normalize status values to match form options
+      const normalizedApartments = response.data.map(apartment => {
+        let normalizedStatus = apartment.status;
+
+        // Convert Hebrew status values to valid English option values
+        if (apartment.status === 'מושכר' || apartment.status === 'Rented') {
+          normalizedStatus = 'occupied';
+        } else if (apartment.status === 'פנוי' || apartment.status === 'Available') {
+          normalizedStatus = 'vacant';
+        } else if (apartment.status === 'חוזה נשלח' || apartment.status === 'Contract Sent') {
+          normalizedStatus = 'contract_sent';
+        }
+
+        // Return apartment with normalized status
+        return {
+          ...apartment,
+          status: normalizedStatus,
+          // Store the display status for UI purposes
+          displayStatus: apartment.status
+        };
+      });
+
+      setApartments(normalizedApartments);
+      setFilteredApartments(normalizedApartments);
     } catch (error) {
       console.error(error);
       // If we get a 401, the token might be expired or invalid
@@ -111,24 +134,45 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   };
 
   const getStatusChip = (status) => {
+    // Map internal status values to display values and colors
     let color = 'default';
     let displayStatus = status;
 
-    // Translate Hebrew status values to English if needed
-    if (status === 'מושכר') {
-      color = 'success';
-      displayStatus = 'Rented';
-    } else if (status === 'פנוי') {
-      color = 'primary';
-      displayStatus = 'Available';
-    } else if (status === 'חוזה נשלח') {
-      color = 'warning';
-      displayStatus = 'Contract Sent';
+    switch (status) {
+      case 'occupied':
+        color = 'success';
+        displayStatus = 'Occupied';
+        break;
+      case 'vacant':
+        color = 'primary';
+        displayStatus = 'Vacant';
+        break;
+      case 'contract_sent':
+        color = 'warning';
+        displayStatus = 'Contract Sent';
+        break;
+      // Handle legacy values
+      case 'מושכר':
+      case 'Rented':
+        color = 'success';
+        displayStatus = 'Occupied';
+        break;
+      case 'פנוי':
+      case 'Available':
+        color = 'primary';
+        displayStatus = 'Vacant';
+        break;
+      case 'חוזה נשלח':
+        color = 'warning';
+        displayStatus = 'Contract Sent';
+        break;
+      default:
+        displayStatus = status || 'Unknown';
     }
 
     return (
       <Chip
-        label={displayStatus || 'Unknown'}
+        label={displayStatus}
         color={color}
         size="small"
         variant="outlined"
@@ -140,6 +184,26 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   const openDetails = (apartment) => {
     setSelectedApartment(apartment);
     setDetailsOpen(true);
+  };
+
+  // Get the display status for the details view
+  const getStatusDisplay = (status) => {
+    switch (status) {
+      case 'occupied': return 'Occupied';
+      case 'vacant': return 'Vacant';
+      case 'contract_sent': return 'Contract Sent';
+      default: return status || 'Not specified';
+    }
+  };
+
+  // Get color for status in details view
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'occupied': return 'success';
+      case 'vacant': return 'primary';
+      case 'contract_sent': return 'warning';
+      default: return 'default';
+    }
   };
 
   if (isLoading) {
@@ -308,8 +372,8 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                         Status
                       </Typography>
                       <Chip
-                        label={selectedApartment.status || 'Not specified'}
-                        color={selectedApartment.status === 'occupied' ? 'success' : 'default'}
+                        label={getStatusDisplay(selectedApartment.status)}
+                        color={getStatusColor(selectedApartment.status)}
                         size="small"
                       />
                     </Box>
@@ -410,16 +474,33 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   <Grid item xs={12}>
                     {selectedApartment.tenants ? (
                       <Box>
-                        {selectedApartment.tenants.split(',').map((tenant, index) => (
-                          <Chip
-                            key={index}
-                            label={tenant.trim()}
-                            icon={<PersonIcon />}
-                            variant="outlined"
-                            color="primary"
-                            sx={{ m: 0.5 }}
-                          />
-                        ))}
+                        {Array.isArray(selectedApartment.tenants) ? (
+                          // Handle array of tenant objects
+                          selectedApartment.tenants.map((tenant, index) => (
+                            <Chip
+                              key={tenant.id || index}
+                              label={tenant.firstName && tenant.lastName ?
+                                `${tenant.firstName} ${tenant.lastName}` :
+                                tenant.name || 'Unnamed Tenant'}
+                              icon={<PersonIcon />}
+                              variant={tenant.isPrimary ? "filled" : "outlined"}
+                              color="primary"
+                              sx={{ m: 0.5 }}
+                            />
+                          ))
+                        ) : (
+                          // Handle string of comma-separated tenant names
+                          selectedApartment.tenants.split(',').map((tenant, index) => (
+                            <Chip
+                              key={index}
+                              label={tenant.trim()}
+                              icon={<PersonIcon />}
+                              variant="outlined"
+                              color="primary"
+                              sx={{ m: 0.5 }}
+                            />
+                          ))
+                        )}
                       </Box>
                     ) : (
                       <Typography variant="body1" color="text.secondary">

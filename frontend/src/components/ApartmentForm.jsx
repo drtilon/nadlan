@@ -5,8 +5,11 @@ import {
   Box,
   Autocomplete,
   TextField,
-  Chip
+  Chip,
+  Avatar,
+  Tooltip
 } from '@mui/material';
+import { Person as PersonIcon } from '@mui/icons-material';
 import api from '../utils/api';
 import ModelSelection from './ModelSelection';
 import ApartmentDetailsForm from './ApartmentDetailsForm';
@@ -25,14 +28,21 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     deposit: 0,
     notes: '',
     IBAN: '',
-    status: '',
+    status: '', // Set empty string as default to avoid validation errors
     model: '',
     managementFee: 0,
     rentCost: 0
   };
 
   const [tenantData, setTenantData] = useState([]);
-  const [formData, setFormData] = useState(isEdit ? initialData : emptyForm);
+  // Clean up initialData to ensure status is valid
+  const validStatusOptions = ['occupied', 'vacant', 'contract_sent', ''];
+  const cleanedInitialData = isEdit ? {
+    ...initialData,
+    status: validStatusOptions.includes(initialData.status) ? initialData.status : ''
+  } : emptyForm;
+
+  const [formData, setFormData] = useState(cleanedInitialData);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [modelChosen, setModelChosen] = useState(isEdit ? true : false);
   const [availableTenants, setAvailableTenants] = useState([]);
@@ -44,8 +54,44 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       try {
         setLoading(true);
         const response = await api.get('/tenants/list');
-        setAvailableTenants(response.data);
+
+        // Process tenant data to match our component needs
+        const processedTenants = response.data.map(tenant => {
+          // Split name into firstName and lastName if needed
+          let firstName = '', lastName = '';
+          if (tenant.name && !tenant.firstName && !tenant.lastName) {
+            const nameParts = tenant.name.split(' ');
+            firstName = nameParts[0] || '';
+            lastName = nameParts.slice(1).join(' ') || '';
+          }
+
+          return {
+            ...tenant,
+            firstName: tenant.firstName || firstName,
+            lastName: tenant.lastName || lastName,
+            // Identify if this tenant is assigned to the current apartment
+            isCurrentTenant: isEdit && initialData.id && tenant.apartment_id === initialData.id
+          };
+        });
+
+        setAvailableTenants(processedTenants);
         setLoading(false);
+
+        // If editing, find current tenants for this apartment
+        if (isEdit && initialData.id) {
+          const currentTenants = processedTenants.filter(t => t.apartment_id === initialData.id);
+
+          // If we have current tenants from the database and no tenant data yet, use them
+          if (currentTenants.length > 0 && tenantData.length === 0) {
+            // Mark the first tenant as primary by default
+            const tenantsWithPrimary = currentTenants.map((tenant, index) => ({
+              ...tenant,
+              isPrimary: index === 0
+            }));
+
+            setTenantData(tenantsWithPrimary);
+          }
+        }
       } catch (error) {
         console.error('Error fetching tenants:', error);
         showNotification('Error loading tenants from database', 'error');
@@ -54,7 +100,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     };
 
     fetchTenants();
-  }, []);
+  }, [isEdit, initialData.id]);
 
   // Initialize tenant data if editing
   useEffect(() => {
@@ -64,23 +110,64 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         const tenantNames = initialData.tenants.split(',').map(name => name.trim()).filter(name => name);
 
         // Match with available tenants or create placeholder objects
-        const initialTenantData = tenantNames.map(name => {
-          const existingTenant = availableTenants.find(t => t.name === name);
-          return existingTenant || { name, email: '', phone: '' };
+        const initialTenantData = tenantNames.map((name, index) => {
+          // Look for matching tenant in available tenants list
+          const existingTenant = availableTenants.find(t =>
+            // Match by exact name
+            t.name === name ||
+            // Match by constructed name (if we have firstName/lastName fields)
+            (t.firstName && t.lastName && `${t.firstName} ${t.lastName}` === name) ||
+            // Match by apartment_id if we're looking at current tenants for this apartment
+            (initialData.id && t.apartment_id === initialData.id)
+          );
+
+          if (existingTenant) {
+            return {
+              ...existingTenant,
+              isPrimary: index === 0 // Make first tenant primary by default
+            };
+          } else {
+            // Create a placeholder with name parts split
+            const nameParts = name.split(' ');
+            const firstName = nameParts[0] || '';
+            const lastName = nameParts.slice(1).join(' ') || '';
+
+            return {
+              id: `temp-${index}`,
+              firstName,
+              lastName,
+              name,
+              email: '',
+              phone: '',
+              isPrimary: index === 0
+            };
+          }
         });
 
         setTenantData(initialTenantData);
       } else if (Array.isArray(initialData.tenants)) {
-        setTenantData(initialData.tenants);
+        // If it's already an array, ensure each tenant has the expected fields
+        const processedTenants = initialData.tenants.map((tenant, index) => ({
+          ...tenant,
+          // If tenant has name but not firstName/lastName, split it
+          firstName: tenant.firstName || (tenant.name ? tenant.name.split(' ')[0] : ''),
+          lastName: tenant.lastName || (tenant.name ? tenant.name.split(' ').slice(1).join(' ') : ''),
+          // Ensure isPrimary is set
+          isPrimary: tenant.isPrimary === undefined ? index === 0 : tenant.isPrimary
+        }));
+
+        setTenantData(processedTenants);
       }
     }
   }, [isEdit, initialData, availableTenants]);
 
   // Handle input changes for the main form fields
   const handleChange = (e, isNumber) => {
+    const value = isNumber ? (e.target.value ? parseInt(e.target.value) : 0) : e.target.value;
+
     setFormData({
       ...formData,
-      [e.target.name]: isNumber ? parseInt(e.target.value) : e.target.value
+      [e.target.name]: value
     });
   };
 
@@ -93,16 +180,46 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     );
   };
 
+  // Set a tenant as primary
+  const setTenantAsPrimary = (index) => {
+    setTenantData(prev =>
+      prev.map((tenant, i) => ({
+        ...tenant,
+        isPrimary: i === index
+      }))
+    );
+  };
+
   // Add a selected tenant
   const handleTenantSelection = (event, tenant) => {
     if (tenant) {
-      setTenantData([...tenantData, tenant]);
+      // If this is the first tenant, make them primary
+      const isPrimary = tenantData.length === 0;
+
+      // Ensure the tenant has firstName and lastName
+      const enrichedTenant = {
+        ...tenant,
+        firstName: tenant.firstName || (tenant.name ? tenant.name.split(' ')[0] : ''),
+        lastName: tenant.lastName || (tenant.name ? tenant.name.split(' ').slice(1).join(' ') : ''),
+        isPrimary
+      };
+
+      setTenantData([...tenantData, enrichedTenant]);
     }
   };
 
   // Remove a tenant
   const removeTenant = (index) => {
-    setTenantData(prev => prev.filter((item, i) => i !== index));
+    const removedTenant = tenantData[index];
+    const newTenantData = tenantData.filter((item, i) => i !== index);
+
+    // If we removed the primary tenant and there are still tenants left,
+    // set the first remaining tenant as primary
+    if (removedTenant.isPrimary && newTenantData.length > 0) {
+      newTenantData[0].isPrimary = true;
+    }
+
+    setTenantData(newTenantData);
   };
 
   // Handle form submission
@@ -157,6 +274,29 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     setModelChosen(true);
   };
 
+  // Generate tenant display name
+  const getTenantDisplayName = (tenant) => {
+    if (tenant.firstName && tenant.lastName) {
+      return `${tenant.firstName} ${tenant.lastName}`;
+    } else if (tenant.name) {
+      return tenant.name;
+    } else {
+      return 'Unnamed Tenant';
+    }
+  };
+
+  // Get tenant display details for tooltip
+  const getTenantTooltip = (tenant) => {
+    const parts = [];
+    if (tenant.email) parts.push(`Email: ${tenant.email}`);
+    if (tenant.phone) parts.push(`Phone: ${tenant.phone}`);
+    if (tenant.apartment_address && tenant.apartment_id !== initialData.id) {
+      parts.push(`Current apartment: ${tenant.apartment_address}`);
+    }
+
+    return parts.length > 0 ? parts.join('\n') : 'No contact information';
+  };
+
   // Modified props to pass to ApartmentDetailsForm
   const formProps = {
     formData,
@@ -170,19 +310,31 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     // New tenant selection components
     tenantSelection: (
       <Box sx={{ mb: 3 }}>
-        <Typography variant="subtitle1" gutterBottom>
-          Tenants
-        </Typography>
-
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
           {tenantData.map((tenant, index) => (
-            <Chip
+            <Tooltip
               key={index}
-              label={tenant.name}
-              onDelete={() => removeTenant(index)}
-              color="primary"
-              variant="outlined"
-            />
+              title={getTenantTooltip(tenant)}
+              placement="top"
+            >
+              <Chip
+                avatar={
+                  <Avatar
+                    sx={{
+                      bgcolor: tenant.isPrimary ? 'primary.main' : 'default'
+                    }}
+                  >
+                    <PersonIcon />
+                  </Avatar>
+                }
+                label={getTenantDisplayName(tenant)}
+                onDelete={() => removeTenant(index)}
+                onClick={() => setTenantAsPrimary(index)}
+                color={tenant.isPrimary ? "primary" : "default"}
+                variant={tenant.isPrimary ? "filled" : "outlined"}
+                sx={{ cursor: 'pointer' }}
+              />
+            </Tooltip>
           ))}
           {tenantData.length === 0 && (
             <Typography variant="body2" color="text.secondary">
@@ -195,7 +347,12 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
           options={availableTenants.filter(
             tenant => !tenantData.some(t => t.id === tenant.id)
           )}
-          getOptionLabel={(option) => option.name}
+          getOptionLabel={(option) => {
+            if (option.firstName && option.lastName) {
+              return `${option.firstName} ${option.lastName}`;
+            }
+            return option.name || 'Unnamed Tenant';
+          }}
           onChange={handleTenantSelection}
           renderInput={(params) => (
             <TextField
@@ -204,7 +361,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
               variant="outlined"
               fullWidth
               placeholder="Search and select a tenant"
-              helperText="Select from existing tenants in the database"
+              helperText="Select from existing tenants in the database (click on a tenant chip to mark as primary)"
             />
           )}
           loading={loading}

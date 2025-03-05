@@ -52,12 +52,13 @@ def create_app():
             Swagger(app)
         except Exception as e:
             app.logger.error(f"Error initializing extensions: {e}")
-
-        with app.app_context():
-            wait_for_mysql(app)
-            ensure_admin_user_exists()
-            ensure_default_apartment_exists()
-
+        try:
+            with app.app_context():
+                wait_for_mysql(app)
+                ensure_admin_user_exists()
+                ensure_default_apartment_exists()
+        except Exception as e:
+            app.logger.error(f"Error initializing DB: {e}")
         try:
             from routes.auth_routes import auth_bp
             from routes.apartments import apartments_bp
@@ -65,6 +66,7 @@ def create_app():
             from routes.adminPanel.user_actions import adminPanel_bp
             from routes.payments import payments_bp
             from routes.analytics import analytics_bp
+            from routes.documents import documents_bp
 
             app.register_blueprint(auth_bp, url_prefix="/api/auth")
             app.register_blueprint(adminPanel_bp, url_prefix="/api/adminPanel")
@@ -72,6 +74,7 @@ def create_app():
             app.register_blueprint(tenants_bp, url_prefix="/api/")
             app.register_blueprint(payments_bp, url_prefix="/api/")
             app.register_blueprint(analytics_bp, url_prefix="/api/")
+            app.register_blueprint(documents_bp, url_prefix="/api/documents")
             print("Blueprints registered")
         except Exception as e:
             app.logger.error(f"Error registering blueprints: {e}")

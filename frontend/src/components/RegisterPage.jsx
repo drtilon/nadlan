@@ -9,11 +9,9 @@ import {
   IconButton,
   Divider,
   useTheme,
-  useMediaQuery,
   Paper,
   FormControl,
   FormHelperText,
-  Link
 } from '@mui/material';
 import {
   Visibility,
@@ -32,7 +30,6 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errors, setErrors] = useState({});
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -101,96 +98,104 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
       sx={{
         minHeight: '100vh',
         display: 'flex',
-        flexDirection: { xs: 'column', md: 'row' },
-        overflow: 'hidden'
+        bgcolor: '#f8f9fa',
       }}
     >
       {/* Left side - Brand/Logo panel */}
       <Box
         sx={{
-          flex: { xs: '1', md: '0 0 45%' },
-          bgcolor: 'primary.main',
-          backgroundImage: 'linear-gradient(135deg, #1A237E 0%, #3F51B5 100%)',
+          flex: { xs: 0, md: '0 0 40%' },
+          display: { xs: 'none', md: 'flex' },
+          bgcolor: '#2563eb',
+          direction: 'ltr',
           color: 'white',
-          display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           position: 'relative',
-          px: 3,
-          py: { xs: 5, md: 0 }
         }}
       >
         <Box
           sx={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            textAlign: 'center',
-            maxWidth: '500px',
             position: 'relative',
-            zIndex: 2
+            zIndex: 2,
+            maxWidth: '380px',
+            p: 4,
           }}
         >
           <Typography
             variant="h2"
             fontWeight="bold"
             sx={{
-              mb: 2,
-              fontSize: { xs: '2.5rem', sm: '3rem', md: '3.5rem' },
-              textShadow: '0 2px 10px rgba(0,0,0,0.3)',
-              letterSpacing: '-0.5px'
+              mb: 3,
+              fontSize: '3rem',
+              letterSpacing: '-0.5px',
             }}
           >
             Shefa UG
           </Typography>
 
           <Typography
-            variant="h5"
+            variant="h6"
             sx={{
-              mb: 4,
+              mb: 6,
+              fontWeight: 400,
               opacity: 0.9,
-              fontWeight: 300,
-              maxWidth: '400px',
-              fontSize: { xs: '1.2rem', sm: '1.5rem' }
             }}
           >
             Join Our Property Management Platform
           </Typography>
 
-          {!isMobile && (
-            <Box sx={{ mt: 4 }}>
-              <Paper
-                elevation={6}
-                sx={{
-                  p: 3,
-                  borderRadius: 2,
-                  bgcolor: 'rgba(255,255,255,0.1)',
-                  backdropFilter: 'blur(10px)',
-                  maxWidth: '400px'
-                }}
-              >
-                <Typography
-                  variant="body1"
-                  sx={{ color: 'white', fontStyle: 'italic', opacity: 0.9 }}
-                >
-                  "Create your account today to start tracking your properties, managing leases, and streamlining your workflow with our comprehensive management tools."
-                </Typography>
-              </Paper>
-            </Box>
-          )}
+          <Paper
+            elevation={0}
+            sx={{
+              p: 3,
+              borderRadius: 2,
+              bgcolor: 'rgba(255,255,255,0.1)',
+              backdropFilter: 'blur(10px)',
+            }}
+          >
+            <Typography
+              variant="body1"
+              sx={{ color: 'white', fontWeight: 300 }}
+            >
+              "Create your account today to start tracking your properties, managing leases, and streamlining your workflow with our comprehensive management tools."
+            </Typography>
+          </Paper>
         </Box>
 
-        {/* Background overlay patterns */}
+        {/* Simple geometric decorations */}
         <Box
           sx={{
             position: 'absolute',
-            top: 0,
-            right: 0,
-            bottom: 0,
-            left: 0,
-            backgroundColor: 'rgba(0,0,0,0.1)',
-            backgroundImage: `radial-gradient(circle at 20% 80%, rgba(41, 53, 86, 0.8) 0%, transparent 100%)`,
-            zIndex: 1
+            bottom: '5%',
+            right: '10%',
+            width: '60px',
+            height: '60px',
+            borderRadius: '50%',
+            backgroundColor: 'rgba(255,255,255,0.1)',
+          }}
+        />
+        <Box
+          sx={{
+            position: 'absolute',
+            top: '15%',
+            left: '15%',
+            width: '40px',
+            height: '40px',
+            borderRadius: '8px',
+            backgroundColor: 'rgba(255,255,255,0.1)',
+            transform: 'rotate(25deg)',
+          }}
+        />
+        <Box
+          sx={{
+            position: 'absolute',
+            bottom: '20%',
+            left: '25%',
+            width: '80px',
+            height: '20px',
+            borderRadius: '20px',
+            backgroundColor: 'rgba(255,255,255,0.1)',
           }}
         />
       </Box>
@@ -198,20 +203,21 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
       {/* Right side - Register form */}
       <Box
         sx={{
-          flex: { xs: '1', md: '0 0 55%' },
+          flex: { xs: '1', md: '0 0 60%' },
           display: 'flex',
           flexDirection: 'column',
+          direction: 'ltr',
           justifyContent: 'center',
           p: { xs: 3, sm: 6, md: 8 },
           maxWidth: { xs: '100%', md: '800px' },
-          margin: '0 auto'
+          margin: '0 auto',
         }}
       >
         <Box sx={{ maxWidth: '450px', mx: 'auto', width: '100%' }}>
           <Typography
             variant="h4"
-            fontWeight="bold"
-            color="text.primary"
+            fontWeight="600"
+            color="#1e293b"
             sx={{ mb: 1 }}
           >
             Create Your Account
@@ -219,7 +225,7 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
 
           <Typography
             variant="body1"
-            color="text.secondary"
+            color="#64748b"
             sx={{ mb: 4 }}
           >
             Fill in the information below to register
@@ -230,11 +236,10 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
               sx={{
                 p: 2,
                 mb: 3,
-                bgcolor: 'error.light',
-                color: 'error.dark',
+                bgcolor: '#fee2e2',
+                color: '#b91c1c',
                 borderRadius: 1,
-                borderLeft: '4px solid',
-                borderColor: 'error.main'
+                border: '1px solid #fecaca',
               }}
             >
               <Typography variant="body2">{errors.general}</Typography>
@@ -245,8 +250,8 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
             <FormControl fullWidth error={!!errors.username} sx={{ mb: 3 }}>
               <Typography
                 variant="body2"
-                fontWeight="medium"
-                color="text.primary"
+                fontWeight="500"
+                color="#334155"
                 sx={{ mb: 1 }}
               >
                 Username
@@ -263,15 +268,17 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
-                      <EmailIcon color={errors.username ? "error" : "action"} />
+                      <EmailIcon color={errors.username ? "error" : "action"} fontSize="small" />
                     </InputAdornment>
                   ),
                   sx: {
-                    borderRadius: 1.5,
-                    bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)',
-                    '&:hover': {
-                      bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.03)'
-                    }
+                    borderRadius: 1,
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#e2e8f0',
+                    },
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#cbd5e1',
+                    },
                   }
                 }}
                 variant="outlined"
@@ -284,8 +291,8 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
             <FormControl fullWidth error={!!errors.password} sx={{ mb: 3 }}>
               <Typography
                 variant="body2"
-                fontWeight="medium"
-                color="text.primary"
+                fontWeight="500"
+                color="#334155"
                 sx={{ mb: 1 }}
               >
                 Password
@@ -302,7 +309,7 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
-                      <LockIcon color={errors.password ? "error" : "action"} />
+                      <LockIcon color={errors.password ? "error" : "action"} fontSize="small" />
                     </InputAdornment>
                   ),
                   endAdornment: (
@@ -312,16 +319,18 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
                         edge="end"
                         size="small"
                       >
-                        {showPassword ? <VisibilityOff /> : <Visibility />}
+                        {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                       </IconButton>
                     </InputAdornment>
                   ),
                   sx: {
-                    borderRadius: 1.5,
-                    bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)',
-                    '&:hover': {
-                      bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.03)'
-                    }
+                    borderRadius: 1,
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#e2e8f0',
+                    },
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#cbd5e1',
+                    },
                   }
                 }}
                 variant="outlined"
@@ -331,11 +340,11 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
               )}
             </FormControl>
 
-            <FormControl fullWidth error={!!errors.confirmPassword} sx={{ mb: 3 }}>
+            <FormControl fullWidth error={!!errors.confirmPassword} sx={{ mb: 4 }}>
               <Typography
                 variant="body2"
-                fontWeight="medium"
-                color="text.primary"
+                fontWeight="500"
+                color="#334155"
                 sx={{ mb: 1 }}
               >
                 Confirm Password
@@ -352,7 +361,7 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
                 InputProps={{
                   startAdornment: (
                     <InputAdornment position="start">
-                      <LockIcon color={errors.confirmPassword ? "error" : "action"} />
+                      <LockIcon color={errors.confirmPassword ? "error" : "action"} fontSize="small" />
                     </InputAdornment>
                   ),
                   endAdornment: (
@@ -362,16 +371,18 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
                         edge="end"
                         size="small"
                       >
-                        {showConfirmPassword ? <VisibilityOff /> : <Visibility />}
+                        {showConfirmPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                       </IconButton>
                     </InputAdornment>
                   ),
                   sx: {
-                    borderRadius: 1.5,
-                    bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)',
-                    '&:hover': {
-                      bgcolor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.03)'
-                    }
+                    borderRadius: 1,
+                    '& .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#e2e8f0',
+                    },
+                    '&:hover .MuiOutlinedInput-notchedOutline': {
+                      borderColor: '#cbd5e1',
+                    },
                   }
                 }}
                 variant="outlined"
@@ -385,31 +396,18 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
               type="submit"
               fullWidth
               variant="contained"
-              color="primary"
               disabled={isLoading}
               sx={{
-                mt: 2,
                 py: 1.5,
-                fontSize: '1rem',
-                fontWeight: 'medium',
+                fontSize: '0.95rem',
+                fontWeight: 500,
                 textTransform: 'none',
-                borderRadius: 1.5,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                position: 'relative',
-                overflow: 'hidden',
-                '&::after': {
-                  content: '""',
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent)',
-                  transform: 'translateX(-100%)',
-                  transition: 'transform 0.5s ease-in-out'
-                },
-                '&:hover::after': {
-                  transform: 'translateX(100%)'
+                borderRadius: 1,
+                bgcolor: '#2563eb',
+                boxShadow: 'none',
+                '&:hover': {
+                  bgcolor: '#1d4ed8',
+                  boxShadow: '0 2px 8px rgba(37, 99, 235, 0.25)',
                 }
               }}
             >
@@ -417,14 +415,14 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
                 <CircularProgress size={24} color="inherit" />
               ) : (
                 <>
-                  <PersonAddIcon sx={{ mr: 1 }} />
+                  <PersonAddIcon sx={{ mr: 1, fontSize: 20 }} />
                   Create Account
                 </>
               )}
             </Button>
 
-            <Divider sx={{ my: 4, opacity: 0.7 }}>
-              <Typography variant="body2" color="text.secondary">
+            <Divider sx={{ my: 4, color: '#94a3b8' }}>
+              <Typography variant="body2" sx={{ px: 1, color: '#64748b' }}>
                 OR
               </Typography>
             </Divider>
@@ -432,18 +430,19 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
             <Button
               fullWidth
               variant="outlined"
-              color="primary"
               onClick={onSwitchToLogin}
-              startIcon={<ArrowBackIcon />}
+              startIcon={<ArrowBackIcon fontSize="small" />}
               sx={{
                 py: 1.5,
                 textTransform: 'none',
-                borderRadius: 1.5,
-                fontSize: '1rem',
-                borderWidth: 1.5,
+                borderRadius: 1,
+                fontSize: '0.95rem',
+                fontWeight: 500,
+                borderColor: '#e2e8f0',
+                color: '#334155',
                 '&:hover': {
-                  borderWidth: 1.5,
-                  bgcolor: 'rgba(63, 81, 181, 0.04)'
+                  borderColor: '#cbd5e1',
+                  bgcolor: 'rgba(226, 232, 240, 0.2)',
                 }
               }}
             >

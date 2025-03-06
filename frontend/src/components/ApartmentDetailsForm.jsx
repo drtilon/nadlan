@@ -113,39 +113,51 @@ const ApartmentDetailsForm = ({
           </Grid>
 
           <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Apartment Address"
-              name="address"
-              value={formData.address}
-              onChange={handleChange}
-              required
-              variant="outlined"
-            />
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Apartment Address *</Typography>
+              <TextField
+                fullWidth
+                name="address"
+                value={formData.address}
+                onChange={handleChange}
+                required
+                variant="outlined"
+                InputLabelProps={{ shrink: true }}
+                placeholder="Enter apartment address"
+              />
+            </Box>
           </Grid>
           <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              type="number"
-              label="Number of Rooms"
-              name="rooms"
-              value={formData.rooms}
-              onChange={(e) => handleChange(e, true)}
-              required
-              variant="outlined"
-            />
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Number of Rooms *</Typography>
+              <TextField
+                fullWidth
+                type="number"
+                name="rooms"
+                value={formData.rooms}
+                onChange={(e) => handleChange(e, true)}
+                required
+                variant="outlined"
+                InputLabelProps={{ shrink: true }}
+                placeholder="0"
+              />
+            </Box>
           </Grid>
           <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              label="Size (sq meters)"
-              type="number"
-              name="size"
-              value={formData.size}
-              onChange={(e) => handleChange(e, true)}
-              required
-              variant="outlined"
-            />
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Size (sq meters) *</Typography>
+              <TextField
+                fullWidth
+                type="number"
+                name="size"
+                value={formData.size}
+                onChange={(e) => handleChange(e, true)}
+                required
+                variant="outlined"
+                InputLabelProps={{ shrink: true }}
+                placeholder="0"
+              />
+            </Box>
           </Grid>
 
           {/* Tenant Details */}
@@ -181,35 +193,47 @@ const ApartmentDetailsForm = ({
           </Grid>
 
           <Grid item xs={12} sm={4}>
-            <TextField
-              fullWidth
-              label="Landlord Name"
-              name="landlordName"
-              value={formData.landlordName}
-              onChange={handleChange}
-              variant="outlined"
-            />
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Landlord Name</Typography>
+              <TextField
+                fullWidth
+                name="landlordName"
+                value={formData.landlordName}
+                onChange={handleChange}
+                variant="outlined"
+                InputLabelProps={{ shrink: true }}
+                placeholder="Enter landlord name"
+              />
+            </Box>
           </Grid>
           <Grid item xs={12} sm={4}>
-            <TextField
-              fullWidth
-              type="email"
-              label="Landlord Email"
-              name="landlordEmail"
-              value={formData.landlordEmail}
-              onChange={handleChange}
-              variant="outlined"
-            />
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Landlord Email</Typography>
+              <TextField
+                fullWidth
+                type="email"
+                name="landlordEmail"
+                value={formData.landlordEmail}
+                onChange={handleChange}
+                variant="outlined"
+                InputLabelProps={{ shrink: true }}
+                placeholder="Enter landlord email"
+              />
+            </Box>
           </Grid>
           <Grid item xs={12} sm={4}>
-            <TextField
-              fullWidth
-              label="Landlord Phone"
-              name="landlordPhone"
-              value={formData.landlordPhone}
-              onChange={handleChange}
-              variant="outlined"
-            />
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Landlord Phone</Typography>
+              <TextField
+                fullWidth
+                name="landlordPhone"
+                value={formData.landlordPhone}
+                onChange={handleChange}
+                variant="outlined"
+                InputLabelProps={{ shrink: true }}
+                placeholder="Enter landlord phone"
+              />
+            </Box>
           </Grid>
 
           {/* Contract Details */}
@@ -221,115 +245,145 @@ const ApartmentDetailsForm = ({
           </Grid>
 
           <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              type="date"
-              label="Move-In Date"
-              name="moveInDate"
-              InputLabelProps={{ shrink: true }}
-              value={formData.moveInDate || ''}
-              onChange={handleChange}
-              variant="outlined"
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              type="date"
-              label="Contract End Date"
-              name="contractEndDate"
-              InputLabelProps={{ shrink: true }}
-              value={formData.contractEndDate || ''}
-              onChange={handleChange}
-              variant="outlined"
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              type="number"
-              label="Monthly Rent ($)"
-              onChange={(e) => handleChange(e, true)}
-              name="rent"
-              value={formData.rent}
-              variant="outlined"
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              type="number"
-              label="Deposit ($)"
-              onChange={(e) => handleChange(e, true)}
-              name="deposit"
-              value={formData.deposit}
-              variant="outlined"
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <TextField
-              fullWidth
-              label="Bank IBAN"
-              name="IBAN"
-              value={formData.IBAN}
-              onChange={handleChange}
-              variant="outlined"
-            />
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <FormControl fullWidth variant="outlined">
-              <InputLabel id="status-label">Status</InputLabel>
-              <Select
-                labelId="status-label"
-                label="Status"
-                name="status"
-                value={['occupied', 'vacant', 'contract_sent', ''].includes(formData.status) ? formData.status : ''}
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Move-In Date</Typography>
+              <TextField
+                fullWidth
+                type="date"
+                name="moveInDate"
+                value={formData.moveInDate || ''}
                 onChange={handleChange}
-              >
-                <MenuItem value="occupied">Occupied</MenuItem>
-                <MenuItem value="vacant">Vacant</MenuItem>
-                <MenuItem value="contract_sent">Contract Sent</MenuItem>
-              </Select>
-            </FormControl>
+                variant="outlined"
+                InputLabelProps={{ shrink: true }}
+              />
+            </Box>
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Contract End Date</Typography>
+              <TextField
+                fullWidth
+                type="date"
+                name="contractEndDate"
+                value={formData.contractEndDate || ''}
+                onChange={handleChange}
+                variant="outlined"
+                InputLabelProps={{ shrink: true }}
+              />
+            </Box>
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Monthly Rent ($)</Typography>
+              <TextField
+                fullWidth
+                type="number"
+                name="rent"
+                value={formData.rent}
+                onChange={(e) => handleChange(e, true)}
+                variant="outlined"
+                InputLabelProps={{ shrink: true }}
+                placeholder="0"
+              />
+            </Box>
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Deposit ($)</Typography>
+              <TextField
+                fullWidth
+                type="number"
+                name="deposit"
+                value={formData.deposit}
+                onChange={(e) => handleChange(e, true)}
+                variant="outlined"
+                InputLabelProps={{ shrink: true }}
+                placeholder="0"
+              />
+            </Box>
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Bank IBAN</Typography>
+              <TextField
+                fullWidth
+                name="IBAN"
+                value={formData.IBAN}
+                onChange={handleChange}
+                variant="outlined"
+                InputLabelProps={{ shrink: true }}
+                placeholder="Enter IBAN"
+              />
+            </Box>
+          </Grid>
+          <Grid item xs={12} sm={6}>
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Status</Typography>
+              <FormControl fullWidth variant="outlined">
+                <Select
+                  name="status"
+                  value={['occupied', 'vacant', 'contract_sent', ''].includes(formData.status) ? formData.status : ''}
+                  onChange={handleChange}
+                  displayEmpty
+                >
+                  <MenuItem value="">Select status</MenuItem>
+                  <MenuItem value="occupied">Occupied</MenuItem>
+                  <MenuItem value="vacant">Vacant</MenuItem>
+                  <MenuItem value="contract_sent">Contract Sent</MenuItem>
+                </Select>
+              </FormControl>
+            </Box>
           </Grid>
           <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Notes"
-              name="notes"
-              value={formData.notes}
-              onChange={handleChange}
-              multiline
-              rows={3}
-              variant="outlined"
-            />
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Notes</Typography>
+              <TextField
+                fullWidth
+                name="notes"
+                value={formData.notes}
+                onChange={handleChange}
+                multiline
+                rows={3}
+                variant="outlined"
+                InputLabelProps={{ shrink: true }}
+                placeholder="Enter notes"
+              />
+            </Box>
           </Grid>
 
           {/* Management and Rental Fields */}
           {formData.model === 'management' && (
             <Grid item xs={12}>
-              <TextField
-                fullWidth
-                type="number"
-                label="Management Fee (%)"
-                name="managementFee"
-                value={formData.managementFee}
-                onChange={(e) => handleChange(e, true)}
-                variant="outlined"
-              />
+              <Box>
+                <Typography variant="body1" sx={{ mb: 1 }}>Management Fee (%)</Typography>
+                <TextField
+                  fullWidth
+                  type="number"
+                  name="managementFee"
+                  value={formData.managementFee}
+                  onChange={(e) => handleChange(e, true)}
+                  variant="outlined"
+                  InputLabelProps={{ shrink: true }}
+                  placeholder="0"
+                />
+              </Box>
             </Grid>
           )}
           {formData.model === 'rental' && (
             <Grid item xs={12}>
-              <TextField
-                fullWidth
-                type="number"
-                label="Rental Cost ($)"
-                name="rentCost"
-                value={formData.rentCost}
-                onChange={(e) => handleChange(e, true)}
-                variant="outlined"
-              />
+              <Box>
+                <Typography variant="body1" sx={{ mb: 1 }}>Rental Cost ($)</Typography>
+                <TextField
+                  fullWidth
+                  type="number"
+                  name="rentCost"
+                  value={formData.rentCost}
+                  onChange={(e) => handleChange(e, true)}
+                  variant="outlined"
+                  InputLabelProps={{ shrink: true }}
+                  placeholder="0"
+                />
+              </Box>
             </Grid>
           )}
 
@@ -351,7 +405,6 @@ const ApartmentDetailsForm = ({
               </Button>
               {isEdit && (
                 <Button
-
                   variant="outlined"
                   color="error"
                   onClick={handleDelete}

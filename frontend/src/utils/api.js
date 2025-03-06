@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // API service
 const api = axios.create({
-  baseURL: 'http://localhost:5001/api',
+  baseURL: 'http://207.154.221.54:5001/api',
 });
 
 // Set auth token for API requests

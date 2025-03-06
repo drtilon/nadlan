@@ -1,12 +1,11 @@
 # app.py
-from flask import Flask
+from flask import Flask, current_app
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from config import Config
 from flasgger import Swagger
 from extentions import db, jwt, bcrypt
 from sqlalchemy.exc import OperationalError
-from flask import current_app
 import time
 from models.models import Apartment, Tenant, User
 from initalized.init_user import ensure_admin_user_exists
@@ -44,7 +43,17 @@ def create_app():
         app.config.from_object(Config)
 
         try:
-            CORS(app, resources={r"/*": {"origins": "*", "supports_credentials": True}})
+            # For production with credentials enabled, you must specify a concrete origin.
+            # Make sure to set CORS_ALLOWED_ORIGINS in your Config (e.g., "https://your-production-domain.com")
+            allowed_origins = app.config.get(
+                "CORS_ALLOWED_ORIGINS", "http://203.0.113.1"
+            )
+            CORS(
+                app,
+                resources={
+                    r"/*": {"origins": allowed_origins, "supports_credentials": True}
+                },
+            )
         except Exception as e:
             app.logger.error(f"Error initializing CORS: {e}")
 
@@ -55,6 +64,7 @@ def create_app():
             Swagger(app)
         except Exception as e:
             app.logger.error(f"Error initializing extensions: {e}")
+
         try:
             with app.app_context():
                 wait_for_mysql(app)
@@ -63,6 +73,7 @@ def create_app():
                 ensure_new_apartment_exists()
         except Exception as e:
             app.logger.error(f"Error initializing DB: {e}")
+
         try:
             from routes.auth_routes import auth_bp
             from routes.apartments import apartments_bp
@@ -79,7 +90,7 @@ def create_app():
             app.register_blueprint(payments_bp, url_prefix="/api/")
             app.register_blueprint(analytics_bp, url_prefix="/api/")
             app.register_blueprint(documents_bp, url_prefix="/api/documents")
-            print("Blueprints registered")
+            app.logger.info("Blueprints registered")
         except Exception as e:
             app.logger.error(f"Error registering blueprints: {e}")
 
@@ -95,4 +106,5 @@ def create_app():
 
 if __name__ == "__main__":
     app = create_app()
-    app.run(debug=True, host="0.0.0.0", port=5001)
+    # In production, you should disable debug mode
+    app.run(debug=False, host="0.0.0.0", port=5001)

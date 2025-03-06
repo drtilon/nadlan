@@ -163,7 +163,7 @@ function ContractGenerator({ showNotification }) {
 
       const response = await api.post('/documents/createContract', {
         apartmentId: selectedApartment,
-        tenantIds: tenantIds, // Send all tenant IDs instead of just one
+        tenantIds: tenantIds, // Send all tenant IDs 
         contractDetails: {
           startDate: contractSettings.startDate,
           endDate: contractSettings.endDate,
@@ -197,7 +197,32 @@ function ContractGenerator({ showNotification }) {
       showNotification('Contract generated successfully', 'success');
     } catch (error) {
       console.error('Error generating contract:', error);
-      showNotification('Failed to generate contract', 'error');
+
+      // More detailed error handling
+      if (error.response) {
+        if (error.response.status === 400) {
+          // Try to parse the error message if possible
+          try {
+            const errorBlob = error.response.data;
+            const reader = new FileReader();
+            reader.readAsText(errorBlob);
+            reader.onload = () => {
+              try {
+                const errorJson = JSON.parse(reader.result);
+                showNotification(`Error: ${errorJson.message || 'Invalid request data'}`, 'error');
+              } catch {
+                showNotification('Failed to generate contract: Invalid data format', 'error');
+              }
+            };
+          } catch {
+            showNotification('Failed to generate contract: Invalid data format', 'error');
+          }
+        } else {
+          showNotification(`Failed to generate contract (Error ${error.response.status})`, 'error');
+        }
+      } else {
+        showNotification('Failed to generate contract: Network error', 'error');
+      }
     } finally {
       setGenerating(false);
     }

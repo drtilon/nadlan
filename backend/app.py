@@ -10,7 +10,10 @@ from flask import current_app
 import time
 from models.models import Apartment, Tenant, User
 from initalized.init_user import ensure_admin_user_exists
-from initalized.init_apartment import ensure_default_apartment_exists
+from initalized.init_apartment import (
+    ensure_default_apartment_exists,
+    ensure_new_apartment_exists,
+)
 
 
 def wait_for_mysql(app):
@@ -57,6 +60,7 @@ def create_app():
                 wait_for_mysql(app)
                 ensure_admin_user_exists()
                 ensure_default_apartment_exists()
+                ensure_new_apartment_exists()
         except Exception as e:
             app.logger.error(f"Error initializing DB: {e}")
         try:

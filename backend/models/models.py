@@ -19,7 +19,7 @@ class Apartment(db.Model):
     moveInDate = db.Column(db.Date, nullable=True)
     contractEndDate = db.Column(db.Date, nullable=True)
     rent = db.Column(db.Float, nullable=False)
-    rentInSentance = db.Column(db.Float, nullable=False)
+    rentInSentance = db.Column(db.String(255), nullable=False)
     deposit = db.Column(db.Float, nullable=False)
     notes = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(50), nullable=False)

@@ -46,7 +46,7 @@ def create_app():
             # For production with credentials enabled, you must specify a concrete origin.
             # Make sure to set CORS_ALLOWED_ORIGINS in your Config (e.g., "https://your-production-domain.com")
             allowed_origins = app.config.get(
-                "CORS_ALLOWED_ORIGINS", "http://207.154.221.54"
+                "CORS_ALLOWED_ORIGINS", "http://207.154.221.54:3001"
             )
             CORS(
                 app,

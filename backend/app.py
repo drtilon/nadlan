@@ -1,4 +1,4 @@
-# app.py
+# app.py - Updated with logs blueprint
 from flask import Flask, current_app
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -46,7 +46,7 @@ def create_app():
             # For production with credentials enabled, you must specify a concrete origin.
             # Make sure to set CORS_ALLOWED_ORIGINS in your Config (e.g., "https://your-production-domain.com")
             allowed_origins = app.config.get(
-                "CORS_ALLOWED_ORIGINS", "http://207.154.221.54:3001"
+                "CORS_ALLOWED_ORIGINS", "http://localhost:3001"
             )
             CORS(
                 app,
@@ -82,6 +82,7 @@ def create_app():
             from routes.payments import payments_bp
             from routes.analytics import analytics_bp
             from routes.documents import documents_bp
+            from routes.logs import logs_bp  # Import the new logs blueprint
 
             app.register_blueprint(auth_bp, url_prefix="/api/auth")
             app.register_blueprint(adminPanel_bp, url_prefix="/api/adminPanel")
@@ -89,7 +90,10 @@ def create_app():
             app.register_blueprint(tenants_bp, url_prefix="/api/")
             app.register_blueprint(payments_bp, url_prefix="/api/")
             app.register_blueprint(analytics_bp, url_prefix="/api/")
-            app.register_blueprint(documents_bp, url_prefix="/api/documents")
+            # app.register_blueprint(documents_bp, url_prefix="/api/documents")
+            app.register_blueprint(
+                logs_bp, url_prefix="/api"
+            )  # Register logs blueprint
             app.logger.info("Blueprints registered")
         except Exception as e:
             app.logger.error(f"Error registering blueprints: {e}")
@@ -107,4 +111,4 @@ def create_app():
 if __name__ == "__main__":
     app = create_app()
     # In production, you should disable debug mode
-    app.run(debug=False, host="0.0.0.0", port=5001)
+    app.run(debug=True, host="0.0.0.0", port=5001)

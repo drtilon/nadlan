@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -20,14 +21,29 @@ import {
   LockOutlined as LockIcon,
   Login as LoginIcon
 } from '@mui/icons-material';
-import api, { setAuthToken } from '../utils/api';
+import api, { setAuthToken, setUserData } from '../utils/api';
 
-function LoginPage({ onLogin, showNotification, onSwitchToRegister }) {
+function LoginPage({ showNotification }) {
   const [credentials, setCredentials] = useState({ username: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [errors, setErrors] = useState({});
   const theme = useTheme();
+  const navigate = useNavigate();
+  const location = useLocation();
+  
+  // Get redirect path from location state or default to dashboard
+  const from = location.state?.from || '/dashboard';
+
+  // Check if there's an expired session message in the URL
+  useEffect(() => {
+    const queryParams = new URLSearchParams(location.search);
+    const expired = queryParams.get('expired');
+    
+    if (expired === 'true') {
+      showNotification('Your session has expired. Please log in again.', 'warning');
+    }
+  }, [location, showNotification]);
 
   const handleChange = (e) => {
     setCredentials({ ...credentials, [e.target.name]: e.target.value });
@@ -59,21 +75,30 @@ function LoginPage({ onLogin, showNotification, onSwitchToRegister }) {
 
     try {
       const response = await api.post('/auth/login', credentials);
+      
+      // Set auth token in axios and localStorage
       setAuthToken(response.data.access_token);
 
+      // Store user data
       let userData = null;
       if (response.data.user) {
         userData = response.data.user;
       } else {
         userData = {
           username: credentials.username,
-          role: 'admin'
+          role: 'admin' // Default role for backward compatibility
         };
       }
 
-      localStorage.setItem('userData', JSON.stringify(userData));
-      onLogin(userData);
+      // Save user data to localStorage
+      setUserData(userData);
+      
+      // Show success notification
       showNotification('Login successful', 'success');
+      
+      // Navigate to the protected route (or dashboard by default)
+      navigate(from, { replace: true });
+      
     } catch (error) {
       console.error(error);
       const message = error.response?.data?.message;
@@ -86,6 +111,10 @@ function LoginPage({ onLogin, showNotification, onSwitchToRegister }) {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSwitchToRegister = () => {
+    navigate('/register');
   };
 
   return (
@@ -373,7 +402,7 @@ function LoginPage({ onLogin, showNotification, onSwitchToRegister }) {
             <Button
               fullWidth
               variant="outlined"
-              onClick={onSwitchToRegister}
+              onClick={handleSwitchToRegister}
               sx={{
                 py: 1.5,
                 textTransform: 'none',

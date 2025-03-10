@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -23,13 +24,14 @@ import {
 } from '@mui/icons-material';
 import api from '../utils/api';
 
-function RegisterPage({ showNotification, onSwitchToLogin }) {
+function RegisterPage({ showNotification }) {
   const [formData, setFormData] = useState({ username: '', password: '', confirmPassword: '' });
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errors, setErrors] = useState({});
   const theme = useTheme();
+  const navigate = useNavigate();
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -77,8 +79,10 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
         username: formData.username,
         password: formData.password
       });
+      
       showNotification('Registration successful! Waiting for admin approval', 'success');
-      onSwitchToLogin();
+      navigate('/login');
+      
     } catch (error) {
       console.error(error);
       const message = error.response?.data?.message;
@@ -91,6 +95,10 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSwitchToLogin = () => {
+    navigate('/login');
   };
 
   return (
@@ -430,7 +438,7 @@ function RegisterPage({ showNotification, onSwitchToLogin }) {
             <Button
               fullWidth
               variant="outlined"
-              onClick={onSwitchToLogin}
+              onClick={handleSwitchToLogin}
               startIcon={<ArrowBackIcon fontSize="small" />}
               sx={{
                 py: 1.5,

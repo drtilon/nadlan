@@ -81,3 +81,13 @@ def register():
     return jsonify(
         {"message": "User registered successfully. Awaiting admin approval."}
     ), 201
+
+
+@auth_bp.route("/verify", methods=["GET"])
+@token_required
+def verify_token():
+    """
+    Simple endpoint to verify if the current token is valid.
+    Token_required decorator will return 401 if token is invalid.
+    """
+    return jsonify({"message": "Token is valid", "status": "success"}), 200

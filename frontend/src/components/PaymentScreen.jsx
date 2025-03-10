@@ -20,11 +20,26 @@ import {
   Chip,
   Card,
   CardContent,
+  CardHeader,
   IconButton,
   Tooltip,
   LinearProgress,
   Collapse,
-  Stack
+  Stack,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  CircularProgress,
+  useTheme,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Switch,
+  Badge
 } from '@mui/material';
 import {
   KeyboardArrowUp as ExpandLessIcon,
@@ -32,7 +47,18 @@ import {
   RefreshOutlined as RefreshIcon,
   PaymentOutlined as PaymentIcon,
   AccountBalanceWalletOutlined as WalletIcon,
-  SaveOutlined as SaveIcon
+  SaveOutlined as SaveIcon,
+  ReceiptOutlined as ReceiptIcon,
+  Add as AddIcon,
+  Visibility as ViewIcon,
+  CalendarMonth as CalendarIcon,
+  CheckCircleOutline as CheckIcon,
+  HistoryOutlined as HistoryIcon,
+  Close as CloseIcon,
+  EditOutlined as EditIcon,
+  CheckCircle as PaidIcon,
+  Cancel as UnpaidIcon,
+  Error as PartialIcon
 } from '@mui/icons-material';
 import api from '../utils/api';
 
@@ -49,18 +75,32 @@ const STATUS_COLORS = {
   not_paid: '#f44336'
 };
 
-function PaymentScreen({ showNotification, initialApartment }) {
+function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
+  const theme = useTheme();
   // Use the initialApartment prop (if provided) as the default selection
   const [selectedApartment, setSelectedApartment] = useState(initialApartment || '');
   const [apartments, setApartments] = useState([]);
   const [paymentData, setPaymentData] = useState({});
   const [apartmentDetails, setApartmentDetails] = useState(null);
   const [totalRent, setTotalRent] = useState(0);
-  const [initializedDefaults, setInitializedDefaults] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [currentTab, setCurrentTab] = useState(0);
+  const [currentMonth, setCurrentMonth] = useState('');
   const [expandedMonths, setExpandedMonths] = useState({});
+  const [isSaving, setIsSaving] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [paymentHistory, setPaymentHistory] = useState([]);
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [paymentMethod, setPaymentMethod] = useState('bank_transfer');
+  const [receiptsDialogOpen, setReceiptsDialogOpen] = useState(false);
+
+  // Get the current year and month
   const currentYear = new Date().getFullYear();
+  const currentMonthIndex = new Date().getMonth(); // 0-indexed (January = 0)
+
+  // When component mounts, set the current month
+  useEffect(() => {
+    setCurrentMonth(MONTH_LIST[currentMonthIndex]);
+  }, [currentMonthIndex]);
 
   // Fetch the list of apartments once on component mount
   useEffect(() => {
@@ -159,7 +199,6 @@ function PaymentScreen({ showNotification, initialApartment }) {
     const fetchApartmentData = async () => {
       try {
         setLoading(true);
-        setInitializedDefaults(false);
         // Get apartment details
         const apartmentResponse = await api.get(`/apartment/${selectedApartment}`);
         setApartmentDetails(apartmentResponse.data);
@@ -214,45 +253,52 @@ function PaymentScreen({ showNotification, initialApartment }) {
         );
 
         setPaymentData(updatedData);
+        
+        // Fetch payment history
+        try {
+          const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
+          setPaymentHistory(historyResponse.data || []);
+        } catch (error) {
+          console.error('Error fetching payment history:', error);
+          setPaymentHistory([]);
+        }
+        
         setLoading(false);
       } catch (error) {
         console.error('Error fetching data:', error);
-        if (!initializedDefaults) {
-          // Initialize default data if an error occurs
-          const defaultData = {};
-          MONTH_LIST.forEach((month) => {
-            defaultData[month] = {
-              status: 'not_paid',
-              tenants: [],
-              extraPayments: {
-                internet: 0,
-                electricity: 0,
-                other: 0
-              }
-            };
-          });
+        // Initialize default data if an error occurs
+        const defaultData = {};
+        MONTH_LIST.forEach((month) => {
+          defaultData[month] = {
+            status: 'not_paid',
+            tenants: [],
+            extraPayments: {
+              internet: 0,
+              electricity: 0,
+              other: 0
+            }
+          };
+        });
 
-          // Still try to add tenants even for the default data
-          if (apartmentDetails) {
-            const updatedData = autoLoadTenantsForAllMonths(
-              apartmentDetails,
-              defaultData,
-              totalRent
-            );
-            setPaymentData(updatedData);
-          } else {
-            setPaymentData(defaultData);
-          }
-
-          setInitializedDefaults(true);
-          showNotification('Initialized new payment data for this apartment', 'info');
+        // Still try to add tenants even for the default data
+        if (apartmentDetails) {
+          const updatedData = autoLoadTenantsForAllMonths(
+            apartmentDetails,
+            defaultData,
+            totalRent
+          );
+          setPaymentData(updatedData);
+        } else {
+          setPaymentData(defaultData);
         }
+
+        showNotification('Error loading payment data. Using default configuration.', 'warning');
         setLoading(false);
       }
     };
 
     fetchApartmentData();
-  }, [selectedApartment, showNotification, initializedDefaults]);
+  }, [selectedApartment, showNotification]);
 
   // Calculate the remaining amount for a given month
   const calculateRemainingAmount = (month) => {
@@ -342,6 +388,60 @@ function PaymentScreen({ showNotification, initialApartment }) {
       };
     });
     showNotification(`Rent split evenly: $${amountPerTenant.toFixed(2)} per tenant`, 'success');
+  };
+
+  // Mark all tenants as paid for a month
+  const markAllAsPaid = (month) => {
+    const tenants = paymentData[month]?.tenants || [];
+    if (tenants.length === 0) {
+      showNotification('No tenants available for this month', 'warning');
+      return;
+    }
+    
+    setPaymentData((prev) => {
+      const updatedTenants = tenants.map((tenant) => ({
+        ...tenant,
+        paid: true,
+        amountPaid: tenant.amountDue
+      }));
+      return {
+        ...prev,
+        [month]: {
+          ...prev[month],
+          tenants: updatedTenants,
+          status: 'paid'
+        }
+      };
+    });
+    
+    showNotification(`All tenants marked as paid for ${month}`, 'success');
+  };
+  
+  // Mark all tenants as unpaid for a month
+  const markAllAsUnpaid = (month) => {
+    const tenants = paymentData[month]?.tenants || [];
+    if (tenants.length === 0) {
+      showNotification('No tenants available for this month', 'warning');
+      return;
+    }
+    
+    setPaymentData((prev) => {
+      const updatedTenants = tenants.map((tenant) => ({
+        ...tenant,
+        paid: false,
+        amountPaid: 0
+      }));
+      return {
+        ...prev,
+        [month]: {
+          ...prev[month],
+          tenants: updatedTenants,
+          status: 'not_paid'
+        }
+      };
+    });
+    
+    showNotification(`All tenants marked as unpaid for ${month}`, 'success');
   };
 
   // Update payment status or other fields for a month
@@ -434,7 +534,7 @@ function PaymentScreen({ showNotification, initialApartment }) {
   // Save the payment data to the backend
   const handleSubmit = async () => {
     try {
-      setLoading(true);
+      setIsSaving(true);
       const formattedData = {};
       for (const month of MONTH_LIST) {
         const monthObj = paymentData[month];
@@ -460,24 +560,83 @@ function PaymentScreen({ showNotification, initialApartment }) {
           // Include flat fields for backward compatibility
           internet: parseFloat(monthObj.extraPayments?.internet) || 0,
           electricity: parseFloat(monthObj.extraPayments?.electricity) || 0,
-          other: parseFloat(monthObj.extraPayments?.other) || 0
+          other: parseFloat(monthObj.extraPayments?.other) || 0,
+          // Add payment date and method
+          paymentDate: paymentDate,
+          paymentMethod: paymentMethod
         };
       }
 
       await api.post(`/payments/${selectedApartment}`, formattedData);
       showNotification('Payment data saved successfully!', 'success');
-      setLoading(false);
+      
+      // Refresh payment history after saving
+      try {
+        const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
+        setPaymentHistory(historyResponse.data || []);
+      } catch (error) {
+        console.error('Error fetching payment history:', error);
+      }
+      
+      setIsSaving(false);
     } catch (error) {
       console.error(error);
       showNotification(`Error saving payment data: ${error.message || 'Unknown error'}`, 'error');
-      setLoading(false);
+      setIsSaving(false);
     }
   };
 
-  // Get months for the current quarter based on selected tab
-  const getQuarterMonths = () => {
-    const quarterStart = currentTab * 3;
-    return MONTH_LIST.slice(quarterStart, quarterStart + 3);
+  // Format currency
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    }).format(amount);
+  };
+  
+  // Format date
+  const formatDate = (dateString) => {
+    if (!dateString) return '';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString(undefined, { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric'
+      });
+    } catch (e) {
+      return dateString;
+    }
+  };
+  
+  // Get payment method display text
+  const getPaymentMethodText = (method) => {
+    const methodMap = {
+      cash: 'Cash',
+      bank_transfer: 'Bank Transfer',
+      credit_card: 'Credit Card',
+      check: 'Check',
+      other: 'Other'
+    };
+    return methodMap[method] || method;
+  };
+  
+  // Generate receipt for a payment
+  const generateReceipt = (month) => {
+    // In a real application, this would generate a PDF receipt
+    showNotification(`Receipt generation for ${month} is not implemented yet`, 'info');
+  };
+  
+  // Is this month current, past, or future?
+  const getMonthStatus = (month) => {
+    const monthIndex = MONTH_LIST.indexOf(month);
+    const currentMonthIndex = new Date().getMonth();
+    
+    if (monthIndex < currentMonthIndex) return 'past';
+    if (monthIndex === currentMonthIndex) return 'current';
+    return 'future';
   };
 
   return (
@@ -487,29 +646,50 @@ function PaymentScreen({ showNotification, initialApartment }) {
       </Typography>
 
       {/* Apartment selection */}
-      <Box sx={{ mb: 4 }}>
-        <FormControl fullWidth variant="outlined">
-          <InputLabel id="apartment-select-label">Select Apartment</InputLabel>
-          <Select
-            labelId="apartment-select-label"
-            value={selectedApartment}
-            label="Select Apartment"
-            onChange={(e) => setSelectedApartment(e.target.value)}
-            disabled={loading}
-          >
-            {apartments.map((apartment) => (
-              <MenuItem key={apartment.id} value={apartment.id}>
-                {apartment.address}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-      </Box>
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} md={8}>
+          <FormControl fullWidth variant="outlined">
+            <InputLabel id="apartment-select-label">Select Apartment</InputLabel>
+            <Select
+              labelId="apartment-select-label"
+              value={selectedApartment}
+              label="Select Apartment"
+              onChange={(e) => setSelectedApartment(e.target.value)}
+              disabled={loading || isSaving}
+            >
+              {apartments.map((apartment) => (
+                <MenuItem key={apartment.id} value={apartment.id}>
+                  {apartment.address}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <Stack direction="row" spacing={2} justifyContent="flex-end" sx={{ height: '100%', alignItems: 'center' }}>
+            <Button
+              variant="outlined"
+              startIcon={<HistoryIcon />}
+              onClick={() => setShowHistory(!showHistory)}
+            >
+              {showHistory ? 'Hide History' : 'Payment History'}
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<ReceiptIcon />}
+              onClick={() => setReceiptsDialogOpen(true)}
+              disabled={!selectedApartment}
+            >
+              Receipts
+            </Button>
+          </Stack>
+        </Grid>
+      </Grid>
 
       {loading && <LinearProgress sx={{ mb: 3 }} />}
 
       {selectedApartment && !loading && (
-        <div>
+        <>
           {totalRent === 0 && (
             <Alert severity="warning" sx={{ mb: 3 }}>
               Rent is not defined for this apartment. Please set the rent in the apartment details.
@@ -523,284 +703,546 @@ function PaymentScreen({ showNotification, initialApartment }) {
                 <Grid container spacing={2}>
                   <Grid item xs={12} md={8}>
                     <Typography variant="h6">{apartmentDetails.address}</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Model: {apartmentDetails.model || 'Not specified'}
+                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                      <strong>Model:</strong> {apartmentDetails.model || 'Not specified'}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Tenants: {formatTenantList()}
+                      <strong>Tenants:</strong> {formatTenantList()}
                     </Typography>
                   </Grid>
                   <Grid item xs={12} md={4}>
-                    <Typography variant="h6" align="right" sx={{ color: 'primary.main' }}>
-                      ${totalRent.toFixed(2)}/month
-                    </Typography>
+                    <Box sx={{ textAlign: 'right' }}>
+                      <Typography variant="h6" sx={{ color: 'primary.main' }}>
+                        {formatCurrency(totalRent)}<Typography component="span" variant="body2">/month</Typography>
+                      </Typography>
+                      
+                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                        <strong>Contract:</strong> {apartmentDetails.contractEndDate ? 
+                          `Until ${formatDate(apartmentDetails.contractEndDate)}` : 
+                          'No end date specified'}
+                      </Typography>
+                    </Box>
                   </Grid>
                 </Grid>
               </CardContent>
             </Card>
           )}
+          
+          {/* Payment History Collapse */}
+          <Collapse in={showHistory}>
+            <Paper sx={{ p: 3, mb: 4 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">
+                  Payment History
+                </Typography>
+                <Button 
+                  size="small" 
+                  startIcon={<RefreshIcon />} 
+                  onClick={async () => {
+                    try {
+                      setLoading(true);
+                      const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
+                      setPaymentHistory(historyResponse.data || []);
+                      setLoading(false);
+                    } catch (error) {
+                      console.error('Error fetching payment history:', error);
+                      setLoading(false);
+                    }
+                  }}
+                >
+                  Refresh
+                </Button>
+              </Box>
+              
+              {paymentHistory.length === 0 ? (
+                <Alert severity="info">No payment history available for this apartment.</Alert>
+              ) : (
+                <TableContainer component={Paper} variant="outlined">
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Date</TableCell>
+                        <TableCell>Month</TableCell>
+                        <TableCell>Status</TableCell>
+                        <TableCell align="right">Amount Due</TableCell>
+                        <TableCell align="right">Amount Paid</TableCell>
+                        <TableCell>Method</TableCell>
+                        <TableCell align="right">Actions</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {paymentHistory.map((record, index) => (
+                        <TableRow key={index} hover>
+                          <TableCell>{formatDate(record.paymentDate)}</TableCell>
+                          <TableCell>{record.month} {record.year || currentYear}</TableCell>
+                          <TableCell>
+                            <Chip 
+                              label={record.status === 'paid' ? 'Paid' : record.status === 'partial' ? 'Partial' : 'Not Paid'}
+                              size="small"
+                              sx={{ 
+                                bgcolor: STATUS_COLORS[record.status],
+                                color: 'white'
+                              }}
+                            />
+                          </TableCell>
+                          <TableCell align="right">{formatCurrency(record.amountDue || 0)}</TableCell>
+                          <TableCell align="right">{formatCurrency(record.amountPaid || 0)}</TableCell>
+                          <TableCell>{getPaymentMethodText(record.paymentMethod)}</TableCell>
+                          <TableCell align="right">
+                            <Tooltip title="View Receipt">
+                              <IconButton size="small" onClick={() => generateReceipt(record.month)}>
+                                <ReceiptIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+            </Paper>
+          </Collapse>
 
-          {/* Quarter tabs */}
-          <Box sx={{ mb: 3, borderBottom: 1, borderColor: 'divider' }}>
-            <Tabs
-              value={currentTab}
-              onChange={(e, newValue) => setCurrentTab(newValue)}
-              variant="fullWidth"
-            >
-              <Tab label="Q1 (Jan-Mar)" />
-              <Tab label="Q2 (Apr-Jun)" />
-              <Tab label="Q3 (Jul-Sep)" />
-              <Tab label="Q4 (Oct-Dec)" />
-            </Tabs>
-          </Box>
-
-          {/* Loop through each month in the current quarter */}
-          {getQuarterMonths().map((month) => {
-            const isExpanded = expandedMonths[month] !== false;
-            const paymentPercentage = calculatePaymentPercentage(month);
-            const paymentStatus = paymentData[month]?.status || 'not_paid';
-            const remainingAmount = calculateRemainingAmount(month);
-
-            return (
-              <Card key={month} sx={{ mb: 3, borderLeft: 4, borderColor: STATUS_COLORS[paymentStatus] }}>
-                {/* Month header */}
-                <CardContent sx={{ py: 2, cursor: 'pointer' }} onClick={() => toggleMonthExpanded(month)}>
-                  <Grid container alignItems="center">
-                    <Grid item xs={6}>
-                      <Typography variant="h6">
-                        {month} {currentYear}
-                        <IconButton size="small" sx={{ ml: 1 }}>
-                          {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                        </IconButton>
+          {/* Current Month Payment Entry */}
+          <Card sx={{ mb: 4, borderLeft: 4, borderColor: 'primary.main' }}>
+            <CardHeader 
+              title={
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <CalendarIcon sx={{ mr: 1, color: 'primary.main' }} />
+                  <Typography variant="h6">
+                    {currentMonth} {currentYear} Payment Entry
+                  </Typography>
+                </Box>
+              }
+              action={
+                <Chip
+                  label={paymentData[currentMonth]?.status === 'paid' ? 'Paid' : 
+                         paymentData[currentMonth]?.status === 'partial' ? 'Partial' : 'Not Paid'}
+                  color={paymentData[currentMonth]?.status === 'paid' ? 'success' : 
+                         paymentData[currentMonth]?.status === 'partial' ? 'warning' : 'error'}
+                />
+              }
+            />
+            <CardContent>
+              <Grid container spacing={3}>
+                {/* Payment Progress */}
+                <Grid item xs={12}>
+                  <Box sx={{ mb: 2 }}>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                      <Typography variant="body2">Payment Progress</Typography>
+                      <Typography variant="body2">
+                        {calculatePaymentPercentage(currentMonth)}% collected
                       </Typography>
-                    </Grid>
-                    <Grid item xs={6} textAlign="right">
-                      <Chip
-                        label={paymentStatus === 'paid' ? 'Paid' : paymentStatus === 'partial' ? 'Partial' : 'Not Paid'}
-                        size="small"
-                        sx={{
-                          bgcolor: STATUS_COLORS[paymentStatus],
-                          color: 'white',
-                          fontWeight: 'bold',
-                          mr: 1
+                    </Box>
+                    <LinearProgress
+                      variant="determinate"
+                      value={calculatePaymentPercentage(currentMonth)}
+                      sx={{
+                        height: 8,
+                        borderRadius: 1,
+                        backgroundColor: 'rgba(0,0,0,0.1)',
+                        '& .MuiLinearProgress-bar': {
+                          backgroundColor: paymentData[currentMonth]?.status === 'paid' ? STATUS_COLORS.paid : 
+                                           paymentData[currentMonth]?.status === 'partial' ? STATUS_COLORS.partial : 
+                                           STATUS_COLORS.not_paid
+                        }
+                      }}
+                    />
+                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
+                      <Typography variant="body2" fontWeight="medium">
+                        Remaining: {formatCurrency(calculateRemainingAmount(currentMonth))}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </Grid>
+                
+                {/* Tenant Payment Grid */}
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" gutterBottom>
+                    Tenant Payments
+                  </Typography>
+                  
+                  {!paymentData[currentMonth]?.tenants || paymentData[currentMonth]?.tenants.length === 0 ? (
+                    <Alert severity="info">
+                      No tenants available for this apartment. Please add tenants to the apartment first.
+                    </Alert>
+                  ) : (
+                    <TableContainer component={Paper} variant="outlined">
+                      <Table>
+                        <TableHead>
+                          <TableRow>
+                            <TableCell>Tenant</TableCell>
+                            <TableCell align="right">Amount Due</TableCell>
+                            <TableCell align="right">Amount Paid</TableCell>
+                            <TableCell>Status</TableCell>
+                            <TableCell align="right">Actions</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {paymentData[currentMonth]?.tenants.map((tenant, index) => (
+                            <TableRow key={index}>
+                              <TableCell>{tenant.name}</TableCell>
+                              <TableCell align="right">
+                                <TextField
+                                  size="small"
+                                  variant="outlined"
+                                  type="number"
+                                  value={tenant.amountDue || 0}
+                                  onChange={(e) => handleTenantAmountChange(currentMonth, index, 'amountDue', e.target.value)}
+                                  InputProps={{
+                                    startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
+                                  }}
+                                  sx={{ width: '120px' }}
+                                />
+                              </TableCell>
+                              <TableCell align="right">
+                                <TextField
+                                  size="small"
+                                  variant="outlined"
+                                  type="number"
+                                  value={tenant.amountPaid || 0}
+                                  onChange={(e) => handleTenantAmountChange(currentMonth, index, 'amountPaid', e.target.value)}
+                                  error={tenant.amountPaid < tenant.amountDue}
+                                  InputProps={{
+                                    startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
+                                  }}
+                                  sx={{ width: '120px' }}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                  <Switch
+                                    checked={tenant.paid}
+                                    onChange={(e) => handleTenantStatusChange(currentMonth, index, e.target.checked)}
+                                    color="success"
+                                  />
+                                  <Chip
+                                    label={tenant.paid ? 'Paid' : 
+                                           tenant.amountPaid > 0 ? 'Partial' : 'Unpaid'}
+                                    size="small"
+                                    sx={{
+                                      bgcolor: tenant.paid ? STATUS_COLORS.paid : 
+                                              tenant.amountPaid > 0 ? STATUS_COLORS.partial : STATUS_COLORS.not_paid,
+                                      color: 'white',
+                                      ml: 1
+                                    }}
+                                  />
+                                </Box>
+                              </TableCell>
+                              <TableCell align="right">
+                                <Tooltip title={tenant.paid ? 'Mark as Unpaid' : 'Mark as Paid'}>
+                                  <IconButton 
+                                    size="small" 
+                                    color={tenant.paid ? 'error' : 'success'}
+                                    onClick={() => handleTenantStatusChange(currentMonth, index, !tenant.paid)}
+                                  >
+                                    {tenant.paid ? <UnpaidIcon fontSize="small" /> : <PaidIcon fontSize="small" />}
+                                  </IconButton>
+                                </Tooltip>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+                </Grid>
+                
+                {/* Additional Payments */}
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
+                    Additional Costs
+                  </Typography>
+                  <Grid container spacing={3}>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="Internet"
+                        variant="outlined"
+                        type="number"
+                        value={paymentData[currentMonth]?.extraPayments?.internet || 0}
+                        onChange={(e) => handleExtraPaymentChange(currentMonth, 'internet', e.target.value)}
+                        InputProps={{
+                          startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
                         }}
                       />
-                      <Typography variant="body2" component="span">
-                        ${remainingAmount} left
-                      </Typography>
                     </Grid>
-                    <Grid item xs={12} sx={{ mt: 1 }}>
-                      <LinearProgress
-                        variant="determinate"
-                        value={paymentPercentage}
-                        sx={{
-                          height: 8,
-                          borderRadius: 1,
-                          backgroundColor: 'rgba(0,0,0,0.1)',
-                          '& .MuiLinearProgress-bar': {
-                            backgroundColor: STATUS_COLORS[paymentStatus]
-                          }
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="Electricity"
+                        variant="outlined"
+                        type="number"
+                        value={paymentData[currentMonth]?.extraPayments?.electricity || 0}
+                        onChange={(e) => handleExtraPaymentChange(currentMonth, 'electricity', e.target.value)}
+                        InputProps={{
+                          startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
                         }}
                       />
-                      <Typography variant="caption" sx={{ display: 'block', textAlign: 'right', mt: 0.5 }}>
-                        {paymentPercentage}% collected
-                      </Typography>
+                    </Grid>
+                    <Grid item xs={12} md={4}>
+                      <TextField
+                        fullWidth
+                        label="Other Expenses"
+                        variant="outlined"
+                        type="number"
+                        value={paymentData[currentMonth]?.extraPayments?.other || 0}
+                        onChange={(e) => handleExtraPaymentChange(currentMonth, 'other', e.target.value)}
+                        InputProps={{
+                          startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
+                        }}
+                      />
                     </Grid>
                   </Grid>
-                </CardContent>
-
-                {/* Expandable month details */}
-                <Collapse in={isExpanded}>
-                  <Divider />
-                  <CardContent>
-                    {/* Quick actions - Removed the "Load Tenants" button since it's automatic now */}
-                    <Stack direction="row" spacing={2} sx={{ mb: 3 }}>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        startIcon={<PaymentIcon />}
-                        onClick={() => splitRentEvenly(month)}
-                        disabled={!paymentData[month]?.tenants?.length}
-                      >
-                        Split Rent Evenly
-                      </Button>
-                      <FormControl size="small" sx={{ minWidth: 150 }}>
-                        <InputLabel id={`${month}-status-label`}>Payment Status</InputLabel>
+                </Grid>
+                
+                {/* Payment Details */}
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
+                    Payment Details
+                  </Typography>
+                  <Grid container spacing={3}>
+                    <Grid item xs={12} md={6}>
+                      <TextField
+                        fullWidth
+                        label="Payment Date"
+                        type="date"
+                        value={paymentDate}
+                        onChange={(e) => setPaymentDate(e.target.value)}
+                        InputLabelProps={{ shrink: true }}
+                      />
+                    </Grid>
+                    <Grid item xs={12} md={6}>
+                      <FormControl fullWidth>
+                        <InputLabel id="payment-method-label">Payment Method</InputLabel>
                         <Select
-                          labelId={`${month}-status-label`}
-                          value={paymentData[month]?.status || 'not_paid'}
-                          label="Payment Status"
-                          onChange={(e) => handlePaymentChange(month, 'status', e.target.value)}
+                          labelId="payment-method-label"
+                          value={paymentMethod}
+                          label="Payment Method"
+                          onChange={(e) => setPaymentMethod(e.target.value)}
                         >
-                          <MenuItem value="paid">Paid</MenuItem>
-                          <MenuItem value="partial">Partial</MenuItem>
-                          <MenuItem value="not_paid">Not Paid</MenuItem>
+                          <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
+                          <MenuItem value="cash">Cash</MenuItem>
+                          <MenuItem value="credit_card">Credit Card</MenuItem>
+                          <MenuItem value="check">Check</MenuItem>
+                          <MenuItem value="other">Other</MenuItem>
                         </Select>
                       </FormControl>
-                    </Stack>
-
-                    {/* Tenant payment details */}
-                    <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold', display: 'flex', alignItems: 'center' }}>
-                      <Box component="span" sx={{ width: 16, height: 16, borderRadius: '50%', bgcolor: 'primary.main', mr: 1 }}></Box>
-                      Tenant Payments
-                    </Typography>
-
-                    {paymentData[month]?.tenants && paymentData[month].tenants.length > 0 ? (
-                      <Grid container spacing={2}>
-                        {paymentData[month].tenants.map((tenant, index) => (
-                          <Grid item xs={12} md={6} key={index}>
-                            <Card variant="outlined" sx={{
-                              bgcolor: tenant.paid ? 'rgba(76, 175, 80, 0.05)' : 'transparent',
-                              borderColor: tenant.paid ? 'success.light' : 'divider'
-                            }}>
-                              <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
-                                <Grid container spacing={2} alignItems="center">
-                                  <Grid item xs={12}>
-                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                                      <FormControlLabel
-                                        control={
-                                          <Checkbox
-                                            checked={tenant.paid}
-                                            onChange={(e) => handleTenantStatusChange(month, index, e.target.checked)}
-                                            color="success"
-                                          />
-                                        }
-                                        label={
-                                          <Typography variant="subtitle2">
-                                            {tenant.name}
-                                          </Typography>
-                                        }
-                                      />
-                                      <Chip
-                                        label={tenant.paid ? 'Paid' : 'Pending'}
-                                        size="small"
-                                        sx={{
-                                          bgcolor: tenant.paid ? STATUS_COLORS.paid : STATUS_COLORS.not_paid,
-                                          color: 'white',
-                                        }}
-                                      />
-                                    </Box>
-                                  </Grid>
-                                  <Grid item xs={6}>
-                                    <TextField
-                                      fullWidth
-                                      label="Amount Due"
-                                      type="number"
-                                      value={tenant.amountDue || 0}
-                                      onChange={(e) => handleTenantAmountChange(month, index, 'amountDue', e.target.value)}
-                                      InputProps={{
-                                        startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
-                                      }}
-                                      size="small"
-                                    />
-                                  </Grid>
-                                  <Grid item xs={6}>
-                                    <TextField
-                                      fullWidth
-                                      label="Amount Paid"
-                                      type="number"
-                                      value={tenant.amountPaid || 0}
-                                      onChange={(e) => handleTenantAmountChange(month, index, 'amountPaid', e.target.value)}
-                                      error={tenant.amountPaid < tenant.amountDue}
-                                      InputProps={{
-                                        startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
-                                      }}
-                                      size="small"
-                                    />
-                                  </Grid>
-                                  {tenant.amountPaid < tenant.amountDue && (
-                                    <Grid item xs={12}>
-                                      <Typography variant="caption" color="error.main">
-                                        Missing: ${(tenant.amountDue - tenant.amountPaid).toFixed(2)}
-                                      </Typography>
-                                    </Grid>
-                                  )}
-                                </Grid>
-                              </CardContent>
-                            </Card>
-                          </Grid>
-                        ))}
-                      </Grid>
-                    ) : (
-                      <Card variant="outlined" sx={{ mb: 3, bgcolor: 'rgba(0,0,0,0.02)' }}>
-                        <CardContent sx={{ textAlign: 'center', p: 3 }}>
-                          <Typography variant="body2" color="text.secondary">
-                            No tenants available for this month. Please add tenants to the apartment first.
-                          </Typography>
-                        </CardContent>
-                      </Card>
-                    )}
-
-                    {/* Additional payments */}
-                    <Typography variant="subtitle1" sx={{ mt: 3, mb: 2, fontWeight: 'bold', display: 'flex', alignItems: 'center' }}>
-                      <Box component="span" sx={{ width: 16, height: 16, borderRadius: '50%', bgcolor: 'secondary.main', mr: 1 }}></Box>
-                      Additional Payments
-                    </Typography>
-                    <Card variant="outlined" sx={{ mb: 2 }}>
-                      <CardContent>
-                        <Grid container spacing={2}>
-                          <Grid item xs={12} md={4}>
-                            <TextField
-                              fullWidth
-                              label="Internet"
-                              type="number"
-                              value={paymentData[month]?.extraPayments?.internet || 0}
-                              onChange={(e) => handleExtraPaymentChange(month, 'internet', e.target.value)}
-                              InputProps={{
-                                startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
-                              }}
-                              size="small"
-                            />
-                          </Grid>
-                          <Grid item xs={12} md={4}>
-                            <TextField
-                              fullWidth
-                              label="Electricity"
-                              type="number"
-                              value={paymentData[month]?.extraPayments?.electricity || 0}
-                              onChange={(e) => handleExtraPaymentChange(month, 'electricity', e.target.value)}
-                              InputProps={{
-                                startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
-                              }}
-                              size="small"
-                            />
-                          </Grid>
-                          <Grid item xs={12} md={4}>
-                            <TextField
-                              fullWidth
-                              label="Other Expenses"
-                              type="number"
-                              value={paymentData[month]?.extraPayments?.other || 0}
-                              onChange={(e) => handleExtraPaymentChange(month, 'other', e.target.value)}
-                              InputProps={{
-                                startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
-                              }}
-                              size="small"
-                            />
-                          </Grid>
-                        </Grid>
-                      </CardContent>
-                    </Card>
-                  </CardContent>
-                </Collapse>
-              </Card>
-            );
-          })}
-
+                    </Grid>
+                  </Grid>
+                </Grid>
+                
+                {/* Quick Actions */}
+                <Grid item xs={12}>
+                  <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
+                    Quick Actions
+                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
+                    <Button
+                      variant="outlined"
+                      startIcon={<PaymentIcon />}
+                      onClick={() => splitRentEvenly(currentMonth)}
+                      disabled={!paymentData[currentMonth]?.tenants?.length}
+                    >
+                      Split Rent Evenly
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      color="success"
+                      startIcon={<PaidIcon />}
+                      onClick={() => markAllAsPaid(currentMonth)}
+                      disabled={!paymentData[currentMonth]?.tenants?.length}
+                    >
+                      Mark All Paid
+                    </Button>
+                    <Button
+                      variant="outlined"
+                      color="error"
+                      startIcon={<UnpaidIcon />}
+                      onClick={() => markAllAsUnpaid(currentMonth)}
+                      disabled={!paymentData[currentMonth]?.tenants?.length}
+                    >
+                      Mark All Unpaid
+                    </Button>
+                  </Box>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+          
+          {/* Save Button */}
           <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
             <Button
               variant="contained"
               color="primary"
               size="large"
               onClick={handleSubmit}
-              startIcon={<SaveIcon />}
-              disabled={loading}
+              startIcon={isSaving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+              disabled={loading || isSaving}
             >
-              Save Payment Data
+              {isSaving ? 'Saving...' : 'Save Payment Data'}
             </Button>
           </Box>
-        </div>
+          
+          {/* All Months Overview */}
+          <Box sx={{ mt: 5 }}>
+            <Typography variant="h6" gutterBottom>
+              Payment Status Overview
+            </Typography>
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Month</TableCell>
+                    <TableCell align="right">Expected</TableCell>
+                    <TableCell align="right">Collected</TableCell>
+                    <TableCell align="right">Progress</TableCell>
+                    <TableCell>Status</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {MONTH_LIST.map((month) => {
+                    const monthStatus = getMonthStatus(month);
+                    const percentage = calculatePaymentPercentage(month);
+                    return (
+                      <TableRow 
+                        key={month} 
+                        sx={{ 
+                          bgcolor: monthStatus === 'current' ? 'rgba(25, 118, 210, 0.05)' : undefined,
+                          '&:hover': {
+                            bgcolor: 'rgba(0, 0, 0, 0.04)',
+                            cursor: 'pointer'
+                          }
+                        }}
+                        onClick={() => setCurrentMonth(month)}
+                      >
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            {monthStatus === 'current' && (
+                              <Chip 
+                                label="Current"
+                                color="primary" 
+                                size="small"
+                                sx={{ mr: 1 }}
+                              />
+                            )}
+                            {month} {currentYear}
+                          </Box>
+                        </TableCell>
+                        <TableCell align="right">{formatCurrency(totalRent)}</TableCell>
+                        <TableCell align="right">
+                          {formatCurrency(totalRent - calculateRemainingAmount(month))}
+                        </TableCell>
+                        <TableCell align="right">
+                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                            <Box sx={{ width: '100%', mr: 1 }}>
+                              <LinearProgress 
+                                variant="determinate" 
+                                value={percentage} 
+                                sx={{
+                                  height: 6,
+                                  borderRadius: 1,
+                                  '& .MuiLinearProgress-bar': {
+                                    backgroundColor: percentage === 100 ? STATUS_COLORS.paid : 
+                                                    percentage > 0 ? STATUS_COLORS.partial : 
+                                                    STATUS_COLORS.not_paid
+                                  }
+                                }}
+                              />
+                            </Box>
+                            <Box sx={{ minWidth: 35 }}>
+                              <Typography variant="body2" color="text.secondary">
+                                {percentage}%
+                              </Typography>
+                            </Box>
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Chip 
+                            label={paymentData[month]?.status === 'paid' ? 'Paid' : 
+                                 paymentData[month]?.status === 'partial' ? 'Partial' : 'Not Paid'}
+                            size="small"
+                            sx={{ 
+                              bgcolor: paymentData[month]?.status === 'paid' ? STATUS_COLORS.paid : 
+                                      paymentData[month]?.status === 'partial' ? STATUS_COLORS.partial : 
+                                      STATUS_COLORS.not_paid,
+                              color: 'white'
+                            }}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+        </>
       )}
+      
+      {/* Receipts Dialog */}
+      <Dialog
+        open={receiptsDialogOpen}
+        onClose={() => setReceiptsDialogOpen(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Typography variant="h6">
+              <ReceiptIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+              Payment Receipts
+            </Typography>
+            <IconButton onClick={() => setReceiptsDialogOpen(false)}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {paymentHistory.length === 0 ? (
+            <Alert severity="info">
+              No payment receipts available. Save payments to generate receipts.
+            </Alert>
+          ) : (
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Date</TableCell>
+                    <TableCell>Month</TableCell>
+                    <TableCell align="right">Amount</TableCell>
+                    <TableCell>Method</TableCell>
+                    <TableCell align="right">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {paymentHistory.map((record, index) => (
+                    <TableRow key={index}>
+                      <TableCell>{formatDate(record.paymentDate)}</TableCell>
+                      <TableCell>{record.month} {record.year || currentYear}</TableCell>
+                      <TableCell align="right">{formatCurrency(record.amountPaid || 0)}</TableCell>
+                      <TableCell>{getPaymentMethodText(record.paymentMethod)}</TableCell>
+                      <TableCell align="right">
+                        <Button
+                          size="small"
+                          startIcon={<ReceiptIcon />}
+                          onClick={() => generateReceipt(record.month)}
+                        >
+                          Receipt
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setReceiptsDialogOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Paper>
   );
 }

@@ -7,6 +7,7 @@ from models.models import (
     Apartment,
     Payment,
 )  # Ensure these models are correctly imported
+from datetime import datetime
 
 payments_bp = Blueprint("payments_bp", __name__)
 
@@ -85,6 +86,7 @@ def update_payments(apartment_id):
     """
     Expects a JSON object with keys for each month (e.g., "January", "February", ...)
     containing payment data. For each month, updates the record if it exists or creates a new record.
+    Enhanced to handle payment date, method and additional metadata.
     """
     data = request.json
     month_list = [
@@ -101,6 +103,8 @@ def update_payments(apartment_id):
         "November",
         "December",
     ]
+    current_year = datetime.utcnow().year
+
     try:
         for month in month_list:
             month_data = data.get(month)
@@ -109,12 +113,21 @@ def update_payments(apartment_id):
                 internet = month_data.get("extraPayments", {}).get("internet", 0)
                 electricity = month_data.get("extraPayments", {}).get("electricity", 0)
                 other = month_data.get("extraPayments", {}).get("other", 0)
+
                 if internet == 0 and "internet" in month_data:
                     internet = month_data["internet"]
                 if electricity == 0 and "electricity" in month_data:
                     electricity = month_data["electricity"]
                 if other == 0 and "other" in month_data:
                     other = month_data["other"]
+
+                # Get extraPayments as JSON string
+                extra_payments = {
+                    "internet": internet,
+                    "electricity": electricity,
+                    "other": other,
+                }
+                extra_payments_json = json.dumps(extra_payments)
 
                 # Ensure tenant data has expected fields
                 tenants = month_data.get("tenants", [])
@@ -125,16 +138,51 @@ def update_payments(apartment_id):
                         tenant["amountPaid"] = 0
                 tenants_json = json.dumps(tenants)
 
+                # Extract payment date and method
+                payment_date_str = month_data.get("paymentDate")
+                payment_method = month_data.get("paymentMethod", "bank_transfer")
+                notes = month_data.get("notes", "")
+
+                # Convert payment date string to datetime object if provided
+                payment_date = None
+                if payment_date_str:
+                    try:
+                        payment_date = datetime.fromisoformat(
+                            payment_date_str.replace("Z", "+00:00")
+                        )
+                    except ValueError:
+                        # Handle different date formats
+                        try:
+                            payment_date = datetime.strptime(
+                                payment_date_str, "%Y-%m-%d"
+                            )
+                        except ValueError:
+                            payment_date = datetime.utcnow()
+
                 payment = Payment.query.filter_by(
                     apartment_id=apartment_id, month=month
                 ).first()
+
                 if payment:
+                    # Update existing payment record
                     payment.status = month_data.get("status", "not_paid")
                     payment.tenants = tenants_json
                     payment.internet = internet
                     payment.electricity = electricity
                     payment.other = other
+                    payment.extraPayments = extra_payments_json
+
+                    # Only update payment date if status changed to paid or if explicitly provided
+                    if (
+                        month_data.get("status") == "paid" and payment.status != "paid"
+                    ) or payment_date_str:
+                        payment.paymentDate = payment_date or datetime.utcnow()
+
+                    payment.paymentMethod = payment_method
+                    payment.notes = notes
+                    payment.year = current_year
                 else:
+                    # Create new payment record
                     new_payment = Payment(
                         apartment_id=apartment_id,
                         month=month,
@@ -143,8 +191,20 @@ def update_payments(apartment_id):
                         internet=internet,
                         electricity=electricity,
                         other=other,
+                        extraPayments=extra_payments_json,
+                        paymentDate=payment_date
+                        if payment_date
+                        else (
+                            datetime.utcnow()
+                            if month_data.get("status") == "paid"
+                            else None
+                        ),
+                        paymentMethod=payment_method,
+                        notes=notes,
+                        year=current_year,
                     )
                     db.session.add(new_payment)
+
         db.session.commit()
         return jsonify({"message": "Payments updated successfully"}), 200
     except Exception as e:

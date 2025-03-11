@@ -118,3 +118,9 @@ class Payment(db.Model):
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+    # New fields for payment history
+    paymentDate = db.Column(db.DateTime, nullable=True)
+    paymentMethod = db.Column(db.String(50), nullable=True, default="bank_transfer")
+    extraPayments = db.Column(db.Text, nullable=True)  # stored as JSON
+    notes = db.Column(db.Text, nullable=True)
+    year = db.Column(db.Integer, nullable=True)  # Store the year for historical records

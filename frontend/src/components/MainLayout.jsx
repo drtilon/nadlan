@@ -57,7 +57,6 @@ function MainLayout({ onLogout, showNotification }) {
   // Navigation items configuration
   const navItems = [
     { title: 'Apartments', icon: <HomeIcon />, path: 'dashboard', adminOnly: false },
-    { title: 'Add Apartment', icon: <AddCircleIcon />, path: 'apartments/add', adminOnly: true },
     { title: 'Tenants', icon: <PersonIcon />, path: 'tenants', adminOnly: false },
     { title: 'Payments', icon: <AttachMoneyIcon />, path: 'payments', adminOnly: false },
     { title: 'Contracts', icon: <DescriptionIcon />, path: 'contracts', adminOnly: true },

@@ -83,6 +83,7 @@ def create_app():
             from routes.analytics import analytics_bp
             from routes.documents import documents_bp
             from routes.logs import logs_bp  # Import the new logs blueprint
+            from routes.payment_history import payment_history_bp
 
             app.register_blueprint(auth_bp, url_prefix="/api/auth")
             app.register_blueprint(adminPanel_bp, url_prefix="/api/adminPanel")
@@ -90,6 +91,7 @@ def create_app():
             app.register_blueprint(tenants_bp, url_prefix="/api/")
             app.register_blueprint(payments_bp, url_prefix="/api/")
             app.register_blueprint(analytics_bp, url_prefix="/api/")
+            app.register_blueprint(payment_history_bp, url_prefix="/api")
             # app.register_blueprint(documents_bp, url_prefix="/api/documents")
             app.register_blueprint(
                 logs_bp, url_prefix="/api"

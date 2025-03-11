@@ -14,9 +14,15 @@ import {
   Grid,
   Divider,
   Alert,
-  Chip
+  Chip,
+  Autocomplete
 } from '@mui/material';
-import DescriptionIcon from '@mui/icons-material/Description';
+import {
+  DescriptionOutlined as DescriptionIcon,
+  SearchOutlined as SearchIcon,
+  ApartmentOutlined as ApartmentIcon,
+  FileDownloadOutlined as DownloadIcon
+} from '@mui/icons-material';
 import api from '../utils/api';
 
 function ContractGenerator({ showNotification }) {
@@ -25,124 +31,73 @@ function ContractGenerator({ showNotification }) {
   const [tenants, setTenants] = useState([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
-  const [contractSettings, setContractSettings] = useState({
-    startDate: new Date(),
-    endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)),
-    rentAmount: '',
-    securityDeposit: '',
-    specialTerms: ''
-  });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filteredApartments, setFilteredApartments] = useState([]);
 
   // Fetch apartments when component mounts
   useEffect(() => {
-    const fetchApartments = async () => {
-      setLoading(true);
-
-      // Check for token before making the request
-      const token = localStorage.getItem('token');
-      if (!token) {
-        console.error('No authentication token found');
-        showNotification('Authentication required. Please log in again.', 'error');
-        setLoading(false);
-        return;
-      }
-
-      try {
-        // Using the /list endpoint consistent with ApartmentList component
-        const response = await api.get('/list');
-        setApartments(response.data || []);
-      } catch (error) {
-        console.error('Error fetching apartments:', error);
-
-        // If we get a 401, the token might be expired or invalid
-        if (error.response && error.response.status === 401) {
-          showNotification('Your session has expired. Please log in again.', 'error');
-        } else {
-          showNotification('Failed to load apartments', 'error');
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchApartments();
-  }, [showNotification]);
+  }, []);
 
-  // Extract tenants and update settings from apartment data when an apartment is selected
+  // Filter apartments based on search query
+  useEffect(() => {
+    if (!searchQuery) {
+      setFilteredApartments(apartments);
+      return;
+    }
+
+    const query = searchQuery.toLowerCase();
+    const filtered = apartments.filter(apt => 
+      apt.address.toLowerCase().includes(query)
+    );
+    setFilteredApartments(filtered);
+  }, [searchQuery, apartments]);
+
+  const fetchApartments = async () => {
+    setLoading(true);
+    try {
+      const response = await api.get('/list');
+      setApartments(response.data || []);
+      setFilteredApartments(response.data || []);
+    } catch (error) {
+      console.error('Error fetching apartments:', error);
+      if (error.response && error.response.status === 401) {
+        showNotification('Your session has expired. Please log in again.', 'error');
+      } else {
+        showNotification('Failed to load apartments', 'error');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Update tenant information when an apartment is selected
   useEffect(() => {
     if (!selectedApartment) {
       setTenants([]);
       return;
     }
 
-    try {
-      const apartment = apartments.find(apt => apt.id === selectedApartment);
-
-      if (apartment) {
-        // Handle different tenant data structures
-        let extractedTenants = [];
-
-        if (apartment.tenants) {
-          if (Array.isArray(apartment.tenants)) {
-            // If tenants is already an array of objects
-            extractedTenants = apartment.tenants.map(tenant => ({
-              id: tenant.id || `tenant-${Math.random().toString(36).substr(2, 9)}`,
-              name: tenant.firstName && tenant.lastName
-                ? `${tenant.firstName} ${tenant.lastName}`
-                : tenant.name || 'Unnamed Tenant',
-              email: tenant.email || ''
-            }));
-          } else if (typeof apartment.tenants === 'string') {
-            // If tenants is a comma-separated string
-            extractedTenants = apartment.tenants.split(',').map((name, index) => ({
-              id: `tenant-${index}`,
-              name: name.trim(),
-              email: ''
-            }));
-          }
-        }
-
-        setTenants(extractedTenants);
-
-        // Update contract settings based on selected apartment data
-        setContractSettings(prev => {
-          // Get move-in date from apartment if available
-          const moveInDate = apartment.moveInDate ? new Date(apartment.moveInDate) : prev.startDate;
-
-          // Get contract end date from apartment if available
-          const contractEndDate = apartment.contractEndDate ? new Date(apartment.contractEndDate) : prev.endDate;
-
-          return {
-            ...prev,
-            startDate: moveInDate,
-            endDate: contractEndDate,
-            rentAmount: apartment.rent || apartment.rentAmount || '',
-            securityDeposit: apartment.securityDeposit || apartment.rent || apartment.rentAmount || ''
-          };
-        });
+    const apartment = apartments.find(apt => apt.id === selectedApartment);
+    if (apartment) {
+      // Handle different tenant data formats
+      if (Array.isArray(apartment.tenants)) {
+        setTenants(apartment.tenants);
+      } else if (typeof apartment.tenants === 'string') {
+        const tenantNames = apartment.tenants.split(',').map(name => name.trim()).filter(name => name);
+        setTenants(tenantNames.map(name => ({ name })));
+      } else {
+        setTenants([]);
       }
-    } catch (error) {
-      console.error('Error processing apartment data:', error);
-      showNotification('Failed to process apartment data', 'error');
     }
-  }, [selectedApartment, apartments, showNotification]);
+  }, [selectedApartment, apartments]);
 
-  const handleApartmentChange = (event) => {
-    setSelectedApartment(event.target.value);
-  };
-
-  const handleSettingsChange = (field) => (event) => {
-    setContractSettings({
-      ...contractSettings,
-      [field]: event.target.value
-    });
-  };
-
-  const handleDateChange = (field, newDate) => {
-    setContractSettings({
-      ...contractSettings,
-      [field]: newDate
-    });
+  const handleApartmentChange = (event, newValue) => {
+    if (newValue) {
+      setSelectedApartment(newValue.id);
+    } else {
+      setSelectedApartment('');
+    }
   };
 
   const generateContract = async () => {
@@ -158,19 +113,9 @@ function ContractGenerator({ showNotification }) {
 
     setGenerating(true);
     try {
-      // Get all tenant IDs for the selected apartment
-      const tenantIds = tenants.map(tenant => tenant.id);
-
+      // Simplified API call - only requires apartmentId
       const response = await api.post('/documents/createContract', {
-        apartmentId: selectedApartment,
-        tenantIds: tenantIds, // Send all tenant IDs 
-        contractDetails: {
-          startDate: contractSettings.startDate,
-          endDate: contractSettings.endDate,
-          rentAmount: parseFloat(contractSettings.rentAmount) || 0,
-          securityDeposit: parseFloat(contractSettings.securityDeposit) || 0,
-          specialTerms: contractSettings.specialTerms
-        }
+        apartmentId: selectedApartment
       }, {
         responseType: 'blob' // Important for file download
       });
@@ -197,32 +142,7 @@ function ContractGenerator({ showNotification }) {
       showNotification('Contract generated successfully', 'success');
     } catch (error) {
       console.error('Error generating contract:', error);
-
-      // More detailed error handling
-      if (error.response) {
-        if (error.response.status === 400) {
-          // Try to parse the error message if possible
-          try {
-            const errorBlob = error.response.data;
-            const reader = new FileReader();
-            reader.readAsText(errorBlob);
-            reader.onload = () => {
-              try {
-                const errorJson = JSON.parse(reader.result);
-                showNotification(`Error: ${errorJson.message || 'Invalid request data'}`, 'error');
-              } catch {
-                showNotification('Failed to generate contract: Invalid data format', 'error');
-              }
-            };
-          } catch {
-            showNotification('Failed to generate contract: Invalid data format', 'error');
-          }
-        } else {
-          showNotification(`Failed to generate contract (Error ${error.response.status})`, 'error');
-        }
-      } else {
-        showNotification('Failed to generate contract: Network error', 'error');
-      }
+      showNotification('Failed to generate contract', 'error');
     } finally {
       setGenerating(false);
     }
@@ -246,140 +166,85 @@ function ContractGenerator({ showNotification }) {
       ) : (
         <Box>
           <Grid container spacing={3}>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth sx={{ mb: 2 }}>
-                <InputLabel id="apartment-select-label">Select Apartment</InputLabel>
-                <Select
-                  labelId="apartment-select-label"
-                  id="apartment-select"
-                  value={selectedApartment}
-                  label="Select Apartment"
-                  onChange={handleApartmentChange}
-                >
-                  {apartments.map((apartment) => (
-                    <MenuItem key={apartment.id} value={apartment.id}>
-                      {apartment.address}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+            <Grid item xs={12}>
+              <Autocomplete
+                options={filteredApartments}
+                getOptionLabel={(option) => option.address}
+                onChange={handleApartmentChange}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Search Apartments"
+                    variant="outlined"
+                    fullWidth
+                    placeholder="Type to search by address"
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    InputProps={{
+                      ...params.InputProps,
+                      startAdornment: (
+                        <>
+                          <SearchIcon color="action" sx={{ mr: 1 }} />
+                          {params.InputProps.startAdornment}
+                        </>
+                      )
+                    }}
+                  />
+                )}
+              />
             </Grid>
 
-            <Grid item xs={12} md={6}>
-              <Box sx={{ mb: 2 }}>
-                <Typography variant="body1" fontWeight="medium">
-                  Tenants on Contract:
-                </Typography>
-                <Box sx={{ mt: 1 }}>
-                  {tenants.length > 0 ? (
-                    tenants.map((tenant, index) => (
-                      <Chip
-                        key={tenant.id}
-                        label={tenant.name}
-                        sx={{ m: 0.5 }}
-                        color="primary"
-                        variant="outlined"
-                      />
-                    ))
-                  ) : (
-                    <Typography variant="body2" color="text.secondary">
-                      No tenants associated with this apartment
-                    </Typography>
-                  )}
-                </Box>
-              </Box>
-            </Grid>
-
-            {selectedApartment && tenants.length > 0 && (
+            {selectedApartment && (
               <>
                 <Grid item xs={12}>
-                  <Typography variant="h6" gutterBottom>
-                    Contract Details
-                  </Typography>
-                  <Divider sx={{ mb: 2 }} />
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <TextField
-                    fullWidth
-                    label="Lease Start Date"
-                    type="date"
-                    value={contractSettings.startDate.toISOString().split('T')[0]}
-                    onChange={(e) => {
-                      const newDate = new Date(e.target.value);
-                      handleDateChange('startDate', newDate);
-                    }}
-                    InputLabelProps={{
-                      shrink: true,
-                    }}
-                  />
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <TextField
-                    fullWidth
-                    label="Lease End Date"
-                    type="date"
-                    value={contractSettings.endDate.toISOString().split('T')[0]}
-                    onChange={(e) => {
-                      const newDate = new Date(e.target.value);
-                      handleDateChange('endDate', newDate);
-                    }}
-                    InputLabelProps={{
-                      shrink: true,
-                    }}
-                  />
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <TextField
-                    fullWidth
-                    label="Monthly Rent"
-                    type="number"
-                    value={contractSettings.rentAmount}
-                    onChange={handleSettingsChange('rentAmount')}
-                    InputProps={{
-                      startAdornment: <Box component="span" mr={1}>€</Box>,
-                    }}
-                  />
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <TextField
-                    fullWidth
-                    label="Security Deposit"
-                    type="number"
-                    value={contractSettings.securityDeposit}
-                    onChange={handleSettingsChange('securityDeposit')}
-                    InputProps={{
-                      startAdornment: <Box component="span" mr={1}>€</Box>,
-                    }}
-                  />
-                </Grid>
-
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="Special Terms (Optional)"
-                    multiline
-                    rows={4}
-                    value={contractSettings.specialTerms}
-                    onChange={handleSettingsChange('specialTerms')}
-                    placeholder="Enter any special terms or conditions for this lease agreement..."
-                  />
+                  <Paper variant="outlined" sx={{ p: 2 }}>
+                    <Typography variant="subtitle1" gutterBottom>
+                      Selected Apartment Details
+                    </Typography>
+                    
+                    {apartments.find(apt => apt.id === selectedApartment) && (
+                      <Box sx={{ mt: 1 }}>
+                        <Typography variant="h6">
+                          <ApartmentIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                          {apartments.find(apt => apt.id === selectedApartment).address}
+                        </Typography>
+                        
+                        <Box sx={{ mt: 2 }}>
+                          <Typography variant="subtitle2" gutterBottom>
+                            Tenants on Contract:
+                          </Typography>
+                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                            {tenants.length > 0 ? (
+                              tenants.map((tenant, index) => (
+                                <Chip
+                                  key={index}
+                                  label={tenant.name || (tenant.firstName && tenant.lastName ? `${tenant.firstName} ${tenant.lastName}` : tenant)}
+                                  color="primary"
+                                  variant="outlined"
+                                />
+                              ))
+                            ) : (
+                              <Typography variant="body2" color="text.secondary">
+                                No tenants associated with this apartment
+                              </Typography>
+                            )}
+                          </Box>
+                        </Box>
+                      </Box>
+                    )}
+                  </Paper>
                 </Grid>
               </>
             )}
 
             <Grid item xs={12}>
-              <Box display="flex" justifyContent="flex-end" mt={2}>
+              <Box display="flex" justifyContent="center" mt={2}>
                 <Button
                   variant="contained"
                   color="primary"
                   size="large"
                   onClick={generateContract}
                   disabled={!selectedApartment || tenants.length === 0 || generating}
-                  startIcon={generating ? <CircularProgress size={20} color="inherit" /> : <DescriptionIcon />}
+                  startIcon={generating ? <CircularProgress size={20} color="inherit" /> : <DownloadIcon />}
                 >
                   {generating ? 'Generating...' : 'Generate Contract'}
                 </Button>

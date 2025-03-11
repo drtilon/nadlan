@@ -79,10 +79,11 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
   return children;
 };
 
-// App Router Component
-function AppRouter() {
+// App Router Container - This is a wrapper component that sets up context for navigation
+const AppRouterContainer = () => {
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' });
   const [editingApartment, setEditingApartment] = useState(null);
+  const navigate = useNavigate();
 
   // Notification helper
   const showNotification = (message, severity = 'success') => {
@@ -94,147 +95,159 @@ function AppRouter() {
     setAuthToken(null);
     localStorage.removeItem('token');
     localStorage.removeItem('userData');
-    window.location.href = '/login';
+    navigate('/login');
   };
 
   return (
+    <>
+      <Routes>
+        {/* Public Routes */}
+        <Route path="/login" element={
+          <LoginPage 
+            showNotification={showNotification} 
+          />
+        } />
+        
+        <Route path="/register" element={
+          <RegisterPage 
+            showNotification={showNotification} 
+          />
+        } />
+        
+        {/* Root redirect */}
+        <Route path="/" element={<Navigate to="/dashboard" />} />
+        
+        {/* Protected Routes inside MainLayout */}
+        <Route 
+          path="/" 
+          element={
+            <ProtectedRoute>
+              <MainLayout 
+                onLogout={handleLogout} 
+                showNotification={showNotification}
+              />
+            </ProtectedRoute>
+          }
+        >
+          {/* Dashboard/Apartment List */}
+          <Route path="dashboard" element={
+            <ApartmentList 
+              showNotification={showNotification}
+              onEdit={(apartment) => {
+                setEditingApartment(apartment);
+                navigate(apartment ? '/apartments/edit' : '/apartments/add');
+              }}
+              onGoToPayments={(apartmentId) => {
+                navigate(`/payments/${apartmentId}`);
+              }}
+            />
+          } />
+          
+          {/* Tenants Routes */}
+          <Route path="tenants" element={
+            <TenantsPanel 
+              showNotification={showNotification}
+            />
+          } />
+          
+          <Route path="tenants/:tenantId" element={
+            <TenantDetails 
+              showNotification={showNotification}
+            />
+          } />
+          
+          {/* Payments Route */}
+          <Route path="payments" element={
+            <PaymentScreen 
+              showNotification={showNotification}
+            />
+          } />
+          
+          <Route path="payments/:apartmentId" element={
+            <PaymentScreen 
+              showNotification={showNotification}
+            />
+          } />
+          
+          {/* Admin Only Routes */}
+          <Route path="apartments/add" element={
+            <ProtectedRoute adminOnly={true}>
+              <ApartmentForm 
+                showNotification={showNotification}
+                onSuccess={() => navigate('/dashboard')}
+              />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="apartments/edit" element={
+            <ProtectedRoute adminOnly={true}>
+              <ApartmentForm 
+                isEdit={true}
+                initialData={editingApartment}
+                showNotification={showNotification}
+                onSuccess={() => navigate('/dashboard')}
+              />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="analytics" element={
+            <ProtectedRoute adminOnly={true}>
+              <AnalyticsPanel 
+                showNotification={showNotification}
+              />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="contracts" element={
+            <ProtectedRoute adminOnly={true}>
+              <ContractGenerator 
+                showNotification={showNotification}
+              />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="admin" element={
+            <ProtectedRoute adminOnly={true}>
+              <AdminPanel 
+                showNotification={showNotification}
+              />
+            </ProtectedRoute>
+          } />
+          
+          <Route path="logs" element={
+            <ProtectedRoute adminOnly={true}>
+              <LogsViewer 
+                showNotification={showNotification}
+              />
+            </ProtectedRoute>
+          } />
+        </Route>
+        
+        {/* Catch-all route */}
+        <Route path="*" element={<Navigate to="/dashboard" />} />
+      </Routes>
+      
+      {/* Global notification system */}
+      <Snackbar
+        open={notification.open}
+        autoHideDuration={6000}
+        onClose={() => setNotification({ ...notification, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={notification.severity} variant="filled">
+          {notification.message}
+        </Alert>
+      </Snackbar>
+    </>
+  );
+};
+
+// App Router Component - Main wrapper that provides the Router context
+function AppRouter() {
+  return (
     <ThemeProvider theme={theme}>
       <Router>
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/login" element={
-            <LoginPage 
-              showNotification={showNotification} 
-            />
-          } />
-          
-          <Route path="/register" element={
-            <RegisterPage 
-              showNotification={showNotification} 
-            />
-          } />
-          
-          {/* Root redirect */}
-          <Route path="/" element={<Navigate to="/dashboard" />} />
-          
-          {/* Protected Routes inside MainLayout */}
-          <Route 
-            path="/" 
-            element={
-              <ProtectedRoute>
-                <MainLayout 
-                  onLogout={handleLogout} 
-                  showNotification={showNotification}
-                />
-              </ProtectedRoute>
-            }
-          >
-            {/* Dashboard/Apartment List */}
-            <Route path="dashboard" element={
-              <ApartmentList 
-                showNotification={showNotification}
-                onEdit={(apartment) => {
-                  setEditingApartment(apartment);
-                  navigate('/apartments/edit');
-                }}
-              />
-            } />
-            
-            {/* Tenants Routes */}
-            <Route path="tenants" element={
-              <TenantsPanel 
-                showNotification={showNotification}
-              />
-            } />
-            
-            <Route path="tenants/:tenantId" element={
-              <TenantDetails 
-                showNotification={showNotification}
-              />
-            } />
-            
-            {/* Payments Route */}
-            <Route path="payments" element={
-              <PaymentScreen 
-                showNotification={showNotification}
-              />
-            } />
-            
-            <Route path="payments/:apartmentId" element={
-              <PaymentScreen 
-                showNotification={showNotification}
-              />
-            } />
-            
-            {/* Admin Only Routes */}
-            <Route path="apartments/add" element={
-              <ProtectedRoute adminOnly={true}>
-                <ApartmentForm 
-                  showNotification={showNotification}
-                  onSuccess={() => navigate('/dashboard')}
-                />
-              </ProtectedRoute>
-            } />
-            
-            <Route path="apartments/edit" element={
-              <ProtectedRoute adminOnly={true}>
-                <ApartmentForm 
-                  isEdit={true}
-                  initialData={editingApartment}
-                  showNotification={showNotification}
-                  onSuccess={() => navigate('/dashboard')}
-                />
-              </ProtectedRoute>
-            } />
-            
-            <Route path="analytics" element={
-              <ProtectedRoute adminOnly={true}>
-                <AnalyticsPanel 
-                  showNotification={showNotification}
-                />
-              </ProtectedRoute>
-            } />
-            
-            <Route path="contracts" element={
-              <ProtectedRoute adminOnly={true}>
-                <ContractGenerator 
-                  showNotification={showNotification}
-                />
-              </ProtectedRoute>
-            } />
-            
-            <Route path="admin" element={
-              <ProtectedRoute adminOnly={true}>
-                <AdminPanel 
-                  showNotification={showNotification}
-                />
-              </ProtectedRoute>
-            } />
-            
-            <Route path="logs" element={
-              <ProtectedRoute adminOnly={true}>
-                <LogsViewer 
-                  showNotification={showNotification}
-                />
-              </ProtectedRoute>
-            } />
-          </Route>
-          
-          {/* Catch-all route */}
-          <Route path="*" element={<Navigate to="/dashboard" />} />
-        </Routes>
-        
-        {/* Global notification system */}
-        <Snackbar
-          open={notification.open}
-          autoHideDuration={6000}
-          onClose={() => setNotification({ ...notification, open: false })}
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-        >
-          <Alert severity={notification.severity} variant="filled">
-            {notification.message}
-          </Alert>
-        </Snackbar>
+        <AppRouterContainer />
       </Router>
     </ThemeProvider>
   );

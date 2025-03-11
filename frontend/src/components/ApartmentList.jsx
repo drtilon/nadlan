@@ -39,7 +39,7 @@ import LocationOnIcon from '@mui/icons-material/LocationOn';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import EventIcon from '@mui/icons-material/Event';
 import FilterListIcon from '@mui/icons-material/FilterList';
-
+import DescriptionIcon from '@mui/icons-material/Description';
 import api from '../utils/api';
 
 function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
@@ -52,7 +52,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
 
   const fetchApartments = async () => {
     setIsLoading(true);
-
     const token = localStorage.getItem('token');
     if (!token) {
       console.error('No authentication token found');
@@ -60,13 +59,10 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
       setIsLoading(false);
       return;
     }
-
     try {
       const response = await api.get('/list');
-
       const normalizedApartments = response.data.map(apartment => {
         let normalizedStatus = apartment.status;
-
         if (apartment.status === 'מושכר' || apartment.status === 'Rented') {
           normalizedStatus = 'occupied';
         } else if (apartment.status === 'פנוי' || apartment.status === 'Available') {
@@ -74,14 +70,12 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         } else if (apartment.status === 'חוזה נשלח' || apartment.status === 'Contract Sent') {
           normalizedStatus = 'contract_sent';
         }
-
         return {
           ...apartment,
           status: normalizedStatus,
           displayStatus: apartment.status
         };
       });
-
       setApartments(normalizedApartments);
       setFilteredApartments(normalizedApartments);
     } catch (error) {
@@ -93,6 +87,51 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
       }
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // More reliable handler for contract generation
+  const handleGenerateContract = (apartmentId, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    
+    setDetailsOpen(false); // Close details dialog if open
+    generateContract(apartmentId);
+  };
+  
+  // Separate function for contract generation logic
+  const generateContract = async (apartmentId) => {
+    try {
+      const response = await api.post('/documents/createContract', {
+        apartmentId: apartmentId
+      }, {
+        responseType: 'blob'
+      });
+
+      // Create a blob from the response data
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      });
+
+      // Create a link element and trigger download
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      // Get apartment details for filename
+      const apartment = apartments.find(apt => apt.id === apartmentId);
+      const fileName = `Rental_Contract_${apartment ? (apartment.address || 'Apartment') : 'Apartment'}.docx`;
+
+      link.href = url;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      showNotification('Contract generated successfully', 'success');
+    } catch (error) {
+      console.error('Error generating contract:', error);
+      showNotification('Failed to generate contract', 'error');
     }
   };
 
@@ -136,7 +175,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   const getStatusChip = (status) => {
     let color = 'default';
     let displayStatus = status;
-
     switch (status) {
       case 'occupied':
         color = 'success';
@@ -167,7 +205,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
       default:
         displayStatus = status || 'Unknown';
     }
-
     return (
       <Chip
         label={displayStatus}
@@ -192,6 +229,27 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     return address && address.charAt(0).toUpperCase();
   };
 
+  // Improved handler for edit button
+  const handleEditClick = (apartment, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onEdit(apartment);
+  };
+
+  // Improved handler for payment button
+  const handlePaymentClick = (apartmentId, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onGoToPayments(apartmentId);
+  };
+  
+  // Improved handler for details button
+  const handleDetailsClick = (apartment, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openDetails(apartment);
+  };
+
   if (isLoading) {
     return (
       <Container maxWidth="xl" sx={{ py: 4 }}>
@@ -201,12 +259,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         <Grid container spacing={3}>
           {[1, 2, 3, 4, 5, 6].map((item) => (
             <Grid item xs={12} sm={6} md={4} lg={3} key={item}>
-              <Skeleton
-                variant="rectangular"
-                width="100%"
-                height={200}
-                sx={{ borderRadius: 2 }}
-              />
+              <Skeleton variant="rectangular" width="100%" height={200} sx={{ borderRadius: 2 }} />
             </Grid>
           ))}
         </Grid>
@@ -373,6 +426,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             <Grid item xs={12} sm={6} md={4} lg={3} key={apartment.id}>
               <Card
                 elevation={0}
+                onClick={() => openDetails(apartment)}
                 sx={{
                   borderRadius: 2,
                   height: '100%',
@@ -384,7 +438,8 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                     boxShadow: 3,
                     transform: 'translateY(-4px)',
                     borderColor: 'transparent'
-                  }
+                  },
+                  cursor: 'pointer'
                 }}
               >
                 {/* Property Header */}
@@ -425,7 +480,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       {apartment.address}
                     </Typography>
                   </Box>
-
                   {getStatusChip(apartment.status)}
                 </Box>
 
@@ -438,14 +492,12 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                         {apartment.rooms} rooms
                       </Typography>
                     </Box>
-
                     <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5, gap: 1 }}>
                       <SquareFootIcon fontSize="small" sx={{ color: 'text.secondary', fontSize: '1rem' }} />
                       <Typography variant="body2" color="text.secondary">
                         {apartment.size} m²
                       </Typography>
                     </Box>
-
                     {apartment.moveInDate && (
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5, gap: 1 }}>
                         <EventIcon fontSize="small" sx={{ color: 'text.secondary', fontSize: '1rem' }} />
@@ -454,7 +506,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                         </Typography>
                       </Box>
                     )}
-
                     {apartment.tenants && (
                       <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
                         <PersonIcon fontSize="small" sx={{ color: 'text.secondary', fontSize: '1rem', mt: 0.5 }} />
@@ -476,7 +527,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       </Box>
                     )}
                   </Box>
-
                   <Divider sx={{ my: 2 }} />
 
                   {/* Action Buttons */}
@@ -487,36 +537,62 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       mt: 1
                     }}
                   >
-                    <Button
-                      size="small"
-                      variant="text"
-                      color="primary"
-                      startIcon={<PaymentIcon fontSize="small" />}
-                      onClick={() => onGoToPayments(apartment.id)}
-                      sx={{
-                        textTransform: 'none',
-                        fontWeight: 500,
-                        fontSize: '0.8rem'
+                    {/* Payment Button - Fixed by making it an IconButton with text */}
+                    <Box 
+                      onClick={(e) => handlePaymentClick(apartment.id, e)}
+                      sx={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: 0.5, 
+                        cursor: 'pointer',
+                        borderRadius: 1,
+                        py: 0.5,
+                        px: 1,
+                        '&:hover': { bgcolor: 'action.hover' }
                       }}
                     >
-                      Payments
-                    </Button>
-
+                      <PaymentIcon fontSize="small" color="primary" />
+                      <Typography 
+                        variant="body2" 
+                        color="primary"
+                        sx={{ 
+                          fontWeight: 500,
+                          fontSize: '0.8rem',
+                          userSelect: 'none'
+                        }}
+                      >
+                        Payments
+                      </Typography>
+                    </Box>
+                    
                     <Box sx={{ display: 'flex', gap: 1 }}>
+                      {/* Contract Generation Button */}
+                      <Tooltip title="Generate Contract">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => handleGenerateContract(apartment.id, e)}
+                          sx={{ color: 'success.main' }}
+                        >
+                          <DescriptionIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      
+                      {/* Edit Property Button */}
                       <Tooltip title="Edit Property">
                         <IconButton
                           size="small"
-                          onClick={() => onEdit(apartment)}
+                          onClick={(e) => handleEditClick(apartment, e)}
                           sx={{ color: 'primary.main' }}
                         >
                           <EditIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-
+                      
+                      {/* Details Button */}
                       <Button
                         size="small"
                         variant="outlined"
-                        onClick={() => openDetails(apartment)}
+                        onClick={(e) => handleDetailsClick(apartment, e)}
                         sx={{
                           borderRadius: 1,
                           textTransform: 'none',
@@ -598,21 +674,26 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   </Typography>
                   <Chip
                     label={
-                      selectedApartment.status === 'occupied' ? 'Occupied' :
-                        selectedApartment.status === 'vacant' ? 'Vacant' :
-                          selectedApartment.status === 'contract_sent' ? 'Contract Sent' :
-                            selectedApartment.status || 'Unknown'
+                      selectedApartment.status === 'occupied'
+                        ? 'Occupied'
+                        : selectedApartment.status === 'vacant'
+                        ? 'Vacant'
+                        : selectedApartment.status === 'contract_sent'
+                        ? 'Contract Sent'
+                        : selectedApartment.status || 'Unknown'
                     }
                     color={
-                      selectedApartment.status === 'occupied' ? 'success' :
-                        selectedApartment.status === 'vacant' ? 'primary' :
-                          selectedApartment.status === 'contract_sent' ? 'warning' :
-                            'default'
+                      selectedApartment.status === 'occupied'
+                        ? 'success'
+                        : selectedApartment.status === 'vacant'
+                        ? 'primary'
+                        : selectedApartment.status === 'contract_sent'
+                        ? 'warning'
+                        : 'default'
                     }
                     size="small"
                   />
                 </Box>
-
                 <Box sx={{ display: 'flex', gap: 2 }}>
                   <Button
                     size="small"
@@ -629,7 +710,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   >
                     Edit
                   </Button>
-
                   <Button
                     size="small"
                     startIcon={<PaymentIcon />}
@@ -665,7 +745,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       <HomeIcon color="primary" fontSize="small" />
                       Property Details
                     </Typography>
-
                     <Grid container spacing={2}>
                       <Grid item xs={12} sm={6} md={3}>
                         <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
@@ -677,7 +756,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                           </Typography>
                         </Box>
                       </Grid>
-
                       <Grid item xs={12} sm={6} md={3}>
                         <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                           <Typography variant="caption" color="text.secondary" gutterBottom display="block">
@@ -688,16 +766,17 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                           </Typography>
                         </Box>
                       </Grid>
-
                       <Grid item xs={12} sm={6} md={3}>
                         <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                           <Typography variant="caption" color="text.secondary" gutterBottom display="block">
                             Property Model
                           </Typography>
                           <Typography variant="body2" fontWeight={500}>
-                            {selectedApartment.model === 'management' ? 'Property Management' :
-                              selectedApartment.model === 'rental' ? 'Rental Property' :
-                                selectedApartment.model || 'Not specified'}
+                            {selectedApartment.model === 'management'
+                              ? 'Property Management'
+                              : selectedApartment.model === 'rental'
+                              ? 'Rental Property'
+                              : selectedApartment.model || 'Not specified'}
                           </Typography>
                         </Box>
                       </Grid>
@@ -719,7 +798,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       <AccessTimeIcon color="primary" fontSize="small" />
                       Contract Timeline
                     </Typography>
-
                     <Grid container spacing={2}>
                       <Grid item xs={12} sm={6}>
                         <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
@@ -731,7 +809,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                           </Typography>
                         </Box>
                       </Grid>
-
                       <Grid item xs={12} sm={6}>
                         <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                           <Typography variant="caption" color="text.secondary" gutterBottom display="block">
@@ -760,7 +837,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       <PersonIcon color="primary" fontSize="small" />
                       Landlord Information
                     </Typography>
-
                     <Box
                       sx={{
                         p: 2,
@@ -781,7 +857,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                           {selectedApartment.landlordName || 'Not specified'}
                         </Typography>
                       </Box>
-
                       {selectedApartment.landlordPhone && (
                         <Box>
                           <Typography variant="caption" color="text.secondary" gutterBottom display="block">
@@ -795,7 +870,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                           </Box>
                         </Box>
                       )}
-
                       {selectedApartment.landlordEmail && (
                         <Box>
                           <Typography variant="caption" color="text.secondary" gutterBottom display="block">
@@ -814,7 +888,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
 
                   {/* Tenants */}
                   <Grid item xs={12} sx={{ mt: 2 }}>
-                    <Typography
+                    <Typography                    
                       variant="subtitle1"
                       sx={{
                         fontWeight: 600,
@@ -827,7 +901,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       <PersonIcon color="primary" fontSize="small" />
                       Current Tenants
                     </Typography>
-
                     <Box
                       sx={{
                         p: 2,
@@ -839,13 +912,14 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       {selectedApartment.tenants ? (
                         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                           {Array.isArray(selectedApartment.tenants) ? (
-                            // Handle array of tenant objects
                             selectedApartment.tenants.map((tenant, index) => (
                               <Chip
                                 key={tenant.id || index}
-                                label={tenant.firstName && tenant.lastName ?
-                                  `${tenant.firstName} ${tenant.lastName}` :
-                                  tenant.name || 'Unnamed Tenant'}
+                                label={
+                                  tenant.firstName && tenant.lastName
+                                    ? `${tenant.firstName} ${tenant.lastName}`
+                                    : tenant.name || 'Unnamed Tenant'
+                                }
                                 icon={<PersonIcon />}
                                 variant="outlined"
                                 color="primary"
@@ -856,7 +930,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                               />
                             ))
                           ) : (
-                            // Handle string of comma-separated tenant names
                             selectedApartment.tenants.split(',').map((tenant, index) => (
                               <Chip
                                 key={index}
@@ -882,16 +955,9 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   {/* Notes */}
                   {selectedApartment.notes && (
                     <Grid item xs={12} sx={{ mt: 2 }}>
-                      <Typography
-                        variant="subtitle1"
-                        sx={{
-                          fontWeight: 600,
-                          mb: 2
-                        }}
-                      >
+                      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
                         Notes
                       </Typography>
-
                       <Box
                         sx={{
                           p: 2,
@@ -911,7 +977,8 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
               </Box>
             </DialogContent>
 
-            <DialogActions sx={{ p: 2, borderTop: '1px solid', borderColor: 'divider' }}>
+            {/* Updated Dialog Actions with Generate Contract Button */}
+            <DialogActions sx={{ px: 3, pb: 3 }}>
               <Button
                 onClick={() => setDetailsOpen(false)}
                 variant="outlined"
@@ -922,6 +989,19 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                 }}
               >
                 Close
+              </Button>
+              <Button
+                onClick={() => handleGenerateContract(selectedApartment.id)}
+                variant="contained"
+                color="primary"
+                startIcon={<DescriptionIcon />}
+                sx={{
+                  borderRadius: 1,
+                  textTransform: 'none',
+                  px: 3
+                }}
+              >
+                Generate Contract
               </Button>
             </DialogActions>
           </>

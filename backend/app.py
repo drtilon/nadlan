@@ -92,7 +92,7 @@ def create_app():
             app.register_blueprint(payments_bp, url_prefix="/api/")
             app.register_blueprint(analytics_bp, url_prefix="/api/")
             app.register_blueprint(payment_history_bp, url_prefix="/api")
-            # app.register_blueprint(documents_bp, url_prefix="/api/documents")
+            app.register_blueprint(documents_bp, url_prefix="/api/documents")
             app.register_blueprint(
                 logs_bp, url_prefix="/api"
             )  # Register logs blueprint

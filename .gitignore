@@ -18,6 +18,7 @@ env/
 venv/
 ENV/
 *.env
+backend/logs/app.log
 
 # OS Generated Files
 .DS_Store

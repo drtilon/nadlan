@@ -14,3 +14,4 @@ pymysql
 cryptography
 python-docx
 num2words
+dotenv

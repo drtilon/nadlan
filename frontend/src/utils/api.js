@@ -1,5 +1,6 @@
 // src/utils/api.js
 import axios from 'axios';
+import sessionManager from './SessionManager';
 
 // API service with base URL configuration
 const api = axios.create({
@@ -10,17 +11,38 @@ const api = axios.create({
   }
 });
 
+// Track failed requests that should be retried after token refresh
+const failedQueue = [];
+
+// Process all requests from the failed queue
+const processQueue = (error = null) => {
+  // If there was an error refreshing the token, reject all requests
+  if (error) {
+    failedQueue.forEach(promise => {
+      promise.reject(error);
+    });
+  } else {
+    // Otherwise, retry each request with the new token
+    failedQueue.forEach(promise => {
+      promise.resolve();
+    });
+  }
+
+  // Clear the queue
+  failedQueue.length = 0;
+};
+
 // Request interceptor - runs before each request
 api.interceptors.request.use(
   (config) => {
     // Get token from localStorage
     const token = localStorage.getItem('token');
-    
+
     // If token exists, add to headers
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    
+
     return config;
   },
   (error) => {
@@ -34,20 +56,20 @@ api.interceptors.response.use(
     // Successful response handler
     return response;
   },
-  (error) => {
-    // Handle 401 Unauthorized errors (expired token)
-    if (error.response && error.response.status === 401) {
-      // Clear localStorage
-      localStorage.removeItem('token');
-      localStorage.removeItem('userData');
-      
-      // Redirect to login page if we're in a browser environment
-      if (typeof window !== 'undefined') {
-        // Optional: Redirect to login with a message
-        window.location.href = '/?expired=true';
-      }
+  async (error) => {
+    const originalRequest = error.config;
+
+    // If the error is because of an expired token (401 Unauthorized)
+    if (error.response && error.response.status === 401 && !originalRequest._retry) {
+      // Only proceed with session expiry once regardless of how many requests fail
+      // The sessionManager will handle the redirection
+      sessionManager.handleSessionExpired();
+
+      // Reject the original request
+      return Promise.reject(new Error('Session expired'));
     }
-    
+
+    // For all other errors, just return the error
     return Promise.reject(error);
   }
 );
@@ -57,6 +79,8 @@ export const setAuthToken = (token) => {
   if (token) {
     api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
     localStorage.setItem('token', token);
+    // Reset session timers when token is set
+    sessionManager.resetSessionTimers();
   } else {
     delete api.defaults.headers.common['Authorization'];
     localStorage.removeItem('token');
@@ -94,6 +118,8 @@ export const verifyToken = async () => {
     if (error.response && error.response.status === 401) {
       // Token is invalid, clear it
       setAuthToken(null);
+      // Let the session manager handle the expired session
+      sessionManager.handleSessionExpired();
     }
     return false;
   }
@@ -108,13 +134,13 @@ export const apiHelpers = {
       return { data: response.data, error: null };
     } catch (error) {
       console.error(`Error fetching data from ${url}:`, error);
-      return { 
-        data: null, 
-        error: error.response?.data?.message || error.message || 'An error occurred' 
+      return {
+        data: null,
+        error: error.response?.data?.message || error.message || 'An error occurred'
       };
     }
   },
-  
+
   // Submit data with error handling
   async submitData(url, data, method = 'post', options = {}) {
     try {
@@ -122,9 +148,9 @@ export const apiHelpers = {
       return { data: response.data, error: null };
     } catch (error) {
       console.error(`Error submitting data to ${url}:`, error);
-      return { 
-        data: null, 
-        error: error.response?.data?.message || error.message || 'An error occurred' 
+      return {
+        data: null,
+        error: error.response?.data?.message || error.message || 'An error occurred'
       };
     }
   }
@@ -135,5 +161,8 @@ const token = localStorage.getItem('token');
 if (token) {
   api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 }
+
+// Initialize session manager
+sessionManager.initialize();
 
 export default api;

@@ -13,6 +13,8 @@ from initalized.init_apartment import (
     ensure_default_apartment_exists,
     ensure_new_apartment_exists,
 )
+import os
+from dotenv import load_dotenv
 
 
 def wait_for_mysql(app):
@@ -45,6 +47,11 @@ def create_app():
         try:
             # For production with credentials enabled, you must specify a concrete origin.
             # Make sure to set CORS_ALLOWED_ORIGINS in your Config (e.g., "https://your-production-domain.com")
+            # env_path = os.path.abspath(
+            #    os.path.join(os.path.dirname(__file__), "..", ".env")
+            # )
+            # load_dotenv(env_path)
+            # host = os.getenv("API_URL")
             allowed_origins = app.config.get(
                 "CORS_ALLOWED_ORIGINS", "http://localhost:3001"
             )

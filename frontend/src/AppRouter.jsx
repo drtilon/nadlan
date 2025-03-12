@@ -1,7 +1,7 @@
 // src/AppRouter.jsx
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
-import { Box, CircularProgress, Snackbar, Alert } from '@mui/material';
+import { Box, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 import { ThemeProvider } from '@mui/material/styles';
 
 // Components
@@ -21,6 +21,7 @@ import TenantDetails from './components/TenantDetails';
 // Utils and theme
 import theme from './theme';
 import { setAuthToken, verifyToken, getUserData } from './utils/api';
+import sessionManager from './utils/SessionManager';
 
 // Protected Route wrapper component
 const ProtectedRoute = ({ children, adminOnly = false }) => {
@@ -33,16 +34,16 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
     const checkAuth = async () => {
       // Check if token exists and is valid
       const token = localStorage.getItem('token');
-      
+
       if (!token) {
         setIsAuthenticated(false);
         return;
       }
-      
+
       // Verify token with backend
       const isValid = await verifyToken();
       setIsAuthenticated(isValid);
-      
+
       // Check authorization for admin routes
       if (isValid && adminOnly) {
         const userData = getUserData();
@@ -52,7 +53,7 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
         setIsAuthorized(true);
       }
     };
-    
+
     checkAuth();
   }, [adminOnly, location.pathname]);
 
@@ -60,7 +61,7 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
   if (isAuthenticated === null || isAuthorized === null) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <CircularProgress />
+      <CircularProgress />
       </Box>
     );
   }
@@ -69,7 +70,7 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location.pathname }} />;
   }
-  
+
   // Redirect to dashboard if not authorized (e.g., non-admin trying to access admin route)
   if (!isAuthorized) {
     return <Navigate to="/dashboard" />;
@@ -79,11 +80,69 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
   return children;
 };
 
+// Session Timeout Warning component
+const SessionTimeoutWarning = ({ open, onExtend, onLogout, remainingTime }) => {
+  return (
+    <Dialog open={open} onClose={onExtend}>
+    <DialogTitle>Session About to Expire</DialogTitle>
+    <DialogContent>
+    Your session will expire in {remainingTime} minute(s).
+    Would you like to extend your session or logout now?
+    </DialogContent>
+    <DialogActions>
+    <Button onClick={onLogout} color="secondary">Logout</Button>
+    <Button onClick={onExtend} color="primary" variant="contained">Extend Session</Button>
+    </DialogActions>
+    </Dialog>
+  );
+};
+
 // App Router Container - This is a wrapper component that sets up context for navigation
 const AppRouterContainer = () => {
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'success' });
   const [editingApartment, setEditingApartment] = useState(null);
+  const [sessionWarning, setSessionWarning] = useState({ open: false, remainingTime: 5 });
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Setup session management
+  useEffect(() => {
+    // Configure session manager to handle expiration
+    sessionManager.onSessionExpired(() => {
+      // Clear data
+      setAuthToken(null);
+      localStorage.removeItem('token');
+      localStorage.removeItem('userData');
+
+      // Show notification if not already on the login page
+      if (location.pathname !== '/login') {
+        setNotification({
+          open: true,
+          message: 'Your session has expired. Please log in again.',
+          severity: 'warning'
+        });
+
+        // Redirect to login with expired flag
+        navigate('/login?expired=true');
+      }
+    });
+
+    // Configure session warning
+    sessionManager.onSessionWarning((remainingMinutes) => {
+      setSessionWarning({
+        open: true,
+        remainingTime: Math.ceil(remainingMinutes)
+      });
+    });
+
+    // Initialize session manager
+    sessionManager.initialize();
+
+    // Clean up on unmount
+    return () => {
+      // Any cleanup needed
+    };
+  }, [navigate, location.pathname]);
 
   // Notification helper
   const showNotification = (message, severity = 'success') => {
@@ -98,146 +157,167 @@ const AppRouterContainer = () => {
     navigate('/login');
   };
 
+  // Handle extension of session
+  const handleExtendSession = async () => {
+    setSessionWarning({ ...sessionWarning, open: false });
+
+    // Try to refresh session with a token verification
+    const isValid = await verifyToken();
+
+    if (!isValid) {
+      // If verification fails, handle as session expired
+      handleLogout();
+    }
+  };
+
   return (
     <>
-      <Routes>
-        {/* Public Routes */}
-        <Route path="/login" element={
-          <LoginPage 
-            showNotification={showNotification} 
-          />
-        } />
-        
-        <Route path="/register" element={
-          <RegisterPage 
-            showNotification={showNotification} 
-          />
-        } />
-        
-        {/* Root redirect */}
-        <Route path="/" element={<Navigate to="/dashboard" />} />
-        
-        {/* Protected Routes inside MainLayout */}
-        <Route 
-          path="/" 
-          element={
-            <ProtectedRoute>
-              <MainLayout 
-                onLogout={handleLogout} 
-                showNotification={showNotification}
-              />
-            </ProtectedRoute>
-          }
-        >
-          {/* Dashboard/Apartment List */}
-          <Route path="dashboard" element={
-            <ApartmentList 
-              showNotification={showNotification}
-              onEdit={(apartment) => {
-                setEditingApartment(apartment);
-                navigate(apartment ? '/apartments/edit' : '/apartments/add');
-              }}
-              onGoToPayments={(apartmentId) => {
-                navigate(`/payments/${apartmentId}`);
-              }}
-            />
-          } />
-          
-          {/* Tenants Routes */}
-          <Route path="tenants" element={
-            <TenantsPanel 
-              showNotification={showNotification}
-            />
-          } />
-          
-          <Route path="tenants/:tenantId" element={
-            <TenantDetails 
-              showNotification={showNotification}
-            />
-          } />
-          
-          {/* Payments Route */}
-          <Route path="payments" element={
-            <PaymentScreen 
-              showNotification={showNotification}
-            />
-          } />
-          
-          <Route path="payments/:apartmentId" element={
-            <PaymentScreen 
-              showNotification={showNotification}
-            />
-          } />
-          
-          {/* Admin Only Routes */}
-          <Route path="apartments/add" element={
-            <ProtectedRoute adminOnly={true}>
-              <ApartmentForm 
-                showNotification={showNotification}
-                onSuccess={() => navigate('/dashboard')}
-              />
-            </ProtectedRoute>
-          } />
-          
-          <Route path="apartments/edit" element={
-            <ProtectedRoute adminOnly={true}>
-              <ApartmentForm 
-                isEdit={true}
-                initialData={editingApartment}
-                showNotification={showNotification}
-                onSuccess={() => navigate('/dashboard')}
-              />
-            </ProtectedRoute>
-          } />
-          
-          <Route path="analytics" element={
-            <ProtectedRoute adminOnly={true}>
-              <AnalyticsPanel 
-                showNotification={showNotification}
-              />
-            </ProtectedRoute>
-          } />
-          
-          <Route path="contracts" element={
-            <ProtectedRoute adminOnly={true}>
-              <ContractGenerator 
-                showNotification={showNotification}
-              />
-            </ProtectedRoute>
-          } />
-          
-          <Route path="admin" element={
-            <ProtectedRoute adminOnly={true}>
-              <AdminPanel 
-                showNotification={showNotification}
-              />
-            </ProtectedRoute>
-          } />
-          
-          <Route path="logs" element={
-            <ProtectedRoute adminOnly={true}>
-              <LogsViewer 
-                showNotification={showNotification}
-              />
-            </ProtectedRoute>
-          } />
-        </Route>
-        
-        {/* Catch-all route */}
-        <Route path="*" element={<Navigate to="/dashboard" />} />
-      </Routes>
-      
-      {/* Global notification system */}
-      <Snackbar
-        open={notification.open}
-        autoHideDuration={6000}
-        onClose={() => setNotification({ ...notification, open: false })}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert severity={notification.severity} variant="filled">
-          {notification.message}
-        </Alert>
-      </Snackbar>
+    <Routes>
+    {/* Public Routes */}
+    <Route path="/login" element={
+      <LoginPage
+      showNotification={showNotification}
+      />
+    } />
+
+    <Route path="/register" element={
+      <RegisterPage
+      showNotification={showNotification}
+      />
+    } />
+
+    {/* Root redirect */}
+    <Route path="/" element={<Navigate to="/dashboard" />} />
+
+    {/* Protected Routes inside MainLayout */}
+    <Route
+    path="/"
+    element={
+      <ProtectedRoute>
+      <MainLayout
+      onLogout={handleLogout}
+      showNotification={showNotification}
+      />
+      </ProtectedRoute>
+    }
+    >
+    {/* Dashboard/Apartment List */}
+    <Route path="dashboard" element={
+      <ApartmentList
+      showNotification={showNotification}
+      onEdit={(apartment) => {
+        setEditingApartment(apartment);
+        navigate(apartment ? '/apartments/edit' : '/apartments/add');
+      }}
+      onGoToPayments={(apartmentId) => {
+        navigate(`/payments/${apartmentId}`);
+      }}
+      />
+    } />
+
+    {/* Tenants Routes */}
+    <Route path="tenants" element={
+      <TenantsPanel
+      showNotification={showNotification}
+      />
+    } />
+
+    <Route path="tenants/:tenantId" element={
+      <TenantDetails
+      showNotification={showNotification}
+      />
+    } />
+
+    {/* Payments Route */}
+    <Route path="payments" element={
+      <PaymentScreen
+      showNotification={showNotification}
+      />
+    } />
+
+    <Route path="payments/:apartmentId" element={
+      <PaymentScreen
+      showNotification={showNotification}
+      />
+    } />
+
+    {/* Admin Only Routes */}
+    <Route path="apartments/add" element={
+      <ProtectedRoute adminOnly={true}>
+      <ApartmentForm
+      showNotification={showNotification}
+      onSuccess={() => navigate('/dashboard')}
+      />
+      </ProtectedRoute>
+    } />
+
+    <Route path="apartments/edit" element={
+      <ProtectedRoute adminOnly={true}>
+      <ApartmentForm
+      isEdit={true}
+      initialData={editingApartment}
+      showNotification={showNotification}
+      onSuccess={() => navigate('/dashboard')}
+      />
+      </ProtectedRoute>
+    } />
+
+    <Route path="analytics" element={
+      <ProtectedRoute adminOnly={true}>
+      <AnalyticsPanel
+      showNotification={showNotification}
+      />
+      </ProtectedRoute>
+    } />
+
+    <Route path="contracts" element={
+      <ProtectedRoute adminOnly={true}>
+      <ContractGenerator
+      showNotification={showNotification}
+      />
+      </ProtectedRoute>
+    } />
+
+    <Route path="admin" element={
+      <ProtectedRoute adminOnly={true}>
+      <AdminPanel
+      showNotification={showNotification}
+      />
+      </ProtectedRoute>
+    } />
+
+    <Route path="logs" element={
+      <ProtectedRoute adminOnly={true}>
+      <LogsViewer
+      showNotification={showNotification}
+      />
+      </ProtectedRoute>
+    } />
+    </Route>
+
+    {/* Catch-all route */}
+    <Route path="*" element={<Navigate to="/dashboard" />} />
+    </Routes>
+
+    {/* Session timeout warning dialog */}
+    <SessionTimeoutWarning
+    open={sessionWarning.open}
+    remainingTime={sessionWarning.remainingTime}
+    onExtend={handleExtendSession}
+    onLogout={handleLogout}
+    />
+
+    {/* Global notification system */}
+    <Snackbar
+    open={notification.open}
+    autoHideDuration={6000}
+    onClose={() => setNotification({ ...notification, open: false })}
+    anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+    >
+    <Alert severity={notification.severity} variant="filled">
+    {notification.message}
+    </Alert>
+    </Snackbar>
     </>
   );
 };
@@ -246,9 +326,9 @@ const AppRouterContainer = () => {
 function AppRouter() {
   return (
     <ThemeProvider theme={theme}>
-      <Router>
-        <AppRouterContainer />
-      </Router>
+    <Router>
+    <AppRouterContainer />
+    </Router>
     </ThemeProvider>
   );
 }

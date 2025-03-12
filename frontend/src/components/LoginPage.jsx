@@ -37,13 +37,24 @@ function LoginPage({ showNotification }) {
 
   // Check if there's an expired session message in the URL
   useEffect(() => {
-    const queryParams = new URLSearchParams(location.search);
-    const expired = queryParams.get('expired');
-    
-    if (expired === 'true') {
-      showNotification('Your session has expired. Please log in again.', 'warning');
-    }
+    // Check URL params for the expired session flag
+    const searchParams = new URLSearchParams(location.search);
+    const sessionExpired = searchParams.get('expired') === 'true';
+
+  if (sessionExpired) {
+    showNotification('Your session has expired. Please log in again.', 'warning');
+
+    // Clean URL by removing the expired parameter
+    const newUrl = window.location.pathname;
+    window.history.replaceState({}, document.title, newUrl);
+  }
+
+  // Check for user coming from a protected page
+  if (location.state && location.state.from) {
+    showNotification('Please log in to continue.', 'info');
+  }
   }, [location, showNotification]);
+
 
   const handleChange = (e) => {
     setCredentials({ ...credentials, [e.target.name]: e.target.value });

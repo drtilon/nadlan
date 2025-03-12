@@ -19,6 +19,7 @@ venv/
 ENV/
 *.env
 backend/logs/app.log
+claude.py
 
 # OS Generated Files
 .DS_Store

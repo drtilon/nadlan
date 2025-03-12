@@ -2,35 +2,22 @@
 import axios from 'axios';
 import sessionManager from './SessionManager';
 
+// Define base URL with protocol
+const baseURL = window.location.protocol === 'https:' 
+  ? 'https://localhost:5001/api'  // Use HTTPS if the site is on HTTPS
+  : 'http://localhost:5001/api';  // Use HTTP otherwise
+
 // API service with base URL configuration
 const api = axios.create({
-  baseURL: 'http://localhost:5001/api',
+  baseURL,
   timeout: 10000, // 10 second timeout
   headers: {
     'Content-Type': 'application/json',
   }
 });
 
-// Track failed requests that should be retried after token refresh
-const failedQueue = [];
-
-// Process all requests from the failed queue
-const processQueue = (error = null) => {
-  // If there was an error refreshing the token, reject all requests
-  if (error) {
-    failedQueue.forEach(promise => {
-      promise.reject(error);
-    });
-  } else {
-    // Otherwise, retry each request with the new token
-    failedQueue.forEach(promise => {
-      promise.resolve();
-    });
-  }
-
-  // Clear the queue
-  failedQueue.length = 0;
-};
+// Track if we are currently handling a session expiration
+let isHandlingSessionExpiration = false;
 
 // Request interceptor - runs before each request
 api.interceptors.request.use(
@@ -57,16 +44,25 @@ api.interceptors.response.use(
     return response;
   },
   async (error) => {
-    const originalRequest = error.config;
-
     // If the error is because of an expired token (401 Unauthorized)
-    if (error.response && error.response.status === 401 && !originalRequest._retry) {
-      // Only proceed with session expiry once regardless of how many requests fail
-      // The sessionManager will handle the redirection
-      sessionManager.handleSessionExpired();
-
-      // Reject the original request
-      return Promise.reject(new Error('Session expired'));
+    if (error.response && error.response.status === 401 && !isHandlingSessionExpiration) {
+      // Set the flag to prevent multiple expiration handlers from running
+      isHandlingSessionExpiration = true;
+      
+      try {
+        // Let the session manager handle the expiration
+        sessionManager.handleSessionExpired();
+      } catch (e) {
+        console.error('Error handling session expiration:', e);
+      } finally {
+        // Reset the flag after a delay to prevent immediate re-triggering
+        setTimeout(() => {
+          isHandlingSessionExpiration = false;
+        }, 1000);
+      }
+      
+      // Return a rejected promise with a clear message
+      return Promise.reject(new Error('Your session has expired. Please log in again.'));
     }
 
     // For all other errors, just return the error
@@ -74,33 +70,52 @@ api.interceptors.response.use(
   }
 );
 
-// Set auth token for API requests
+// Set auth token for API requests safely
 export const setAuthToken = (token) => {
-  if (token) {
-    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    localStorage.setItem('token', token);
-    // Reset session timers when token is set
-    sessionManager.resetSessionTimers();
-  } else {
-    delete api.defaults.headers.common['Authorization'];
-    localStorage.removeItem('token');
-    localStorage.removeItem('userData'); // Also clear user data when token is removed
+  try {
+    if (token) {
+      // Store token securely
+      localStorage.setItem('token', token);
+      
+      // Set in axios defaults
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+      
+      // Reset session timers when token is set
+      sessionManager.resetSessionTimers();
+    } else {
+      // Token is null/undefined/empty - clear it
+      localStorage.removeItem('token');
+      delete api.defaults.headers.common['Authorization'];
+      localStorage.removeItem('userData'); // Also clear user data when token is removed
+    }
+  } catch (error) {
+    console.error('Error setting auth token:', error);
+    // If localStorage is not available or throws an error, we'll just continue without storing the token
   }
 };
 
 // Store user data
 export const setUserData = (userData) => {
-  if (userData) {
-    localStorage.setItem('userData', JSON.stringify(userData));
-  } else {
-    localStorage.removeItem('userData');
+  try {
+    if (userData) {
+      localStorage.setItem('userData', JSON.stringify(userData));
+    } else {
+      localStorage.removeItem('userData');
+    }
+  } catch (error) {
+    console.error('Error setting user data:', error);
   }
 };
 
 // Get user data
 export const getUserData = () => {
-  const userData = localStorage.getItem('userData');
-  return userData ? JSON.parse(userData) : null;
+  try {
+    const userData = localStorage.getItem('userData');
+    return userData ? JSON.parse(userData) : null;
+  } catch (error) {
+    console.error('Error getting user data:', error);
+    return null;
+  }
 };
 
 // Check if user is admin
@@ -118,8 +133,6 @@ export const verifyToken = async () => {
     if (error.response && error.response.status === 401) {
       // Token is invalid, clear it
       setAuthToken(null);
-      // Let the session manager handle the expired session
-      sessionManager.handleSessionExpired();
     }
     return false;
   }
@@ -156,13 +169,15 @@ export const apiHelpers = {
   }
 };
 
-// Load token from localStorage on startup
-const token = localStorage.getItem('token');
-if (token) {
-  api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+// Safely load token from localStorage on startup
+try {
+  const token = localStorage.getItem('token');
+  if (token) {
+    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    // Don't initialize session manager here - it will be done elsewhere
+  }
+} catch (error) {
+  console.error('Error loading token from localStorage:', error);
 }
-
-// Initialize session manager
-sessionManager.initialize();
 
 export default api;

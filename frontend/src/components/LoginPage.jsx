@@ -41,19 +41,19 @@ function LoginPage({ showNotification }) {
     const searchParams = new URLSearchParams(location.search);
     const sessionExpired = searchParams.get('expired') === 'true';
 
-  if (sessionExpired) {
-    showNotification('Your session has expired. Please log in again.', 'warning');
+    if (sessionExpired) {
+      showNotification('Your session has expired. Please log in again.', 'warning');
 
-    // Clean URL by removing the expired parameter
-    const newUrl = window.location.pathname;
-    window.history.replaceState({}, document.title, newUrl);
-  }
+      // Clean URL by removing the expired parameter
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+    }
 
-  // Check for user coming from a protected page
-  if (location.state && location.state.from) {
-    showNotification('Please log in to continue.', 'info');
-  }
-  }, [location, showNotification]);
+    // Check for user coming from a protected page
+    if (location.state && location.state.from) {
+      showNotification('Please log in to continue.', 'info');
+    }
+  }, [location.search, location.state, showNotification]);
 
 
   const handleChange = (e) => {
@@ -88,27 +88,32 @@ function LoginPage({ showNotification }) {
       const response = await api.post('/auth/login', credentials);
       
       // Set auth token in axios and localStorage
-      setAuthToken(response.data.access_token);
+      const token = response.data.access_token;
+      if (token) {
+        setAuthToken(token);
 
-      // Store user data
-      let userData = null;
-      if (response.data.user) {
-        userData = response.data.user;
+        // Store user data
+        let userData = null;
+        if (response.data.user) {
+          userData = response.data.user;
+        } else {
+          userData = {
+            username: credentials.username,
+            role: 'admin' // Default role for backward compatibility
+          };
+        }
+
+        // Save user data to localStorage
+        setUserData(userData);
+        
+        // Show success notification
+        showNotification('Login successful', 'success');
+        
+        // Navigate to the protected route (or dashboard by default)
+        navigate(from, { replace: true });
       } else {
-        userData = {
-          username: credentials.username,
-          role: 'admin' // Default role for backward compatibility
-        };
+        throw new Error('No token received from server');
       }
-
-      // Save user data to localStorage
-      setUserData(userData);
-      
-      // Show success notification
-      showNotification('Login successful', 'success');
-      
-      // Navigate to the protected route (or dashboard by default)
-      navigate(from, { replace: true });
       
     } catch (error) {
       console.error(error);

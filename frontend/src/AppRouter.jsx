@@ -1,5 +1,5 @@
 // src/AppRouter.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Box, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 import { ThemeProvider } from '@mui/material/styles';
@@ -29,39 +29,52 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
   const [isAuthorized, setIsAuthorized] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
+  const authCheckInProgress = useRef(false);
 
   useEffect(() => {
     const checkAuth = async () => {
-      // Check if token exists and is valid
-      const token = localStorage.getItem('token');
+      // Prevent multiple simultaneous auth checks
+      if (authCheckInProgress.current) return;
+      authCheckInProgress.current = true;
+      
+      try {
+        // Check if token exists
+        const token = localStorage.getItem('token');
 
-      if (!token) {
+        if (!token) {
+          setIsAuthenticated(false);
+          authCheckInProgress.current = false;
+          return;
+        }
+
+        // Verify token with backend
+        const isValid = await verifyToken();
+        setIsAuthenticated(isValid);
+
+        // Check authorization for admin routes
+        if (isValid && adminOnly) {
+          const userData = getUserData();
+          const isAdmin = userData && userData.role === 'admin';
+          setIsAuthorized(isAdmin);
+        } else {
+          setIsAuthorized(true);
+        }
+      } catch (error) {
+        console.error('Auth verification error:', error);
         setIsAuthenticated(false);
-        return;
-      }
-
-      // Verify token with backend
-      const isValid = await verifyToken();
-      setIsAuthenticated(isValid);
-
-      // Check authorization for admin routes
-      if (isValid && adminOnly) {
-        const userData = getUserData();
-        const isAdmin = userData && userData.role === 'admin';
-        setIsAuthorized(isAdmin);
-      } else {
-        setIsAuthorized(true);
+      } finally {
+        authCheckInProgress.current = false;
       }
     };
 
     checkAuth();
-  }, [adminOnly, location.pathname]);
+  }, [adminOnly]);
 
   // Show loading while checking authentication
   if (isAuthenticated === null || isAuthorized === null) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-      <CircularProgress />
+        <CircularProgress />
       </Box>
     );
   }
@@ -84,15 +97,15 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
 const SessionTimeoutWarning = ({ open, onExtend, onLogout, remainingTime }) => {
   return (
     <Dialog open={open} onClose={onExtend}>
-    <DialogTitle>Session About to Expire</DialogTitle>
-    <DialogContent>
-    Your session will expire in {remainingTime} minute(s).
-    Would you like to extend your session or logout now?
-    </DialogContent>
-    <DialogActions>
-    <Button onClick={onLogout} color="secondary">Logout</Button>
-    <Button onClick={onExtend} color="primary" variant="contained">Extend Session</Button>
-    </DialogActions>
+      <DialogTitle>Session About to Expire</DialogTitle>
+      <DialogContent>
+        Your session will expire in {remainingTime} minute(s).
+        Would you like to extend your session or logout now?
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onLogout} color="secondary">Logout</Button>
+        <Button onClick={onExtend} color="primary" variant="contained">Extend Session</Button>
+      </DialogActions>
     </Dialog>
   );
 };
@@ -104,16 +117,19 @@ const AppRouterContainer = () => {
   const [sessionWarning, setSessionWarning] = useState({ open: false, remainingTime: 5 });
   const navigate = useNavigate();
   const location = useLocation();
+  const sessionHandlersSetup = useRef(false);
 
-  // Setup session management
+  // Setup session management - only run once
   useEffect(() => {
+    // Avoid setting up multiple times
+    if (sessionHandlersSetup.current) return;
+    sessionHandlersSetup.current = true;
+    
     // Configure session manager to handle expiration
     sessionManager.onSessionExpired(() => {
       // Clear data
       setAuthToken(null);
-      localStorage.removeItem('token');
-      localStorage.removeItem('userData');
-
+      
       // Show notification if not already on the login page
       if (location.pathname !== '/login') {
         setNotification({
@@ -123,7 +139,7 @@ const AppRouterContainer = () => {
         });
 
         // Redirect to login with expired flag
-        navigate('/login?expired=true');
+        navigate('/login?expired=true', { replace: true });
       }
     });
 
@@ -142,23 +158,21 @@ const AppRouterContainer = () => {
     return () => {
       // Any cleanup needed
     };
-  }, [navigate, location.pathname]);
+  }, []);
 
   // Notification helper
-  const showNotification = (message, severity = 'success') => {
+  const showNotification = useCallback((message, severity = 'success') => {
     setNotification({ open: true, message, severity });
-  };
+  }, []);
 
   // Handler for logout
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     setAuthToken(null);
-    localStorage.removeItem('token');
-    localStorage.removeItem('userData');
-    navigate('/login');
-  };
+    navigate('/login', { replace: true });
+  }, [navigate]);
 
   // Handle extension of session
-  const handleExtendSession = async () => {
+  const handleExtendSession = useCallback(async () => {
     setSessionWarning({ ...sessionWarning, open: false });
 
     // Try to refresh session with a token verification
@@ -168,156 +182,156 @@ const AppRouterContainer = () => {
       // If verification fails, handle as session expired
       handleLogout();
     }
-  };
+  }, [sessionWarning, handleLogout]);
 
   return (
     <>
-    <Routes>
-    {/* Public Routes */}
-    <Route path="/login" element={
-      <LoginPage
-      showNotification={showNotification}
+      <Routes>
+        {/* Public Routes */}
+        <Route path="/login" element={
+          <LoginPage
+            showNotification={showNotification}
+          />
+        } />
+
+        <Route path="/register" element={
+          <RegisterPage
+            showNotification={showNotification}
+          />
+        } />
+
+        {/* Root redirect */}
+        <Route path="/" element={<Navigate to="/dashboard" />} />
+
+        {/* Protected Routes inside MainLayout */}
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <MainLayout
+                onLogout={handleLogout}
+                showNotification={showNotification}
+              />
+            </ProtectedRoute>
+          }
+        >
+          {/* Dashboard/Apartment List */}
+          <Route path="dashboard" element={
+            <ApartmentList
+              showNotification={showNotification}
+              onEdit={(apartment) => {
+                setEditingApartment(apartment);
+                navigate(apartment ? '/apartments/edit' : '/apartments/add');
+              }}
+              onGoToPayments={(apartmentId) => {
+                navigate(`/payments/${apartmentId}`);
+              }}
+            />
+          } />
+
+          {/* Tenants Routes */}
+          <Route path="tenants" element={
+            <TenantsPanel
+              showNotification={showNotification}
+            />
+          } />
+
+          <Route path="tenants/:tenantId" element={
+            <TenantDetails
+              showNotification={showNotification}
+            />
+          } />
+
+          {/* Payments Route */}
+          <Route path="payments" element={
+            <PaymentScreen
+              showNotification={showNotification}
+            />
+          } />
+
+          <Route path="payments/:apartmentId" element={
+            <PaymentScreen
+              showNotification={showNotification}
+            />
+          } />
+
+          {/* Admin Only Routes */}
+          <Route path="apartments/add" element={
+            <ProtectedRoute adminOnly={true}>
+              <ApartmentForm
+                showNotification={showNotification}
+                onSuccess={() => navigate('/dashboard')}
+              />
+            </ProtectedRoute>
+          } />
+
+          <Route path="apartments/edit" element={
+            <ProtectedRoute adminOnly={true}>
+              <ApartmentForm
+                isEdit={true}
+                initialData={editingApartment}
+                showNotification={showNotification}
+                onSuccess={() => navigate('/dashboard')}
+              />
+            </ProtectedRoute>
+          } />
+
+          <Route path="analytics" element={
+            <ProtectedRoute adminOnly={true}>
+              <AnalyticsPanel
+                showNotification={showNotification}
+              />
+            </ProtectedRoute>
+          } />
+
+          <Route path="contracts" element={
+            <ProtectedRoute adminOnly={true}>
+              <ContractGenerator
+                showNotification={showNotification}
+              />
+            </ProtectedRoute>
+          } />
+
+          <Route path="admin" element={
+            <ProtectedRoute adminOnly={true}>
+              <AdminPanel
+                showNotification={showNotification}
+              />
+            </ProtectedRoute>
+          } />
+
+          <Route path="logs" element={
+            <ProtectedRoute adminOnly={true}>
+              <LogsViewer
+                showNotification={showNotification}
+              />
+            </ProtectedRoute>
+          } />
+        </Route>
+
+        {/* Catch-all route */}
+        <Route path="*" element={<Navigate to="/dashboard" />} />
+      </Routes>
+
+      {/* Session timeout warning dialog */}
+      <SessionTimeoutWarning
+        open={sessionWarning.open}
+        remainingTime={sessionWarning.remainingTime}
+        onExtend={handleExtendSession}
+        onLogout={handleLogout}
       />
-    } />
 
-    <Route path="/register" element={
-      <RegisterPage
-      showNotification={showNotification}
-      />
-    } />
-
-    {/* Root redirect */}
-    <Route path="/" element={<Navigate to="/dashboard" />} />
-
-    {/* Protected Routes inside MainLayout */}
-    <Route
-    path="/"
-    element={
-      <ProtectedRoute>
-      <MainLayout
-      onLogout={handleLogout}
-      showNotification={showNotification}
-      />
-      </ProtectedRoute>
-    }
-    >
-    {/* Dashboard/Apartment List */}
-    <Route path="dashboard" element={
-      <ApartmentList
-      showNotification={showNotification}
-      onEdit={(apartment) => {
-        setEditingApartment(apartment);
-        navigate(apartment ? '/apartments/edit' : '/apartments/add');
-      }}
-      onGoToPayments={(apartmentId) => {
-        navigate(`/payments/${apartmentId}`);
-      }}
-      />
-    } />
-
-    {/* Tenants Routes */}
-    <Route path="tenants" element={
-      <TenantsPanel
-      showNotification={showNotification}
-      />
-    } />
-
-    <Route path="tenants/:tenantId" element={
-      <TenantDetails
-      showNotification={showNotification}
-      />
-    } />
-
-    {/* Payments Route */}
-    <Route path="payments" element={
-      <PaymentScreen
-      showNotification={showNotification}
-      />
-    } />
-
-    <Route path="payments/:apartmentId" element={
-      <PaymentScreen
-      showNotification={showNotification}
-      />
-    } />
-
-    {/* Admin Only Routes */}
-    <Route path="apartments/add" element={
-      <ProtectedRoute adminOnly={true}>
-      <ApartmentForm
-      showNotification={showNotification}
-      onSuccess={() => navigate('/dashboard')}
-      />
-      </ProtectedRoute>
-    } />
-
-    <Route path="apartments/edit" element={
-      <ProtectedRoute adminOnly={true}>
-      <ApartmentForm
-      isEdit={true}
-      initialData={editingApartment}
-      showNotification={showNotification}
-      onSuccess={() => navigate('/dashboard')}
-      />
-      </ProtectedRoute>
-    } />
-
-    <Route path="analytics" element={
-      <ProtectedRoute adminOnly={true}>
-      <AnalyticsPanel
-      showNotification={showNotification}
-      />
-      </ProtectedRoute>
-    } />
-
-    <Route path="contracts" element={
-      <ProtectedRoute adminOnly={true}>
-      <ContractGenerator
-      showNotification={showNotification}
-      />
-      </ProtectedRoute>
-    } />
-
-    <Route path="admin" element={
-      <ProtectedRoute adminOnly={true}>
-      <AdminPanel
-      showNotification={showNotification}
-      />
-      </ProtectedRoute>
-    } />
-
-    <Route path="logs" element={
-      <ProtectedRoute adminOnly={true}>
-      <LogsViewer
-      showNotification={showNotification}
-      />
-      </ProtectedRoute>
-    } />
-    </Route>
-
-    {/* Catch-all route */}
-    <Route path="*" element={<Navigate to="/dashboard" />} />
-    </Routes>
-
-    {/* Session timeout warning dialog */}
-    <SessionTimeoutWarning
-    open={sessionWarning.open}
-    remainingTime={sessionWarning.remainingTime}
-    onExtend={handleExtendSession}
-    onLogout={handleLogout}
-    />
-
-    {/* Global notification system */}
-    <Snackbar
-    open={notification.open}
-    autoHideDuration={6000}
-    onClose={() => setNotification({ ...notification, open: false })}
-    anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-    >
-    <Alert severity={notification.severity} variant="filled">
-    {notification.message}
-    </Alert>
-    </Snackbar>
+      {/* Global notification system */}
+      <Snackbar
+        open={notification.open}
+        autoHideDuration={6000}
+        onClose={() => setNotification({ ...notification, open: false })}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity={notification.severity} variant="filled">
+          {notification.message}
+        </Alert>
+      </Snackbar>
     </>
   );
 };
@@ -326,9 +340,9 @@ const AppRouterContainer = () => {
 function AppRouter() {
   return (
     <ThemeProvider theme={theme}>
-    <Router>
-    <AppRouterContainer />
-    </Router>
+      <Router>
+        <AppRouterContainer />
+      </Router>
     </ThemeProvider>
   );
 }

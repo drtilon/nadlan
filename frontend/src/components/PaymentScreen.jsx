@@ -1,5 +1,6 @@
 // components/PaymentScreen.jsx
 import React, { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
 import {
   Paper,
   Typography,
@@ -76,9 +77,10 @@ const STATUS_COLORS = {
 };
 
 function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
+  const {apartmentId} = useParams();
   const theme = useTheme();
   // Use the initialApartment prop (if provided) as the default selection
-  const [selectedApartment, setSelectedApartment] = useState(initialApartment || '');
+  const [selectedApartment, setSelectedApartment] = useState(apartmentId || '');
   const [apartments, setApartments] = useState([]);
   const [paymentData, setPaymentData] = useState({});
   const [apartmentDetails, setApartmentDetails] = useState(null);

@@ -18,6 +18,8 @@ const api = axios.create({
 
 // Track if we are currently handling a session expiration
 let isHandlingSessionExpiration = false;
+// Debounce the expiration handling to prevent multiple expiry alerts
+let expirationDebounceTimer = null;
 
 // Request interceptor - runs before each request
 api.interceptors.request.use(
@@ -40,26 +42,37 @@ api.interceptors.request.use(
 // Response interceptor - runs after each response
 api.interceptors.response.use(
   (response) => {
-    // Successful response handler
+    // Successful response handler - reset the flag after successful calls
+    isHandlingSessionExpiration = false;
     return response;
   },
   async (error) => {
+    // Network errors should not trigger session expiration
+    if (!error.response) {
+      return Promise.reject(error);
+    }
+    
     // If the error is because of an expired token (401 Unauthorized)
-    if (error.response && error.response.status === 401 && !isHandlingSessionExpiration) {
-      // Set the flag to prevent multiple expiration handlers from running
-      isHandlingSessionExpiration = true;
-      
-      try {
-        // Let the session manager handle the expiration
-        sessionManager.handleSessionExpired();
-      } catch (e) {
-        console.error('Error handling session expiration:', e);
-      } finally {
-        // Reset the flag after a delay to prevent immediate re-triggering
-        setTimeout(() => {
-          isHandlingSessionExpiration = false;
-        }, 1000);
+    if (error.response && error.response.status === 401) {
+      // Clear any pending debounce timers
+      if (expirationDebounceTimer) {
+        clearTimeout(expirationDebounceTimer);
       }
+      
+      // Use debounce to prevent multiple rapid expiration handlers
+      expirationDebounceTimer = setTimeout(() => {
+        if (!isHandlingSessionExpiration) {
+          // Set the flag to prevent multiple expiration handlers from running
+          isHandlingSessionExpiration = true;
+          
+          try {
+            // Let the session manager handle the expiration
+            sessionManager.handleSessionExpired();
+          } catch (e) {
+            console.error('Error handling session expiration:', e);
+          }
+        }
+      }, 1000); // 1 second debounce
       
       // Return a rejected promise with a clear message
       return Promise.reject(new Error('Your session has expired. Please log in again.'));
@@ -82,6 +95,13 @@ export const setAuthToken = (token) => {
       
       // Reset session timers when token is set
       sessionManager.resetSessionTimers();
+      
+      // Reset the expiration handling flags
+      isHandlingSessionExpiration = false;
+      if (expirationDebounceTimer) {
+        clearTimeout(expirationDebounceTimer);
+        expirationDebounceTimer = null;
+      }
     } else {
       // Token is null/undefined/empty - clear it
       localStorage.removeItem('token');
@@ -124,10 +144,12 @@ export const isAdmin = () => {
   return userData && userData.role === 'admin';
 };
 
-// Check if token is valid by making a verification request
+// Check if token is valid by making a verification request with a longer timeout
 export const verifyToken = async () => {
   try {
-    await api.get('/auth/verify');
+    await api.get('/auth/verify', { timeout: 5000 }); // 5-second timeout
+    // Reset expiration flag on successful verification
+    isHandlingSessionExpiration = false;
     return true;
   } catch (error) {
     if (error.response && error.response.status === 401) {

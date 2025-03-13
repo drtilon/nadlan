@@ -9,10 +9,10 @@ class SessionManager {
         this.refreshCallbacks = [];
         this.sessionCheckerInterval = null;
 
-        // Session timer config
-        this.tokenExpiryMinutes = 60; // Adjust based on your JWT expiry time
-        this.warningThresholdMinutes = 5; // Show warning 5 minutes before expiry
-        this.inactivityTimeoutMinutes = 65; // Logout after inactivity (should be slightly longer than token expiry)
+        // Session timer config - INCREASED TIMES
+        this.tokenExpiryMinutes = 1440; // Increased to 24 hours to match server config
+        this.warningThresholdMinutes = 30; // Show warning 30 minutes before expiry
+        this.inactivityTimeoutMinutes = 1500; // Logout after 25 hours of inactivity
 
         // Track user activity
         this.lastActivityTime = Date.now();
@@ -73,10 +73,10 @@ class SessionManager {
             clearInterval(this.sessionCheckerInterval);
         }
 
-        // Check session every minute
+        // Check session every 15 minutes instead of every minute
         this.sessionCheckerInterval = setInterval(() => {
             this.checkAndRefreshSession();
-        }, 60000); // Check every minute
+        }, 15 * 60 * 1000); // Check every 15 minutes
     }
 
     // Reset all session timers when a new token is set
@@ -113,6 +113,11 @@ class SessionManager {
             const expiryTime = this.calculateTokenExpiry(token);
             const timeToExpiry = (expiryTime - Date.now()) / (1000 * 60);
             
+            // Don't check too frequently - only if we're within warning threshold or forced
+            if (timeToExpiry > this.warningThresholdMinutes && !forceCheck) {
+                return; // Skip validation for tokens that aren't close to expiring
+            }
+            
             // Check if it's time to show warning
             if (timeToExpiry <= this.warningThresholdMinutes && !this.isSessionExpired && this.onSessionWarningCallback) {
                 this.onSessionWarningCallback(timeToExpiry);
@@ -125,6 +130,7 @@ class SessionManager {
             }
         } catch (e) {
             // If we can't parse the token, fall back to verification
+            console.log("Couldn't parse token expiry, falling back to API verification");
         }
 
         // Only do token validation if forced or not expired yet
@@ -146,7 +152,12 @@ class SessionManager {
             } catch (error) {
                 this.isRefreshing = false;
                 console.error('Session verification error:', error);
-                // Consider the session expired on error
+                // Don't consider session expired on network errors
+                if (error.message && error.message.includes('Network Error')) {
+                    console.log('Network error during verification - keeping session active');
+                    return;
+                }
+                // Consider the session expired on other errors
                 this.handleSessionExpired();
             }
         }
@@ -173,19 +184,32 @@ class SessionManager {
     // Verify token with the server
     async verifyToken() {
         try {
+            // Get the base URL from current window location
+            const baseUrl = window.location.protocol === 'https:' 
+                ? 'https://localhost:5001/api'
+                : 'http://localhost:5001/api';
+                
             // Use a new instance to avoid interference with interceptors
             const api = axios.create({
-                baseURL: 'http://localhost:5001/api',
+                baseURL: baseUrl,
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('token')}`
-                }
+                },
+                timeout: 5000 // 5-second timeout to prevent hanging
             });
 
             await api.get('/auth/verify');
             return true;
         } catch (error) {
-            // Token verification failed
-            return false;
+            if (error.response) {
+                // Got a response from server
+                if (error.response.status === 401) {
+                    // Token is invalid
+                    return false;
+                }
+            }
+            // For network errors or other issues, throw so we can decide later
+            throw error;
         }
     }
 

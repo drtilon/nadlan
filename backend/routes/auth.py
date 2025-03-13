@@ -19,6 +19,7 @@ def token_required(f):
         if not token:
             return jsonify({"message": "Token is missing!"}), 401
         try:
+            # Use the HS256 algorithm explicitly
             decoded = jwt.decode(
                 token, current_app.config["SECRET_KEY"], algorithms=["HS256"]
             )
@@ -51,10 +52,14 @@ def role_required(required_role):
     return decorator
 
 
-def create_token(username, role, expiration_hours):
+def create_token(username, role, expiration_hours=None):
     """
     Helper function to create a JWT with the given username, role, and expiration.
     """
+    if expiration_hours is None:
+        # Get token expiration from application config, default to 24 hours
+        expiration_hours = current_app.config.get("TOKEN_EXPIRATION", 24)
+
     payload = {
         "sub": username,
         "role": role,

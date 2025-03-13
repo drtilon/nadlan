@@ -13,7 +13,9 @@ class Config:
     }
 
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev_secret_key_change_in_production")
-    TOKEN_EXPIRATION = 24  # hours
+    TOKEN_EXPIRATION = (
+        24  # hours - was already set to 24 hours but not being used in auth.py
+    )
 
     SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:3306/{DB_CONFIG['database']}"
     # SQLALCHEMY_ECHO = True

@@ -1,6 +1,6 @@
 # routes/auth_routes.py
 import os
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import create_access_token, create_refresh_token
 from flask_limiter import Limiter
@@ -38,11 +38,14 @@ def login():
     if user and bcrypt.check_password_hash(user.password, password):
         role = user.role  # Retrieve role from database
 
-        # Generate JWT tokens
+        # Get token expiration time from config (in hours)
+        token_expiration_hours = current_app.config.get("TOKEN_EXPIRATION", 24)
+
+        # Generate JWT tokens with the proper expiration time
         access_token = create_access_token(
             identity=username,
             additional_claims={"role": role},
-            expires_delta=timedelta(hours=1),
+            expires_delta=timedelta(hours=token_expiration_hours),  # Use config value
         )
         refresh_token = create_refresh_token(identity=username)
 
@@ -51,8 +54,16 @@ def login():
                 "message": "Login successful",
                 "access_token": access_token,
                 "refresh_token": refresh_token,
+                "user": {
+                    "username": username,
+                    "role": role,
+                    "id": user.id,
+                    "is_approved": user.is_approved,
+                },
             }
         ), 200
+
+    return jsonify({"message": "Invalid username or password"}), 401
 
 
 @auth_bp.route("/register", methods=["POST"])

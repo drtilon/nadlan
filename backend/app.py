@@ -70,6 +70,9 @@ def create_app():
         try:
             with app.app_context():
                 wait_for_mysql(app)
+                from initalized.init_apartment import ensure_db_schema
+
+                ensure_db_schema()
                 ensure_admin_user_exists()
                 ensure_default_apartment_exists()
                 ensure_new_apartment_exists()

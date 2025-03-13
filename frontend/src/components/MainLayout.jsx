@@ -17,7 +17,8 @@ import {
   Box,
   useMediaQuery,
   useTheme,
-  Container
+  Container,
+  Button
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import HomeIcon from '@mui/icons-material/Home';
@@ -69,6 +70,11 @@ function MainLayout({ onLogout, showNotification }) {
   const navigateTo = (path) => {
     navigate(`/${path}`);
     setDrawerOpen(false);
+  };
+
+  // Handle navigate to dashboard when clicking on app title
+  const handleTitleClick = () => {
+    navigate('/dashboard');
   };
 
   // Sidebar navigation for mobile
@@ -136,7 +142,19 @@ function MainLayout({ onLogout, showNotification }) {
             </IconButton>
           )}
 
-          <Typography variant="h6" sx={{ flexGrow: 1, direction: 'ltr' }}>
+          {/* Make the title clickable to navigate to dashboard */}
+          <Typography
+            variant="h6"
+            sx={{
+              flexGrow: 1,
+              direction: 'ltr',
+              cursor: 'pointer',
+              '&:hover': {
+                opacity: 0.85
+              }
+            }}
+            onClick={handleTitleClick}
+          >
             Apartment Rental Management
           </Typography>
 

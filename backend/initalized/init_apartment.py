@@ -1,7 +1,45 @@
-from models.models import Apartment, Tenant, User
+from models.models import Apartment, Tenant, User, Payment
 from extentions import db
 from flask import current_app
-from datetime import date
+from datetime import date, datetime
+from sqlalchemy import inspect, text
+
+
+def ensure_db_schema():
+    """Ensure that the database schema matches our model definitions."""
+    try:
+        inspector = inspect(db.engine)
+
+        # Check payments table columns
+        if "payments" in inspector.get_table_names():
+            existing_columns = [
+                col["name"] for col in inspector.get_columns("payments")
+            ]
+
+            # Define required columns that might be missing
+            required_columns = {
+                "paymentDate": "DATETIME NULL",
+                "paymentMethod": 'VARCHAR(50) NULL DEFAULT "bank_transfer"',
+                "extraPayments": "TEXT NULL",
+                "notes": "TEXT NULL",
+                "year": "INT NULL",
+            }
+
+            # Add missing columns
+            for column_name, column_type in required_columns.items():
+                if column_name not in existing_columns:
+                    sql = f"ALTER TABLE payments ADD COLUMN {column_name} {column_type}"
+                    db.engine.execute(text(sql))
+                    current_app.logger.info(
+                        f"Added missing column '{column_name}' to payments table"
+                    )
+
+        # Make sure the database tables exist
+        db.create_all()
+        current_app.logger.info("Database schema check completed")
+
+    except Exception as e:
+        current_app.logger.error(f"Error ensuring database schema: {e}")
 
 
 def ensure_default_apartment_exists(new_tenants_data=None):
@@ -34,6 +72,9 @@ def ensure_default_apartment_exists(new_tenants_data=None):
         db.session.add(default_apartment)
         db.session.commit()
         current_app.logger.info("Default apartment created.")
+
+        # Initialize monthly payment records with all required fields
+        initialize_payment_records(default_apartment.id)
     else:
         current_app.logger.info("Default apartment already exists.")
         updated = False
@@ -150,6 +191,9 @@ def ensure_new_apartment_exists(new_tenants_data=None):
         db.session.add(new_apartment)
         db.session.commit()
         current_app.logger.info("New apartment created.")
+
+        # Initialize monthly payment records with all required fields
+        initialize_payment_records(new_apartment.id)
     else:
         current_app.logger.info("New apartment already exists.")
         updated = False
@@ -232,3 +276,52 @@ def ensure_new_apartment_exists(new_tenants_data=None):
             )
         else:
             current_app.logger.info("New apartment already has four or more tenants.")
+
+
+def initialize_payment_records(apartment_id):
+    """Initialize monthly payment records for a new apartment with all required fields."""
+    month_list = [
+        "January",
+        "February",
+        "March",
+        "April",
+        "May",
+        "June",
+        "July",
+        "August",
+        "September",
+        "October",
+        "November",
+        "December",
+    ]
+
+    current_year = datetime.utcnow().year
+
+    for month in month_list:
+        # Check if payment record already exists
+        existing_payment = Payment.query.filter_by(
+            apartment_id=apartment_id, month=month
+        ).first()
+
+        if not existing_payment:
+            payment = Payment(
+                apartment_id=apartment_id,
+                month=month,
+                status="not_paid",
+                tenants="[]",  # Empty JSON array
+                internet=0.0,
+                electricity=0.0,
+                other=0.0,
+                updated_at=datetime.utcnow(),
+                paymentDate=None,
+                paymentMethod="bank_transfer",
+                extraPayments="{}",  # Empty JSON object
+                notes="",
+                year=current_year,
+            )
+            db.session.add(payment)
+
+    db.session.commit()
+    current_app.logger.info(
+        f"Initialized payment records for apartment ID {apartment_id}"
+    )

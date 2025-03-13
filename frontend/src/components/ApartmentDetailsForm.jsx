@@ -137,111 +137,112 @@ const ApartmentDetailsForm = ({
             </Typography>
             {tenantSelection}
           </Grid>
+          {isAdmin && (
+            <>
+              {/* Landlord Details */}
+              <Grid item xs={12} sx={{ mt: 2 }}>
+                <SectionTitle
+                  icon={<BusinessIcon sx={{ color: 'grey.700' }} />}
+                  title="Landlord Details"
+                />
+              </Grid>
 
-          {/* Landlord Details */}
-          <Grid item xs={12} sx={{ mt: 2 }}>
-            <SectionTitle
-              icon={<BusinessIcon sx={{ color: 'grey.700' }} />}
-              title="Landlord Details"
-            />
-          </Grid>
+              <Grid item xs={12} sm={6}>
+                <Box>
+                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord Company Name *</Typography>
+                  <TextField
+                    fullWidth
+                    name="landlordCompanyName"
+                    value={formData.landlordCompanyName}
+                    onChange={(e) => handleChange(e)}
+                    required
+                    variant="outlined"
+                    InputLabelProps={{ shrink: true }}
+                    placeholder="Enter company name"
+                  />
+                </Box>
+              </Grid>
 
-          <Grid item xs={12} sm={6}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Landlord Company Name *</Typography>
-              <TextField
-                fullWidth
-                name="landlordCompanyName"
-                value={formData.landlordCompanyName}
-                onChange={(e) => handleChange(e)}
-                required
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="Enter company name"
-              />
-            </Box>
-          </Grid>
+              <Grid item xs={12} sm={6}>
+                <Box>
+                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord Name *</Typography>
+                  <TextField
+                    fullWidth
+                    name="landlordName"
+                    value={formData.landlordName}
+                    onChange={(e) => handleChange(e)}
+                    required
+                    variant="outlined"
+                    InputLabelProps={{ shrink: true }}
+                    placeholder="Enter landlord name"
+                  />
+                </Box>
+              </Grid>
 
-          <Grid item xs={12} sm={6}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Landlord Name *</Typography>
-              <TextField
-                fullWidth
-                name="landlordName"
-                value={formData.landlordName}
-                onChange={(e) => handleChange(e)}
-                required
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="Enter landlord name"
-              />
-            </Box>
-          </Grid>
+              <Grid item xs={12} sm={6}>
+                <Box>
+                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord Company Address *</Typography>
+                  <TextField
+                    fullWidth
+                    name="landlordCompanyAddress"
+                    value={formData.landlordCompanyAddress}
+                    onChange={(e) => handleChange(e)}
+                    required
+                    variant="outlined"
+                    InputLabelProps={{ shrink: true }}
+                    placeholder="Enter company address"
+                  />
+                </Box>
+              </Grid>
 
-          <Grid item xs={12} sm={6}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Landlord Company Address *</Typography>
-              <TextField
-                fullWidth
-                name="landlordCompanyAddress"
-                value={formData.landlordCompanyAddress}
-                onChange={(e) => handleChange(e)}
-                required
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="Enter company address"
-              />
-            </Box>
-          </Grid>
+              <Grid item xs={12} sm={6}>
+                <Box>
+                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord IBAN *</Typography>
+                  <TextField
+                    fullWidth
+                    name="landlordIban"
+                    value={formData.landlordIban}
+                    onChange={(e) => handleChange(e)}
+                    required
+                    variant="outlined"
+                    InputLabelProps={{ shrink: true }}
+                    placeholder="Enter IBAN"
+                  />
+                </Box>
+              </Grid>
 
-          <Grid item xs={12} sm={6}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Landlord IBAN *</Typography>
-              <TextField
-                fullWidth
-                name="landlordIban"
-                value={formData.landlordIban}
-                onChange={(e) => handleChange(e)}
-                required
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="Enter IBAN"
-              />
-            </Box>
-          </Grid>
+              <Grid item xs={12} sm={6}>
+                <Box>
+                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord Email *</Typography>
+                  <TextField
+                    fullWidth
+                    type="email"
+                    name="landlordEmail"
+                    value={formData.landlordEmail}
+                    onChange={(e) => handleChange(e)}
+                    required
+                    variant="outlined"
+                    InputLabelProps={{ shrink: true }}
+                    placeholder="Enter landlord email"
+                  />
+                </Box>
+              </Grid>
 
-          <Grid item xs={12} sm={6}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Landlord Email *</Typography>
-              <TextField
-                fullWidth
-                type="email"
-                name="landlordEmail"
-                value={formData.landlordEmail}
-                onChange={(e) => handleChange(e)}
-                required
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="Enter landlord email"
-              />
-            </Box>
-          </Grid>
-
-          <Grid item xs={12} sm={6}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Landlord Phone *</Typography>
-              <TextField
-                fullWidth
-                name="landlordPhone"
-                value={formData.landlordPhone}
-                onChange={(e) => handleChange(e)}
-                required
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="Enter landlord phone"
-              />
-            </Box>
-          </Grid>
+              <Grid item xs={12} sm={6}>
+                <Box>
+                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord Phone *</Typography>
+                  <TextField
+                    fullWidth
+                    name="landlordPhone"
+                    value={formData.landlordPhone}
+                    onChange={(e) => handleChange(e)}
+                    required
+                    variant="outlined"
+                    InputLabelProps={{ shrink: true }}
+                    placeholder="Enter landlord phone"
+                  />
+                </Box>
+              </Grid></>)}
 
           {/* Contract Details */}
           <Grid item xs={12} sx={{ mt: 2 }}>

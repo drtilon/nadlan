@@ -65,7 +65,7 @@ function AuthenticatedApp({
 
   // If non-admin user tries to access admin-only views, redirect to list view
   useEffect(() => {
-    const adminOnlyViews = ['add', 'edit', 'admin', 'analytics', 'contracts', 'logs'];
+    const adminOnlyViews = [ 'admin', 'analytics', 'contracts', 'logs'];
     if (!userIsAdmin && adminOnlyViews.includes(activeView)) {
       setActiveView('list');
       showNotification('You do not have permission to access this area', 'error');

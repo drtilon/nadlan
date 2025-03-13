@@ -1,4 +1,4 @@
-// Updated ApartmentForm.jsx
+// Modified ApartmentForm.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Paper,
@@ -12,9 +12,8 @@ import {
 } from '@mui/material';
 import { Person as PersonIcon } from '@mui/icons-material';
 import api from '../utils/api';
-import ModelSelection from './ModelSelection';
 import ApartmentDetailsForm from './ApartmentDetailsForm';
-import { getUserData } from '../utils/api'; // Import to get user data
+import { getUserData } from '../utils/api';
 
 function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotification }) {
   // Get user data to check if admin
@@ -35,7 +34,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     notes: '',
     IBAN: '',
     status: '', // Set empty string as default to avoid validation errors
-    model: '',
+    model: 'management', // Default model is management, but will be hidden from non-admin users
     managementFee: 0,
     rentCost: 0
   };
@@ -50,7 +49,6 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
 
   const [formData, setFormData] = useState(cleanedInitialData);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [modelChosen, setModelChosen] = useState(isEdit ? true : false);
   const [availableTenants, setAvailableTenants] = useState([]);
   const [loading, setLoading] = useState(false);
 
@@ -274,12 +272,6 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     }
   };
 
-  // Select management model
-  const chooseModel = (modelType) => {
-    setFormData({ ...formData, model: modelType });
-    setModelChosen(true);
-  };
-
   // Generate tenant display name
   const getTenantDisplayName = (tenant) => {
     if (tenant.firstName && tenant.lastName) {
@@ -379,30 +371,12 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     )
   };
 
-  // If user is not admin and trying to create a new apartment, show appropriate message
-  if (!isAdmin && !isEdit) {
-    return (
-      <Paper sx={{ p: 4, mb: 4 }}>
-        <Typography variant="h5" gutterBottom align="center">
-          Access Restricted
-        </Typography>
-        <Typography variant="body1" align="center" sx={{ mt: 2 }}>
-          Only administrators can create new apartments. Please contact your administrator for assistance.
-        </Typography>
-      </Paper>
-    );
-  }
-
   return (
     <Paper sx={{ p: 4, mb: 4 }}>
       <Typography variant="h5" gutterBottom align="center" sx={{ mb: 3 }}>
         {isEdit ? 'Edit Apartment Details' : 'Add New Apartment'}
       </Typography>
-      {!modelChosen && !isEdit ? (
-        <ModelSelection onSelect={chooseModel} />
-      ) : (
-        <ApartmentDetailsForm {...formProps} />
-      )}
+      <ApartmentDetailsForm {...formProps} />
     </Paper>
   );
 }

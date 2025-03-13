@@ -332,7 +332,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             width: { xs: '100%', md: 'auto' }
           }}
         >
-          {isAdmin && (
             <Button
               variant="outlined"
               startIcon={<FileDownloadIcon />}
@@ -348,9 +347,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             >
               Export
             </Button>
-          )}
 
-          {isAdmin && (
             <Button
               variant="contained"
               startIcon={<ApartmentIcon />}
@@ -367,7 +364,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             >
               Add Property
             </Button>
-          )}
         </Box>
       </Box>
 
@@ -615,7 +611,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       </Tooltip>
                       
                       {/* Edit Property Button - Only for admins */}
-                      {isAdmin && (
                         <Tooltip title="Edit Property">
                           <IconButton
                             size="small"
@@ -625,7 +620,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                             <EditIcon fontSize="small" />
                           </IconButton>
                         </Tooltip>
-                      )}
+                      
                       
                       {/* Details Button */}
                       <Button

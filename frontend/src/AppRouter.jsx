@@ -257,7 +257,7 @@ const AppRouterContainer = () => {
 
           {/* Admin Only Routes */}
           <Route path="apartments/add" element={
-            <ProtectedRoute adminOnly={true}>
+            <ProtectedRoute >
               <ApartmentForm
                 showNotification={showNotification}
                 onSuccess={() => navigate('/dashboard')}
@@ -266,7 +266,7 @@ const AppRouterContainer = () => {
           } />
 
           <Route path="apartments/edit" element={
-            <ProtectedRoute adminOnly={true}>
+            <ProtectedRoute >
               <ApartmentForm
                 isEdit={true}
                 initialData={editingApartment}

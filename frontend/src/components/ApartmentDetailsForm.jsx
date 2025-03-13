@@ -1,3 +1,4 @@
+// Updated ApartmentDetailsForm.jsx
 import React from 'react';
 import {
   Typography,
@@ -35,7 +36,8 @@ const ApartmentDetailsForm = ({
   handleDelete,
   isEdit,
   isSubmitting,
-  tenantSelection
+  tenantSelection,
+  isAdmin // New prop to check admin status
 }) => {
   // Function to display current tenants if they exist
   const renderCurrentTenants = () => {
@@ -124,6 +126,7 @@ const ApartmentDetailsForm = ({
                 variant="outlined"
                 InputLabelProps={{ shrink: true }}
                 placeholder="Enter apartment address"
+                disabled={!isAdmin && isEdit} // Only admins can edit existing addresses
               />
             </Box>
           </Grid>
@@ -140,6 +143,7 @@ const ApartmentDetailsForm = ({
                 variant="outlined"
                 InputLabelProps={{ shrink: true }}
                 placeholder="0"
+                disabled={!isAdmin && isEdit} // Only admins can edit existing apartment details
               />
             </Box>
           </Grid>
@@ -156,6 +160,7 @@ const ApartmentDetailsForm = ({
                 variant="outlined"
                 InputLabelProps={{ shrink: true }}
                 placeholder="0"
+                disabled={!isAdmin && isEdit} // Only admins can edit existing apartment details
               />
             </Box>
           </Grid>
@@ -176,65 +181,71 @@ const ApartmentDetailsForm = ({
             {renderCurrentTenants()}
           </Grid>
 
-          {/* Tenant Selection Component */}
-          <Grid item xs={12}>
-            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'medium' }}>
-              Assign Tenants:
-            </Typography>
-            {tenantSelection}
-          </Grid>
+          {/* Tenant Selection Component - Only shown to admins */}
+          {isAdmin && (
+            <Grid item xs={12}>
+              <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'medium' }}>
+                Assign Tenants:
+              </Typography>
+              {tenantSelection}
+            </Grid>
+          )}
 
-          {/* Landlord Details */}
-          <Grid item xs={12} sx={{ mt: 2 }}>
-            <SectionTitle
-              icon={<PersonIcon sx={{ color: 'grey.700' }} />}
-              title="Landlord Details"
-            />
-          </Grid>
+          {/* Landlord Details - Only shown to admins */}
+          {isAdmin && (
+            <>
+              <Grid item xs={12} sx={{ mt: 2 }}>
+                <SectionTitle
+                  icon={<PersonIcon sx={{ color: 'grey.700' }} />}
+                  title="Landlord Details"
+                />
+              </Grid>
 
-          <Grid item xs={12} sm={4}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Landlord Name</Typography>
-              <TextField
-                fullWidth
-                name="landlordName"
-                value={formData.landlordName}
-                onChange={handleChange}
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="Enter landlord name"
-              />
-            </Box>
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Landlord Email</Typography>
-              <TextField
-                fullWidth
-                type="email"
-                name="landlordEmail"
-                value={formData.landlordEmail}
-                onChange={handleChange}
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="Enter landlord email"
-              />
-            </Box>
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Landlord Phone</Typography>
-              <TextField
-                fullWidth
-                name="landlordPhone"
-                value={formData.landlordPhone}
-                onChange={handleChange}
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="Enter landlord phone"
-              />
-            </Box>
-          </Grid>
+              <Grid item xs={12} sm={4}>
+                <Box>
+                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord Name</Typography>
+                  <TextField
+                    fullWidth
+                    name="landlordName"
+                    value={formData.landlordName}
+                    onChange={handleChange}
+                    variant="outlined"
+                    InputLabelProps={{ shrink: true }}
+                    placeholder="Enter landlord name"
+                  />
+                </Box>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Box>
+                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord Email</Typography>
+                  <TextField
+                    fullWidth
+                    type="email"
+                    name="landlordEmail"
+                    value={formData.landlordEmail}
+                    onChange={handleChange}
+                    variant="outlined"
+                    InputLabelProps={{ shrink: true }}
+                    placeholder="Enter landlord email"
+                  />
+                </Box>
+              </Grid>
+              <Grid item xs={12} sm={4}>
+                <Box>
+                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord Phone</Typography>
+                  <TextField
+                    fullWidth
+                    name="landlordPhone"
+                    value={formData.landlordPhone}
+                    onChange={handleChange}
+                    variant="outlined"
+                    InputLabelProps={{ shrink: true }}
+                    placeholder="Enter landlord phone"
+                  />
+                </Box>
+              </Grid>
+            </>
+          )}
 
           {/* Contract Details */}
           <Grid item xs={12} sx={{ mt: 2 }}>
@@ -255,6 +266,7 @@ const ApartmentDetailsForm = ({
                 onChange={handleChange}
                 variant="outlined"
                 InputLabelProps={{ shrink: true }}
+                disabled={!isAdmin && isEdit} // Only admins can edit dates for existing apartments
               />
             </Box>
           </Grid>
@@ -269,54 +281,62 @@ const ApartmentDetailsForm = ({
                 onChange={handleChange}
                 variant="outlined"
                 InputLabelProps={{ shrink: true }}
+                disabled={!isAdmin && isEdit} // Only admins can edit dates for existing apartments
               />
             </Box>
           </Grid>
-          <Grid item xs={12} sm={6}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Monthly Rent ($)</Typography>
-              <TextField
-                fullWidth
-                type="number"
-                name="rent"
-                value={formData.rent}
-                onChange={(e) => handleChange(e, true)}
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="0"
-              />
-            </Box>
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Deposit ($)</Typography>
-              <TextField
-                fullWidth
-                type="number"
-                name="deposit"
-                value={formData.deposit}
-                onChange={(e) => handleChange(e, true)}
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="0"
-              />
-            </Box>
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Bank IBAN</Typography>
-              <TextField
-                fullWidth
-                name="IBAN"
-                value={formData.IBAN}
-                onChange={handleChange}
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="Enter IBAN"
-              />
-            </Box>
-          </Grid>
-          <Grid item xs={12} sm={6}>
+          
+          {/* Financial Details - Only visible to admins */}
+          {isAdmin && (
+            <>
+              <Grid item xs={12} sm={6}>
+                <Box>
+                  <Typography variant="body1" sx={{ mb: 1 }}>Monthly Rent ($)</Typography>
+                  <TextField
+                    fullWidth
+                    type="number"
+                    name="rent"
+                    value={formData.rent}
+                    onChange={(e) => handleChange(e, true)}
+                    variant="outlined"
+                    InputLabelProps={{ shrink: true }}
+                    placeholder="0"
+                  />
+                </Box>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Box>
+                  <Typography variant="body1" sx={{ mb: 1 }}>Deposit ($)</Typography>
+                  <TextField
+                    fullWidth
+                    type="number"
+                    name="deposit"
+                    value={formData.deposit}
+                    onChange={(e) => handleChange(e, true)}
+                    variant="outlined"
+                    InputLabelProps={{ shrink: true }}
+                    placeholder="0"
+                  />
+                </Box>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Box>
+                  <Typography variant="body1" sx={{ mb: 1 }}>Bank IBAN</Typography>
+                  <TextField
+                    fullWidth
+                    name="IBAN"
+                    value={formData.IBAN}
+                    onChange={handleChange}
+                    variant="outlined"
+                    InputLabelProps={{ shrink: true }}
+                    placeholder="Enter IBAN"
+                  />
+                </Box>
+              </Grid>
+            </>
+          )}
+          
+          <Grid item xs={12} sm={isAdmin ? 6 : 12}>
             <Box>
               <Typography variant="body1" sx={{ mb: 1 }}>Status</Typography>
               <FormControl fullWidth variant="outlined">
@@ -325,6 +345,7 @@ const ApartmentDetailsForm = ({
                   value={['occupied', 'vacant', 'contract_sent', ''].includes(formData.status) ? formData.status : ''}
                   onChange={handleChange}
                   displayEmpty
+                  disabled={!isAdmin && isEdit} // Only admins can change status of existing apartments
                 >
                   <MenuItem value="">Select status</MenuItem>
                   <MenuItem value="occupied">Occupied</MenuItem>
@@ -334,60 +355,68 @@ const ApartmentDetailsForm = ({
               </FormControl>
             </Box>
           </Grid>
-          <Grid item xs={12}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Notes</Typography>
-              <TextField
-                fullWidth
-                name="notes"
-                value={formData.notes}
-                onChange={handleChange}
-                multiline
-                rows={3}
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="Enter notes"
-              />
-            </Box>
-          </Grid>
 
-          {/* Management and Rental Fields */}
-          {formData.model === 'management' && (
+          {/* Notes field only for admins */}
+          {isAdmin && (
             <Grid item xs={12}>
               <Box>
-                <Typography variant="body1" sx={{ mb: 1 }}>Management Fee (%)</Typography>
+                <Typography variant="body1" sx={{ mb: 1 }}>Notes</Typography>
                 <TextField
                   fullWidth
-                  type="number"
-                  name="managementFee"
-                  value={formData.managementFee}
-                  onChange={(e) => handleChange(e, true)}
+                  name="notes"
+                  value={formData.notes}
+                  onChange={handleChange}
+                  multiline
+                  rows={3}
                   variant="outlined"
                   InputLabelProps={{ shrink: true }}
-                  placeholder="0"
-                />
-              </Box>
-            </Grid>
-          )}
-          {formData.model === 'rental' && (
-            <Grid item xs={12}>
-              <Box>
-                <Typography variant="body1" sx={{ mb: 1 }}>Rental Cost ($)</Typography>
-                <TextField
-                  fullWidth
-                  type="number"
-                  name="rentCost"
-                  value={formData.rentCost}
-                  onChange={(e) => handleChange(e, true)}
-                  variant="outlined"
-                  InputLabelProps={{ shrink: true }}
-                  placeholder="0"
+                  placeholder="Enter notes"
                 />
               </Box>
             </Grid>
           )}
 
-          {/* Submit and Delete Buttons */}
+          {/* Management and Rental Fields - Only visible to admins */}
+          {isAdmin && (
+            <>
+              {formData.model === 'management' && (
+                <Grid item xs={12}>
+                  <Box>
+                    <Typography variant="body1" sx={{ mb: 1 }}>Management Fee (%)</Typography>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      name="managementFee"
+                      value={formData.managementFee}
+                      onChange={(e) => handleChange(e, true)}
+                      variant="outlined"
+                      InputLabelProps={{ shrink: true }}
+                      placeholder="0"
+                    />
+                  </Box>
+                </Grid>
+              )}
+              {formData.model === 'rental' && (
+                <Grid item xs={12}>
+                  <Box>
+                    <Typography variant="body1" sx={{ mb: 1 }}>Rental Cost ($)</Typography>
+                    <TextField
+                      fullWidth
+                      type="number"
+                      name="rentCost"
+                      value={formData.rentCost}
+                      onChange={(e) => handleChange(e, true)}
+                      variant="outlined"
+                      InputLabelProps={{ shrink: true }}
+                      placeholder="0"
+                    />
+                  </Box>
+                </Grid>
+              )}
+            </>
+          )}
+
+          {/* Submit and Delete Buttons - Delete only for admins */}
           <Grid item xs={12} sx={{ textAlign: 'center', mt: 4 }}>
             <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2 }}>
               <Button
@@ -403,7 +432,7 @@ const ApartmentDetailsForm = ({
               >
                 {isEdit ? 'Update Apartment' : 'Add Apartment'}
               </Button>
-              {isEdit && (
+              {isAdmin && isEdit && (
                 <Button
                   variant="outlined"
                   color="error"

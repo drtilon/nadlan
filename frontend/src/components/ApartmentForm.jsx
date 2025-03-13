@@ -1,3 +1,4 @@
+// Updated ApartmentForm.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Paper,
@@ -13,8 +14,13 @@ import { Person as PersonIcon } from '@mui/icons-material';
 import api from '../utils/api';
 import ModelSelection from './ModelSelection';
 import ApartmentDetailsForm from './ApartmentDetailsForm';
+import { getUserData } from '../utils/api'; // Import to get user data
 
 function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotification }) {
+  // Get user data to check if admin
+  const userData = getUserData();
+  const isAdmin = userData && userData.role === 'admin';
+
   const emptyForm = {
     address: '',
     rooms: 0,
@@ -307,6 +313,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     handleDelete,
     isEdit,
     isSubmitting,
+    isAdmin, // Pass the admin status to the details form
     // New tenant selection components
     tenantSelection: (
       <Box sx={{ mb: 3 }}>
@@ -371,6 +378,20 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       </Box>
     )
   };
+
+  // If user is not admin and trying to create a new apartment, show appropriate message
+  if (!isAdmin && !isEdit) {
+    return (
+      <Paper sx={{ p: 4, mb: 4 }}>
+        <Typography variant="h5" gutterBottom align="center">
+          Access Restricted
+        </Typography>
+        <Typography variant="body1" align="center" sx={{ mt: 2 }}>
+          Only administrators can create new apartments. Please contact your administrator for assistance.
+        </Typography>
+      </Paper>
+    );
+  }
 
   return (
     <Paper sx={{ p: 4, mb: 4 }}>

@@ -34,6 +34,7 @@ import {
   Apartment as ApartmentIcon,
   Person as PersonIcon,
   AttachMoney as MoneyIcon,
+  AttachMoney as AttachMoney,
   ShowChart as ChartIcon,
   Lightbulb as UtilityIcon,
   Receipt as ReceiptIcon,
@@ -68,7 +69,7 @@ import {
 } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
-
+import NetEarningsSection from './NetEarningsSection';
 // Colors for charts
 const COLORS = {
   primary: '#1976d2',
@@ -568,6 +569,7 @@ function AnalyticsPanel({ showNotification }) {
                 <Tab label="Upcoming Payments" icon={<CalendarIcon />} iconPosition="start" />
                 <Tab label="Property Alerts" icon={<ErrorOutlineIcon />} iconPosition="start" />
                 <Tab label="Financial Overview" icon={<MoneyIcon />} iconPosition="start" />
+                <Tab label="Net Earnings" icon={<AttachMoney />} iconPosition="start" /> {/* New tab */}
               </Tabs>
             </Box>
 
@@ -1039,6 +1041,15 @@ function AnalyticsPanel({ showNotification }) {
                   </TableContainer>
                 )}
               </>
+            )}
+            {tabIndex === 4 && (
+              <NetEarningsSection
+                paymentTrends={paymentTrends}
+                expenseData={expenseData}
+                apartments={apartmentMetrics}
+                loading={loading}
+                onRefresh={fetchAnalytics}
+              />
             )}
 
             {/* Financial Overview Tab */}

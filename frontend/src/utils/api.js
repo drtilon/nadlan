@@ -2,18 +2,24 @@
 import axios from 'axios';
 import sessionManager from './SessionManager';
 
-// Define base URL with protocol
-const baseURL = window.location.protocol === 'https:' 
-  ? 'https://localhost:5001/api'  // Use HTTPS if the site is on HTTPS
-  : 'http://localhost:5001/api';  // Use HTTP otherwise
+// Define base URL with protocol and host detection
+const getBaseUrl = () => {
+  // Check if running in production (on the digital ocean server)
+  if (window.location.hostname === '207.154.221.54') {
+    return 'http://207.154.221.54:5001/api';
+  }
+  // Local development
+  return 'http://localhost:5001/api';
+};
 
-// API service with base URL configuration
+// API service with dynamic base URL configuration
 const api = axios.create({
-  baseURL,
+  baseURL: getBaseUrl(),
   timeout: 10000, // 10 second timeout
   headers: {
     'Content-Type': 'application/json',
-  }
+  },
+  withCredentials: true, // Important for cookies/credentials
 });
 
 // Track if we are currently handling a session expiration

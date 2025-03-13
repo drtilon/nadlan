@@ -19,6 +19,8 @@ services:
       interval: 10s
       retries: 5
       start_period: 20s
+    networks:
+      - app_network
 
   backend:
     build: ./backend
@@ -34,9 +36,12 @@ services:
       - FLASK_ENV=development
       - DB_USER=myuser
       - DB_PASSWORD=mypassword
-      - DB_HOST=mysql_db
+      - DB_HOST=mysql
       - DB_NAME=mydatabase
       - SECRET_KEY=mysecret
+      - CORS_ALLOWED_ORIGINS=http://localhost:3001,http://207.154.221.54:3001,http://frontend:3001
+    networks:
+      - app_network
 
   frontend:
     build: ./frontend
@@ -49,7 +54,12 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
     command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3001"]
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
 
 volumes:
   mysql_data:
-

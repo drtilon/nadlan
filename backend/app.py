@@ -45,16 +45,11 @@ def create_app():
         app.config.from_object(Config)
 
         try:
-            # For production with credentials enabled, you must specify a concrete origin.
-            # Make sure to set CORS_ALLOWED_ORIGINS in your Config (e.g., "https://your-production-domain.com")
-            # env_path = os.path.abspath(
-            #    os.path.join(os.path.dirname(__file__), "..", ".env")
-            # )
-            # load_dotenv(env_path)
-            # host = os.getenv("API_URL")
-            allowed_origins = app.config.get(
-                "CORS_ALLOWED_ORIGINS", "http://207.154.221.54:3001"
-            )
+            # Allow requests from any origin during development
+            # For production, specify your frontend domain
+            allowed_origins = os.environ.get(
+                "CORS_ALLOWED_ORIGINS", "http://localhost:3001"
+            ).split(",")
             CORS(
                 app,
                 resources={

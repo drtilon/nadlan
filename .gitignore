@@ -16,6 +16,7 @@ __pycache__/
 .eggs/
 env/
 venv/
+.venv/
 ENV/
 *.env
 backend/logs/app.log

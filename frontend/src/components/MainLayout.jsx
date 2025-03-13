@@ -38,14 +38,14 @@ function MainLayout({ onLogout, showNotification }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  
+
   // Get user data from localStorage
   const userData = getUserData();
   const userIsAdmin = userData && userData.role === 'admin';
-  
+
   // Current active path for highlighting
   const currentPath = location.pathname.split('/')[1] || 'dashboard';
-  
+
   // Toggle drawer for mobile
   const toggleDrawer = (open) => (event) => {
     if (event.type === 'keydown' && (event.key === 'Tab' || event.key === 'Shift')) {
@@ -53,7 +53,7 @@ function MainLayout({ onLogout, showNotification }) {
     }
     setDrawerOpen(open);
   };
-  
+
   // Navigation items configuration
   const navItems = [
     { title: 'Apartments', icon: <HomeIcon />, path: 'dashboard', adminOnly: false },
@@ -64,13 +64,13 @@ function MainLayout({ onLogout, showNotification }) {
     { title: 'Admin Panel', icon: <AdminPanelSettingsIcon />, path: 'admin', adminOnly: true },
     { title: 'System Logs', icon: <AssessmentIcon />, path: 'logs', adminOnly: true },
   ];
-  
+
   // Navigate to a path and close the drawer
   const navigateTo = (path) => {
     navigate(`/${path}`);
     setDrawerOpen(false);
   };
-  
+
   // Sidebar navigation for mobile
   const sidebarNav = (
     <Box
@@ -83,12 +83,12 @@ function MainLayout({ onLogout, showNotification }) {
         {navItems
           .filter(item => !item.adminOnly || userIsAdmin)
           .map((item) => (
-            <ListItem 
-              button 
+            <ListItem
+              button
               key={item.path}
               onClick={() => navigateTo(item.path)}
-              selected={currentPath === item.path || 
-                       (item.path === 'dashboard' && currentPath === '')}
+              selected={currentPath === item.path ||
+                (item.path === 'dashboard' && currentPath === '')}
               sx={{
                 '&.Mui-selected': {
                   backgroundColor: theme.palette.primary.light,
@@ -135,7 +135,7 @@ function MainLayout({ onLogout, showNotification }) {
               <MenuIcon />
             </IconButton>
           )}
-          
+
           <Typography variant="h6" sx={{ flexGrow: 1, direction: 'ltr' }}>
             Apartment Rental Management
           </Typography>
@@ -147,7 +147,7 @@ function MainLayout({ onLogout, showNotification }) {
                 .filter(item => !item.adminOnly || userIsAdmin)
                 .map((item) => (
                   <Tooltip key={item.path} title={item.title}>
-                    <IconButton 
+                    <IconButton
                       color={currentPath === item.path || (item.path === 'dashboard' && currentPath === '') ? "secondary" : "inherit"}
                       onClick={() => navigateTo(item.path)}
                     >

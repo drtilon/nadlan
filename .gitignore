@@ -21,6 +21,8 @@ ENV/
 *.env
 backend/logs/app.log
 claude.py
+backend.txt
+frontend.txt
 
 # OS Generated Files
 .DS_Store

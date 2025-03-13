@@ -31,7 +31,7 @@ function LoginPage({ showNotification }) {
   const theme = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
-  
+
   // Get redirect path from location state or default to dashboard
   const from = location.state?.from || '/dashboard';
 
@@ -86,37 +86,32 @@ function LoginPage({ showNotification }) {
 
     try {
       const response = await api.post('/auth/login', credentials);
-      
-      // Set auth token in axios and localStorage
-      const token = response.data.access_token;
+
+      // Check that we have a token in the response
+      const token = response.data.access_token || response.data.token;
+
       if (token) {
+        // Make sure we're setting the token correctly
         setAuthToken(token);
+        console.log("Token set successfully:", token);
 
         // Store user data
-        let userData = null;
         if (response.data.user) {
-          userData = response.data.user;
-        } else {
-          userData = {
-            username: credentials.username,
-            role: 'admin' // Default role for backward compatibility
-          };
+          setUserData(response.data.user);
+          console.log("User data stored:", response.data.user);
         }
 
-        // Save user data to localStorage
-        setUserData(userData);
-        
         // Show success notification
         showNotification('Login successful', 'success');
-        
-        // Navigate to the protected route (or dashboard by default)
+
+        // Ensure we're navigating correctly - use replace: true to avoid back button issues
         navigate(from, { replace: true });
       } else {
         throw new Error('No token received from server');
       }
-      
+
     } catch (error) {
-      console.error(error);
+      console.error('Login error:', error);
       const message = error.response?.data?.message;
       if (message === "Your account is pending admin approval.") {
         showNotification('Your account is pending admin approval.', 'error');

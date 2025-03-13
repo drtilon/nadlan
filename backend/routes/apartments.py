@@ -19,28 +19,22 @@ apartments_bp = Blueprint("apartments_bp", __name__)
 @role_required("admin")
 def add_apartment_route() -> Tuple[Response, int]:
     try:
-        # ✅ Get and validate request data
         data = request.get_json()
         if not data:
             return jsonify({"message": "Invalid request: No data provided"}), 400
 
-        # ✅ Validate request body using Pydantic
         try:
-            new_apartment = ApartmentData(**data["new_apartment"])
             new_tenants = [
                 TenantData(**tenant) for tenant in data.get("new_tenants", [])
             ]
         except ValidationError as e:
             return jsonify({"message": "Invalid data", "errors": e.errors()}), 400
 
-        # ✅ Add Apartment to DB
-        current_app.logger.error(new_apartment)
-        apartment = Apartment(**new_apartment.model_dump(exclude={"tenants"}))
+        apartment = Apartment(**data["new_apartment"].model_dump(exclude={"tenants"}))
 
         db.session.add(apartment)
         db.session.flush()  # Ensure apartment ID is assigned before adding tenants
 
-        # ✅ Add Tenants to DB
         tenants = [
             Tenant(**tenant.dict(), apartment_id=apartment.id) for tenant in new_tenants
         ]

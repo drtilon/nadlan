@@ -25,53 +25,64 @@ import sessionManager from './utils/SessionManager';
 
 // Protected Route wrapper component
 const ProtectedRoute = ({ children, adminOnly = false }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(null);
-  const [isAuthorized, setIsAuthorized] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [isChecking, setIsChecking] = useState(true); // Add this state to track checking process
   const navigate = useNavigate();
   const location = useLocation();
   const authCheckInProgress = useRef(false);
 
   useEffect(() => {
     const checkAuth = async () => {
-      // Prevent multiple simultaneous auth checks
       if (authCheckInProgress.current) return;
       authCheckInProgress.current = true;
-      
+      setIsChecking(true); // Start checking
+
       try {
         // Check if token exists
         const token = localStorage.getItem('token');
+        console.log("Protected route check - token exists:", !!token);
 
         if (!token) {
           setIsAuthenticated(false);
+          setIsAuthorized(false);
           authCheckInProgress.current = false;
+          setIsChecking(false);
           return;
         }
 
         // Verify token with backend
+        console.log("Verifying token with backend");
         const isValid = await verifyToken();
+        console.log("Token verification result:", isValid);
+
         setIsAuthenticated(isValid);
 
         // Check authorization for admin routes
         if (isValid && adminOnly) {
           const userData = getUserData();
+          console.log("User data for admin check:", userData);
           const isAdmin = userData && userData.role === 'admin';
           setIsAuthorized(isAdmin);
+          console.log("Is user authorized as admin:", isAdmin);
         } else {
           setIsAuthorized(true);
         }
       } catch (error) {
         console.error('Auth verification error:', error);
         setIsAuthenticated(false);
+        setIsAuthorized(false);
       } finally {
         authCheckInProgress.current = false;
+        setIsChecking(false); // Finished checking
       }
     };
 
     checkAuth();
   }, [adminOnly]);
 
-  // Show loading while checking authentication
-  if (isAuthenticated === null || isAuthorized === null) {
+  // Show loading only while actively checking auth
+  if (isChecking) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <CircularProgress />
@@ -79,17 +90,22 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
     );
   }
 
+  console.log("Protected route state - authenticated:", isAuthenticated, "authorized:", isAuthorized);
+
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
+    console.log("Redirecting to login");
     return <Navigate to="/login" state={{ from: location.pathname }} />;
   }
 
-  // Redirect to dashboard if not authorized (e.g., non-admin trying to access admin route)
+  // Redirect to dashboard if not authorized
   if (!isAuthorized) {
+    console.log("Redirecting to dashboard - not authorized");
     return <Navigate to="/dashboard" />;
   }
 
   // Render the protected component
+  console.log("Rendering protected component");
   return children;
 };
 
@@ -124,12 +140,12 @@ const AppRouterContainer = () => {
     // Avoid setting up multiple times
     if (sessionHandlersSetup.current) return;
     sessionHandlersSetup.current = true;
-    
+
     // Configure session manager to handle expiration
     sessionManager.onSessionExpired(() => {
       // Clear data
       setAuthToken(null);
-      
+
       // Show notification if not already on the login page
       if (location.pathname !== '/login') {
         setNotification({
@@ -201,7 +217,11 @@ const AppRouterContainer = () => {
         } />
 
         {/* Root redirect */}
-        <Route path="/" element={<Navigate to="/dashboard" />} />
+        <Route path="/" element={
+          localStorage.getItem('token')
+            ? <Navigate to="/dashboard" />
+            : <Navigate to="/login" />
+        } />
 
         {/* Protected Routes inside MainLayout */}
         <Route

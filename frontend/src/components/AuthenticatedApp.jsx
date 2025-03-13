@@ -52,7 +52,7 @@ function AuthenticatedApp({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  
+
   // New state to hold the default apartment for payments
   const [defaultPaymentApartment, setDefaultPaymentApartment] = useState(null);
 
@@ -65,7 +65,7 @@ function AuthenticatedApp({
 
   // If non-admin user tries to access admin-only views, redirect to list view
   useEffect(() => {
-    const adminOnlyViews = [ 'admin', 'analytics', 'contracts', 'logs'];
+    const adminOnlyViews = ['admin', 'analytics', 'contracts', 'logs'];
     if (!userIsAdmin && adminOnlyViews.includes(activeView)) {
       setActiveView('list');
       showNotification('You do not have permission to access this area', 'error');
@@ -120,8 +120,8 @@ function AuthenticatedApp({
         {navItems
           .filter(item => !item.adminOnly || userIsAdmin)
           .map((item) => (
-            <ListItem 
-              button 
+            <ListItem
+              button
               key={item.view}
               onClick={() => {
                 if (item.view === 'add') {
@@ -132,10 +132,10 @@ function AuthenticatedApp({
               selected={activeView === item.view}
             >
               <ListItemIcon>
-                {item.view === activeView ? 
+                {item.view === activeView ?
                   <Badge color="primary" variant="dot">
                     {item.icon}
-                  </Badge> : 
+                  </Badge> :
                   item.icon
                 }
               </ListItemIcon>
@@ -167,7 +167,7 @@ function AuthenticatedApp({
               <MenuIcon />
             </IconButton>
           )}
-          
+
           <Typography variant="h6" sx={{ flexGrow: 1, direction: 'ltr' }}>
             Apartment Rental Management
           </Typography>
@@ -235,7 +235,7 @@ function AuthenticatedApp({
                       <AdminPanelSettingsIcon />
                     </IconButton>
                   </Tooltip>
-                  
+
                   {/* Logs panel icon - admin only */}
                   <Tooltip title="System Logs">
                     <IconButton color="inherit" onClick={() => setActiveView('logs')}>

@@ -1,4 +1,4 @@
-// Modified ApartmentForm.jsx
+// Updated ApartmentForm.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Paper,
@@ -10,7 +10,9 @@ import {
   Avatar,
   Tooltip
 } from '@mui/material';
-import { Person as PersonIcon } from '@mui/icons-material';
+import {
+  Person as PersonIcon
+} from '@mui/icons-material';
 import api from '../utils/api';
 import ApartmentDetailsForm from './ApartmentDetailsForm';
 import { getUserData } from '../utils/api';
@@ -24,17 +26,20 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     address: '',
     rooms: 0,
     size: 0,
+    landlordCompanyName: '', // Matches DB column name
     landlordName: '',
     landlordEmail: '',
     landlordPhone: '',
+    landlordIban: '', // Matches DB column name
+    landlordCompanyAddress: '', // Matches DB column name
     moveInDate: '',
     contractEndDate: '',
     rent: 0,
+    rentInSentance: '', // Matches DB column name
     deposit: 0,
     notes: '',
-    IBAN: '',
-    status: '', // Set empty string as default to avoid validation errors
-    model: 'management', // Default model is management, but will be hidden from non-admin users
+    status: 'vacant', // Set a default status
+    model: 'management', // Default model is management
     managementFee: 0,
     rentCost: 0
   };
@@ -44,7 +49,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   const validStatusOptions = ['occupied', 'vacant', 'contract_sent', ''];
   const cleanedInitialData = isEdit ? {
     ...initialData,
-    status: validStatusOptions.includes(initialData.status) ? initialData.status : ''
+    status: validStatusOptions.includes(initialData.status) ? initialData.status : 'vacant'
   } : emptyForm;
 
   const [formData, setFormData] = useState(cleanedInitialData);
@@ -167,11 +172,12 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
 
   // Handle input changes for the main form fields
   const handleChange = (e, isNumber) => {
-    const value = isNumber ? (e.target.value ? parseInt(e.target.value) : 0) : e.target.value;
+    const { name, value } = e.target;
+    const processedValue = isNumber ? (value ? parseFloat(value) : 0) : value;
 
     setFormData({
       ...formData,
-      [e.target.name]: value
+      [name]: processedValue
     });
   };
 
@@ -232,6 +238,19 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     setIsSubmitting(true);
 
     try {
+      // Ensure all required fields are present
+      if (!formData.address) {
+        showNotification('Address is required', 'error');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Make sure rentInSentance is set if not already
+      if (!formData.rentInSentance) {
+        // Simple conversion of rent to words
+        formData.rentInSentance = `${formData.rent} dollars`;
+      }
+
       const payload = {
         new_apartment: formData,
         new_tenants: tenantData
@@ -248,7 +267,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       onSuccess();
     } catch (error) {
       console.error(error);
-      showNotification(`Error: ${error.message}`, 'error');
+      showNotification(`Error: ${error.response?.data?.message || error.message}`, 'error');
     } finally {
       setIsSubmitting(false);
     }

@@ -53,7 +53,7 @@ def create_app():
             # load_dotenv(env_path)
             # host = os.getenv("API_URL")
             allowed_origins = app.config.get(
-                "CORS_ALLOWED_ORIGINS", "http://localhost:3001"
+                "CORS_ALLOWED_ORIGINS", "http://207.154.221.54:3001"
             )
             CORS(
                 app,

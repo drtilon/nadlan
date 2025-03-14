@@ -124,3 +124,29 @@ class Payment(db.Model):
     extraPayments = db.Column(db.Text, nullable=True)  # stored as JSON
     notes = db.Column(db.Text, nullable=True)
     year = db.Column(db.Integer, nullable=True)  # Store the year for historical records
+
+
+class Contract(db.Model):
+    __tablename__ = "contracts"
+    id = db.Column(db.Integer, primary_key=True)
+    apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=False)
+    file_path = db.Column(db.String(255), nullable=False)
+    file_name = db.Column(db.String(255), nullable=False)
+    file_size = db.Column(db.Integer, nullable=False)
+    file_type = db.Column(db.String(100), nullable=False)
+    upload_date = db.Column(db.DateTime, default=datetime.utcnow)
+    notes = db.Column(db.Text, nullable=True)
+    uploaded_by = db.Column(
+        db.Integer, nullable=True
+    )  # User ID who uploaded the contract
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "apartment_id": self.apartment_id,
+            "fileName": self.file_name,
+            "fileSize": self.file_size,
+            "fileType": self.file_type,
+            "uploadDate": self.upload_date.isoformat() if self.upload_date else None,
+            "notes": self.notes,
+        }

@@ -14,6 +14,7 @@ import AdminPanel from './components/AdminPanel';
 import AnalyticsPanel from './components/AnalyticsPanel';
 import TenantsPanel from './components/TenantsPanel';
 import ContractGenerator from './components/ContractGenerator';
+import ContractManager from './components/ContractManager'; // Import the new ContractManager component
 import LogsViewer from './components/LogsViewer';
 import MainLayout from './components/MainLayout';
 import TenantDetails from './components/TenantDetails';
@@ -218,9 +219,7 @@ const AppRouterContainer = () => {
 
         {/* Root redirect */}
         <Route path="/" element={
-          localStorage.getItem('token')
-            ? <Navigate to="/dashboard" />
-            : <Navigate to="/login" />
+          <Navigate to={localStorage.getItem('token') ? "/dashboard" : "/login"} />
         } />
 
         {/* Protected Routes inside MainLayout */}
@@ -304,9 +303,19 @@ const AppRouterContainer = () => {
             </ProtectedRoute>
           } />
 
-          <Route path="contracts" element={
+          {/* Contract Generator Route */}
+          <Route path="contracts/generate" element={
             <ProtectedRoute adminOnly={true}>
               <ContractGenerator
+                showNotification={showNotification}
+              />
+            </ProtectedRoute>
+          } />
+
+          {/* Contract Manager Route */}
+          <Route path="contracts/manage" element={
+            <ProtectedRoute adminOnly={true}>
+              <ContractManager
                 showNotification={showNotification}
               />
             </ProtectedRoute>

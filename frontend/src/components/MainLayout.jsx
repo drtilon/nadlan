@@ -1,4 +1,4 @@
-// src/components/MainLayout.jsx
+// Updated MainLayout.jsx with Contract Manager navigation
 import React, { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -18,7 +18,10 @@ import {
   useMediaQuery,
   useTheme,
   Container,
-  Button
+  Button,
+  Menu,
+  MenuItem,
+  ListItemButton
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import HomeIcon from '@mui/icons-material/Home';
@@ -29,7 +32,10 @@ import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 import InsightsIcon from '@mui/icons-material/Insights';
 import PersonIcon from '@mui/icons-material/Person';
 import DescriptionIcon from '@mui/icons-material/Description';
+import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline';
 import AssessmentIcon from '@mui/icons-material/Assessment';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import FileOpenIcon from '@mui/icons-material/FileOpen';
 
 import { getUserData } from '../utils/api';
 
@@ -37,6 +43,7 @@ function MainLayout({ onLogout, showNotification }) {
   const navigate = useNavigate();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [contractsMenuAnchor, setContractsMenuAnchor] = useState(null);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
@@ -46,6 +53,7 @@ function MainLayout({ onLogout, showNotification }) {
 
   // Current active path for highlighting
   const currentPath = location.pathname.split('/')[1] || 'dashboard';
+  const contractsPath = location.pathname.includes('contracts');
 
   // Toggle drawer for mobile
   const toggleDrawer = (open) => (event) => {
@@ -60,7 +68,15 @@ function MainLayout({ onLogout, showNotification }) {
     { title: 'Apartments', icon: <HomeIcon />, path: 'dashboard', adminOnly: false },
     { title: 'Tenants', icon: <PersonIcon />, path: 'tenants', adminOnly: false },
     { title: 'Payments', icon: <AttachMoneyIcon />, path: 'payments', adminOnly: false },
-    { title: 'Contracts', icon: <DescriptionIcon />, path: 'contracts', adminOnly: true },
+    {
+      title: 'Contracts',
+      icon: <DescriptionIcon />,
+      children: [
+        { title: 'Generate Contract', icon: <DriveFileRenameOutlineIcon />, path: 'contracts/generate' },
+        { title: 'Contract Manager', icon: <FileOpenIcon />, path: 'contracts/manage' }
+      ],
+      adminOnly: true
+    },
     { title: 'Analytics', icon: <InsightsIcon />, path: 'analytics', adminOnly: true },
     { title: 'Admin Panel', icon: <AdminPanelSettingsIcon />, path: 'admin', adminOnly: true },
     { title: 'System Logs', icon: <AssessmentIcon />, path: 'logs', adminOnly: true },
@@ -70,11 +86,21 @@ function MainLayout({ onLogout, showNotification }) {
   const navigateTo = (path) => {
     navigate(`/${path}`);
     setDrawerOpen(false);
+    setContractsMenuAnchor(null);
   };
 
   // Handle navigate to dashboard when clicking on app title
   const handleTitleClick = () => {
     navigate('/dashboard');
+  };
+
+  // Handle contracts menu
+  const handleContractsMenuOpen = (event) => {
+    setContractsMenuAnchor(event.currentTarget);
+  };
+
+  const handleContractsMenuClose = () => {
+    setContractsMenuAnchor(null);
   };
 
   // Sidebar navigation for mobile
@@ -89,32 +115,86 @@ function MainLayout({ onLogout, showNotification }) {
         {navItems
           .filter(item => !item.adminOnly || userIsAdmin)
           .map((item) => (
-            <ListItem
-              button
-              key={item.path}
-              onClick={() => navigateTo(item.path)}
-              selected={currentPath === item.path ||
-                (item.path === 'dashboard' && currentPath === '')}
-              sx={{
-                '&.Mui-selected': {
-                  backgroundColor: theme.palette.primary.light,
-                  '&:hover': {
+            item.children ? (
+              <React.Fragment key={item.title}>
+                <ListItem
+                  sx={{
+                    '&.Mui-selected': {
+                      backgroundColor: theme.palette.primary.light,
+                      '&:hover': {
+                        backgroundColor: theme.palette.primary.light,
+                      }
+                    }
+                  }}
+                >
+                  <ListItemIcon>
+                    {contractsPath ? (
+                      <Badge color="primary" variant="dot">
+                        {item.icon}
+                      </Badge>
+                    ) : (
+                      item.icon
+                    )}
+                  </ListItemIcon>
+                  <ListItemText primary={item.title} />
+                </ListItem>
+                {item.children.map(child => (
+                  <ListItem
+                    key={child.path}
+                    button
+                    onClick={() => navigateTo(child.path)}
+                    selected={location.pathname.includes(child.path)}
+                    sx={{
+                      pl: 4,
+                      '&.Mui-selected': {
+                        backgroundColor: theme.palette.primary.light,
+                        '&:hover': {
+                          backgroundColor: theme.palette.primary.light,
+                        }
+                      }
+                    }}
+                  >
+                    <ListItemIcon>
+                      {location.pathname.includes(child.path) ? (
+                        <Badge color="primary" variant="dot">
+                          {child.icon}
+                        </Badge>
+                      ) : (
+                        child.icon
+                      )}
+                    </ListItemIcon>
+                    <ListItemText primary={child.title} />
+                  </ListItem>
+                ))}
+              </React.Fragment>
+            ) : (
+              <ListItem
+                button
+                key={item.path}
+                onClick={() => navigateTo(item.path)}
+                selected={currentPath === item.path ||
+                  (item.path === 'dashboard' && currentPath === '')}
+                sx={{
+                  '&.Mui-selected': {
                     backgroundColor: theme.palette.primary.light,
+                    '&:hover': {
+                      backgroundColor: theme.palette.primary.light,
+                    }
                   }
-                }
-              }}
-            >
-              <ListItemIcon>
-                {item.path === currentPath || (item.path === 'dashboard' && currentPath === '') ? (
-                  <Badge color="primary" variant="dot">
-                    {item.icon}
-                  </Badge>
-                ) : (
-                  item.icon
-                )}
-              </ListItemIcon>
-              <ListItemText primary={item.title} />
-            </ListItem>
+                }}
+              >
+                <ListItemIcon>
+                  {item.path === currentPath || (item.path === 'dashboard' && currentPath === '') ? (
+                    <Badge color="primary" variant="dot">
+                      {item.icon}
+                    </Badge>
+                  ) : (
+                    item.icon
+                  )}
+                </ListItemIcon>
+                <ListItemText primary={item.title} />
+              </ListItem>
+            )
           ))}
         <Divider />
         <ListItem button onClick={onLogout}>
@@ -164,20 +244,61 @@ function MainLayout({ onLogout, showNotification }) {
               {navItems
                 .filter(item => !item.adminOnly || userIsAdmin)
                 .map((item) => (
-                  <Tooltip key={item.path} title={item.title}>
-                    <IconButton
-                      color={currentPath === item.path || (item.path === 'dashboard' && currentPath === '') ? "secondary" : "inherit"}
-                      onClick={() => navigateTo(item.path)}
-                    >
-                      {item.path === currentPath || (item.path === 'dashboard' && currentPath === '') ? (
-                        <Badge color="secondary" variant="dot">
-                          {item.icon}
-                        </Badge>
-                      ) : (
-                        item.icon
-                      )}
-                    </IconButton>
-                  </Tooltip>
+                  item.children ? (
+                    <React.Fragment key={item.title}>
+                      <Tooltip title={item.title}>
+                        <IconButton
+                          color={contractsPath ? "secondary" : "inherit"}
+                          onClick={handleContractsMenuOpen}
+                          aria-haspopup="true"
+                        >
+                          {contractsPath ? (
+                            <Badge color="secondary" variant="dot">
+                              {item.icon}
+                            </Badge>
+                          ) : (
+                            item.icon
+                          )}
+                        </IconButton>
+                      </Tooltip>
+                      <Menu
+                        anchorEl={contractsMenuAnchor}
+                        open={Boolean(contractsMenuAnchor)}
+                        onClose={handleContractsMenuClose}
+                        MenuListProps={{
+                          'aria-labelledby': 'contracts-button',
+                        }}
+                      >
+                        {item.children.map(child => (
+                          <MenuItem
+                            key={child.path}
+                            onClick={() => navigateTo(child.path)}
+                            selected={location.pathname.includes(child.path)}
+                          >
+                            <ListItemIcon>
+                              {child.icon}
+                            </ListItemIcon>
+                            <ListItemText>{child.title}</ListItemText>
+                          </MenuItem>
+                        ))}
+                      </Menu>
+                    </React.Fragment>
+                  ) : (
+                    <Tooltip key={item.path} title={item.title}>
+                      <IconButton
+                        color={currentPath === item.path || (item.path === 'dashboard' && currentPath === '') ? "secondary" : "inherit"}
+                        onClick={() => navigateTo(item.path)}
+                      >
+                        {item.path === currentPath || (item.path === 'dashboard' && currentPath === '') ? (
+                          <Badge color="secondary" variant="dot">
+                            {item.icon}
+                          </Badge>
+                        ) : (
+                          item.icon
+                        )}
+                      </IconButton>
+                    </Tooltip>
+                  )
                 ))}
 
               <Divider orientation="vertical" flexItem sx={{ mx: 0.5, bgcolor: 'rgba(255,255,255,0.3)' }} />

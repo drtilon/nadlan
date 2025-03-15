@@ -1,4 +1,4 @@
-// Updated ApartmentDetailsForm.jsx
+// ApartmentDetailsForm.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Typography,
@@ -29,6 +29,7 @@ const ApartmentDetailsForm = ({
   formData,
   tenantData,
   handleChange,
+  handleTenantChange,
   handleSubmit,
   handleDelete,
   isEdit,
@@ -213,7 +214,7 @@ const ApartmentDetailsForm = ({
             </Box>
           </Grid>
 
-          {/* Tenant Details */}
+          {/* Tenant Details Section */}
           <Grid item xs={12} sx={{ mt: 2 }}>
             <SectionTitle
               icon={<PersonIcon sx={{ color: 'grey.700' }} />}

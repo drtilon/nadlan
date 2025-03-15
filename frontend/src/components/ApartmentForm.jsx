@@ -1,4 +1,4 @@
-// Updated ApartmentForm.jsx
+// src/components/ApartmentForm.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Paper,
@@ -8,11 +8,13 @@ import {
   TextField,
   Chip,
   Avatar,
-  Tooltip
+  Tooltip,
+  Button
 } from '@mui/material';
-import { Person as PersonIcon } from '@mui/icons-material';
+import { Person as PersonIcon, PersonAdd as PersonAddIcon } from '@mui/icons-material';
 import api from '../utils/api';
 import ApartmentDetailsForm from './ApartmentDetailsForm';
+import TenantFormDialog from './TenantFormDialog';
 import { getUserData } from '../utils/api';
 
 function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotification }) {
@@ -51,6 +53,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [availableTenants, setAvailableTenants] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [tenantFormOpen, setTenantFormOpen] = useState(false);
 
   // Fetch the list of tenants once on component mount
   useEffect(() => {
@@ -235,6 +238,21 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     }
   };
 
+  // Add a newly created tenant to the list
+  const handleNewTenantCreated = (newTenant) => {
+    // If this is the first tenant, make them primary
+    const isPrimary = tenantData.length === 0;
+
+    // Add the new tenant to the tenant data
+    setTenantData([...tenantData, {
+      ...newTenant,
+      isPrimary
+    }]);
+
+    // Close the tenant form dialog
+    setTenantFormOpen(false);
+  };
+
   // Remove a tenant
   const removeTenant = (index) => {
     const removedTenant = tenantData[index];
@@ -378,31 +396,47 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
           )}
         </Box>
 
-        <Autocomplete
-          options={availableTenants.filter(
-            tenant => !tenantData.some(t => t.id === tenant.id)
-          )}
-          getOptionLabel={(option) => {
-            if (option.firstName && option.lastName) {
-              return `${option.firstName} ${option.lastName}`;
-            }
-            return option.name || 'Unnamed Tenant';
-          }}
-          onChange={handleTenantSelection}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Add tenant"
-              variant="outlined"
-              fullWidth
-              placeholder="Search and select a tenant"
-              helperText="Select from existing tenants in the database (click on a tenant chip to mark as primary)"
-            />
-          )}
-          loading={loading}
-          loadingText="Loading tenants..."
-          noOptionsText="No tenants found or all tenants already added"
-        />
+        <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+          <Autocomplete
+            options={availableTenants.filter(
+              tenant => !tenantData.some(t => t.id === tenant.id)
+            )}
+            getOptionLabel={(option) => {
+              if (option.firstName && option.lastName) {
+                return `${option.firstName} ${option.lastName}`;
+              }
+              return option.name || 'Unnamed Tenant';
+            }}
+            onChange={handleTenantSelection}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Add existing tenant"
+                variant="outlined"
+                fullWidth
+                placeholder="Search and select a tenant"
+              />
+            )}
+            loading={loading}
+            loadingText="Loading tenants..."
+            noOptionsText="No tenants found or all tenants already added"
+            sx={{ flexGrow: 1 }}
+          />
+
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<PersonAddIcon />}
+            onClick={() => setTenantFormOpen(true)}
+            sx={{ whiteSpace: 'nowrap' }}
+          >
+            New Tenant
+          </Button>
+        </Box>
+
+        <Typography variant="caption" color="text.secondary">
+          Select from existing tenants or create a new one. Click on a tenant chip to mark as primary.
+        </Typography>
       </Box>
     )
   };
@@ -413,6 +447,14 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         {isEdit ? 'Edit Apartment Details' : 'Add New Apartment'}
       </Typography>
       <ApartmentDetailsForm {...formProps} />
+
+      {/* Tenant creation dialog */}
+      <TenantFormDialog
+        open={tenantFormOpen}
+        onClose={() => setTenantFormOpen(false)}
+        onSave={handleNewTenantCreated}
+        showNotification={showNotification}
+      />
     </Paper>
   );
 }

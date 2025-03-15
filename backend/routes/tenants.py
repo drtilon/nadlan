@@ -31,6 +31,8 @@ def list_tenants() -> Tuple[Response, int]:
                 "email": tenant.email,
                 "phone": tenant.phone,
                 "apartment_id": tenant.apartment_id,
+                "bornOn": tenant.bornOn,
+                "refundIban": tenant.refundIban,
             }
 
             # If tenant is associated with an apartment, add apartment address

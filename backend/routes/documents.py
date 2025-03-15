@@ -159,10 +159,8 @@ def build_db_data(
     """
 
     return {
-        "landlord_company_name": apartment.landlord.company_name
-        if apartment.landlord
-        else "",
-        "landlord_name": apartment.landlord.name if apartment.landlord else "",
+        "landlord_company_name": apartment.landlord.name if apartment.landlord else "",
+        "landlord_name": apartment.landlord.company_name,
         "landlord_company_address": apartment.landlord.company_address
         if apartment.landlord
         else "",
@@ -171,7 +169,7 @@ def build_db_data(
         "landlord_iban": apartment.landlord.iban if apartment.landlord else "",
         "apartment_address": apartment.address,
         "rent_price": f"{apartment.rent:.2f}",
-        "rent_words": apartment.rentInSentance,
+        "rent_words": str(num2words(int(apartment.rent))),
         "deposit": apartment.deposit,
         "start_date": start_date,
         "end_date": end_date,

@@ -106,15 +106,8 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
                 if tenant:
                     tenant.apartment_id = apartment_id
                     continue
-            # If tenant doesn't exist or has no ID, create a new one
-            tenant = Tenant(
-                name=tenant_data.get("name")
-                or f"{tenant_data.get('firstName', '')} {tenant_data.get('lastName', '')}".strip(),
-                email=tenant_data.get("email", ""),
-                phone=tenant_data.get("phone", ""),
-                apartment_id=apartment_id,
-            )
-            db.session.add(tenant)
+
+                db.session.add(tenant)
 
         db.session.commit()
         return jsonify({"message": "Apartment updated successfully"}), 200

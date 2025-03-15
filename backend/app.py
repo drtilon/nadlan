@@ -73,9 +73,9 @@ def create_app():
                 from initalized.init_apartment import ensure_db_schema
 
                 ensure_db_schema()
-                ensure_admin_user_exists()
-                ensure_default_apartment_exists()
-                ensure_new_apartment_exists()
+                # ensure_admin_user_exists()
+                # ensure_default_apartment_exists()
+                # ensure_new_apartment_exists()
         except Exception as e:
             app.logger.error(f"Error initializing DB: {e}")
 

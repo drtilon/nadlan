@@ -157,13 +157,18 @@ def build_db_data(
     Build the dictionary of data to pass to the contract template updater,
     using all values from the database.
     """
+
     return {
-        "landlord_company_name": apartment.landlordCompanyName,
-        "landlord_name": apartment.landlordName,
-        "landlord_company_address": apartment.landlordCompanyAddress,
-        "landlord_email": apartment.landlordEmail,
-        "landlord_phone": apartment.landlordPhone,
-        "landlord_iban": apartment.landlordIban,
+        "landlord_company_name": apartment.landlord.company_name
+        if apartment.landlord
+        else "",
+        "landlord_name": apartment.landlord.name if apartment.landlord else "",
+        "landlord_company_address": apartment.landlord.company_address
+        if apartment.landlord
+        else "",
+        "landlord_email": apartment.landlord.email if apartment.landlord else "",
+        "landlord_phone": apartment.landlord.phone if apartment.landlord else "",
+        "landlord_iban": apartment.landlord.iban if apartment.landlord else "",
         "apartment_address": apartment.address,
         "rent_price": f"{apartment.rent:.2f}",
         "rent_words": apartment.rentInSentance,

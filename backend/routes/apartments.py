@@ -65,6 +65,9 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
         if not apartment_data:
             return jsonify({"message": "No apartment data provided"}), 400
 
+        # Remove nested 'landlord' field if present to avoid assigning a dict to the relationship
+        apartment_data.pop("landlord", None)
+
         # Get the apartment
         apartment = Apartment.query.get(apartment_id)
         if not apartment:
@@ -89,7 +92,7 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
             elif field != "tenants" and hasattr(apartment, field):
                 setattr(apartment, field, value)
 
-        # Handle tenants - first unassign all tenants from this apartment
+        # Unassign all existing tenants from this apartment
         existing_tenants = Tenant.query.filter_by(apartment_id=apartment_id).all()
         for tenant in existing_tenants:
             tenant.apartment_id = None  # Set to NULL instead of deleting the tenant
@@ -97,14 +100,12 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
         # Then assign the selected tenants to this apartment
         for tenant_data in tenants_data:
             tenant_id = tenant_data.get("id")
-
             if tenant_id:
                 # If tenant has an ID, find and update
                 tenant = Tenant.query.get(tenant_id)
                 if tenant:
                     tenant.apartment_id = apartment_id
                     continue
-
             # If tenant doesn't exist or has no ID, create a new one
             tenant = Tenant(
                 name=tenant_data.get("name")

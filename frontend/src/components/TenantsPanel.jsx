@@ -41,6 +41,7 @@ import {
 import api from '../utils/api';
 import TenantDetails from './TenantDetails';
 import EnhancedTenantForm from './EnhancedTenantForm';
+import Pagination from './common/Pagination';
 
 function TenantsPanel({ showNotification }) {
   const [tenants, setTenants] = useState([]);
@@ -63,6 +64,11 @@ function TenantsPanel({ showNotification }) {
   const [tenantToDelete, setTenantToDelete] = useState(null);
   const [selectedTenant, setSelectedTenant] = useState(null);
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [paginatedTenants, setPaginatedTenants] = useState([]);
+
   // Fetch tenants and apartments data
   useEffect(() => {
     fetchData();
@@ -72,20 +78,28 @@ function TenantsPanel({ showNotification }) {
   useEffect(() => {
     if (!searchQuery) {
       setFilteredTenants(tenants);
-      return;
+    } else {
+      const query = searchQuery.toLowerCase();
+      const filtered = tenants.filter(tenant =>
+        tenant.name.toLowerCase().includes(query) ||
+        (tenant.email && tenant.email.toLowerCase().includes(query)) ||
+        (tenant.phone && tenant.phone.toLowerCase().includes(query)) ||
+        (tenant.apartment_address && tenant.apartment_address.toLowerCase().includes(query)) ||
+        (tenant.bornOn && tenant.bornOn.includes(query)) ||
+        (tenant.refundIban && tenant.refundIban.toLowerCase().includes(query))
+      );
+      setFilteredTenants(filtered);
     }
-
-    const query = searchQuery.toLowerCase();
-    const filtered = tenants.filter(tenant =>
-      tenant.name.toLowerCase().includes(query) ||
-      (tenant.email && tenant.email.toLowerCase().includes(query)) ||
-      (tenant.phone && tenant.phone.toLowerCase().includes(query)) ||
-      (tenant.apartment_address && tenant.apartment_address.toLowerCase().includes(query)) ||
-      (tenant.bornOn && tenant.bornOn.includes(query)) ||
-      (tenant.refundIban && tenant.refundIban.toLowerCase().includes(query))
-    );
-    setFilteredTenants(filtered);
+    // Reset to first page when search changes
+    setCurrentPage(1);
   }, [searchQuery, tenants]);
+
+  // Update paginated tenants when filtered tenants or pagination settings change
+  useEffect(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    setPaginatedTenants(filteredTenants.slice(startIndex, endIndex));
+  }, [filteredTenants, currentPage, itemsPerPage]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -211,6 +225,15 @@ function TenantsPanel({ showNotification }) {
     }
   };
 
+  // Handle pagination
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+  };
+
+  const handleItemsPerPageChange = (newItemsPerPage) => {
+    setItemsPerPage(newItemsPerPage);
+  };
+
   // If a tenant is selected, show tenant details
   if (selectedTenant) {
     return (
@@ -276,133 +299,144 @@ function TenantsPanel({ showNotification }) {
                 No tenants found. Add tenants using the button above.
               </Alert>
             ) : (
-              <TableContainer component={Paper} variant="outlined">
-                <Table>
-                  <TableHead sx={{ bgcolor: 'primary.light' }}>
-                    <TableRow>
-                      <TableCell>Tenant Name</TableCell>
-                      <TableCell>Contact Information</TableCell>
-                      <TableCell>Personal Details</TableCell>
-                      <TableCell>Assigned Property</TableCell>
-                      <TableCell align="right">Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {filteredTenants.map((tenant) => (
-                      <TableRow
-                        key={tenant.id}
-                        hover
-                        sx={{
-                          cursor: 'pointer',
-                          '&:hover': { bgcolor: 'action.hover' }
-                        }}
-                        onClick={() => handleViewTenant(tenant)}
-                      >
-                        <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                            <PersonIcon sx={{ mr: 1, color: 'primary.main' }} />
-                            <Typography variant="subtitle1">
-                              {tenant.name}
-                            </Typography>
-                          </Box>
-                        </TableCell>
-                        <TableCell>
-                          <Stack spacing={1}>
-                            {tenant.email && (
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <EmailIcon fontSize="small" color="action" />
-                                <Typography variant="body2">{tenant.email}</Typography>
-                              </Box>
-                            )}
-                            {tenant.phone && (
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <PhoneIcon fontSize="small" color="action" />
-                                <Typography variant="body2">{tenant.phone}</Typography>
-                              </Box>
-                            )}
-                          </Stack>
-                        </TableCell>
-                        <TableCell>
-                          <Stack spacing={1}>
-                            {tenant.bornOn && (
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <BirthdayIcon fontSize="small" color="action" />
-                                <Typography variant="body2">
-                                  {formatDate(tenant.bornOn)}
-                                </Typography>
-                              </Box>
-                            )}
-                            {tenant.refundIban && (
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <IbanIcon fontSize="small" color="action" />
-                                <Typography variant="body2">
-                                  {tenant.refundIban}
-                                </Typography>
-                              </Box>
-                            )}
-                          </Stack>
-                        </TableCell>
-                        <TableCell>
-                          {tenant.apartment_id ? (
-                            <Chip
-                              icon={<HomeIcon />}
-                              label={getApartmentAddress(tenant.apartment_id)}
-                              color="primary"
-                              variant="outlined"
-                              size="small"
-                            />
-                          ) : (
-                            <Chip
-                              label="Not Assigned"
-                              color="default"
-                              variant="outlined"
-                              size="small"
-                            />
-                          )}
-                        </TableCell>
-                        <TableCell align="right" onClick={(e) => e.stopPropagation()}>
-                          <Tooltip title="View Details">
-                            <IconButton
-                              color="info"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleViewTenant(tenant);
-                              }}
-                              size="small"
-                            >
-                              <ViewIcon />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Edit Tenant">
-                            <IconButton
-                              color="primary"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenDialog(tenant);
-                              }}
-                              size="small"
-                            >
-                              <EditIcon />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Delete Tenant">
-                            <IconButton
-                              color="error"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openDeleteConfirmation(tenant);
-                              }}
-                              size="small"
-                            >
-                              <DeleteIcon />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
+              <>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table>
+                    <TableHead sx={{ bgcolor: 'primary.light' }}>
+                      <TableRow>
+                        <TableCell>Tenant Name</TableCell>
+                        <TableCell>Contact Information</TableCell>
+                        <TableCell>Personal Details</TableCell>
+                        <TableCell>Assigned Property</TableCell>
+                        <TableCell align="right">Actions</TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+                    </TableHead>
+                    <TableBody>
+                      {paginatedTenants.map((tenant) => (
+                        <TableRow
+                          key={tenant.id}
+                          hover
+                          sx={{
+                            cursor: 'pointer',
+                            '&:hover': { bgcolor: 'action.hover' }
+                          }}
+                          onClick={() => handleViewTenant(tenant)}
+                        >
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                              <PersonIcon sx={{ mr: 1, color: 'primary.main' }} />
+                              <Typography variant="subtitle1">
+                                {tenant.name}
+                              </Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            <Stack spacing={1}>
+                              {tenant.email && (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <EmailIcon fontSize="small" color="action" />
+                                  <Typography variant="body2">{tenant.email}</Typography>
+                                </Box>
+                              )}
+                              {tenant.phone && (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <PhoneIcon fontSize="small" color="action" />
+                                  <Typography variant="body2">{tenant.phone}</Typography>
+                                </Box>
+                              )}
+                            </Stack>
+                          </TableCell>
+                          <TableCell>
+                            <Stack spacing={1}>
+                              {tenant.bornOn && (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <BirthdayIcon fontSize="small" color="action" />
+                                  <Typography variant="body2">
+                                    {formatDate(tenant.bornOn)}
+                                  </Typography>
+                                </Box>
+                              )}
+                              {tenant.refundIban && (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <IbanIcon fontSize="small" color="action" />
+                                  <Typography variant="body2">
+                                    {tenant.refundIban}
+                                  </Typography>
+                                </Box>
+                              )}
+                            </Stack>
+                          </TableCell>
+                          <TableCell>
+                            {tenant.apartment_id ? (
+                              <Chip
+                                icon={<HomeIcon />}
+                                label={getApartmentAddress(tenant.apartment_id)}
+                                color="primary"
+                                variant="outlined"
+                                size="small"
+                              />
+                            ) : (
+                              <Chip
+                                label="Not Assigned"
+                                color="default"
+                                variant="outlined"
+                                size="small"
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell align="right" onClick={(e) => e.stopPropagation()}>
+                            <Tooltip title="View Details">
+                              <IconButton
+                                color="info"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleViewTenant(tenant);
+                                }}
+                                size="small"
+                              >
+                                <ViewIcon />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Edit Tenant">
+                              <IconButton
+                                color="primary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenDialog(tenant);
+                                }}
+                                size="small"
+                              >
+                                <EditIcon />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Delete Tenant">
+                              <IconButton
+                                color="error"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openDeleteConfirmation(tenant);
+                                }}
+                                size="small"
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+
+                {/* Pagination component */}
+                <Pagination
+                  totalItems={filteredTenants.length}
+                  itemsPerPage={itemsPerPage}
+                  currentPage={currentPage}
+                  onPageChange={handlePageChange}
+                  onItemsPerPageChange={handleItemsPerPageChange}
+                />
+              </>
             )}
           </>
         )}

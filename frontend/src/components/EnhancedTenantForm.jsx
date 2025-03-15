@@ -41,9 +41,8 @@ function EnhancedTenantForm({
         lastName: ''
       });
     }
-  }, [editingTenant, formData.name]);
+  }, [editingTenant]);  // Update full name when first or last name changes
 
-  // Update full name when first or last name changes
   useEffect(() => {
     const fullName = `${nameFields.firstName} ${nameFields.lastName}`.trim();
     setFormData(prev => ({

@@ -33,12 +33,16 @@ import {
   Home as HomeIcon,
   Phone as PhoneIcon,
   Email as EmailIcon,
+  Person as PersonIcon,
   Visibility as ViewIcon,
-  CreditCard as IbanIcon
+  LocationOn as LocationIcon,
+  AccountBalance as BankIcon
 } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
 import LandlordDetails from './LandlordDetails';
 import EnhancedLandlordForm from './EnhancedLandlordForm';
+import Pagination from './common/Pagination';
 
 function LandlordsPanel({ showNotification }) {
   const [landlords, setLandlords] = useState([]);
@@ -61,6 +65,13 @@ function LandlordsPanel({ showNotification }) {
   const [landlordToDelete, setLandlordToDelete] = useState(null);
   const [selectedLandlord, setSelectedLandlord] = useState(null);
 
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [paginatedLandlords, setPaginatedLandlords] = useState([]);
+
+  const navigate = useNavigate();
+
   // Fetch landlords data
   useEffect(() => {
     fetchData();
@@ -70,19 +81,27 @@ function LandlordsPanel({ showNotification }) {
   useEffect(() => {
     if (!searchQuery) {
       setFilteredLandlords(landlords);
-      return;
+    } else {
+      const query = searchQuery.toLowerCase();
+      const filtered = landlords.filter(landlord =>
+        landlord.name.toLowerCase().includes(query) ||
+        landlord.company_name.toLowerCase().includes(query) ||
+        (landlord.email && landlord.email.toLowerCase().includes(query)) ||
+        (landlord.phone && landlord.phone.toLowerCase().includes(query)) ||
+        (landlord.company_address && landlord.company_address.toLowerCase().includes(query))
+      );
+      setFilteredLandlords(filtered);
     }
-
-    const query = searchQuery.toLowerCase();
-    const filtered = landlords.filter(landlord =>
-      landlord.name.toLowerCase().includes(query) ||
-      landlord.company_name.toLowerCase().includes(query) ||
-      (landlord.email && landlord.email.toLowerCase().includes(query)) ||
-      (landlord.phone && landlord.phone.toLowerCase().includes(query)) ||
-      (landlord.company_address && landlord.company_address.toLowerCase().includes(query))
-    );
-    setFilteredLandlords(filtered);
+    // Reset to first page when search changes
+    setCurrentPage(1);
   }, [searchQuery, landlords]);
+
+  // Update paginated landlords when filtered landlords or pagination settings change
+  useEffect(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    setPaginatedLandlords(filteredLandlords.slice(startIndex, endIndex));
+  }, [filteredLandlords, currentPage, itemsPerPage]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -192,6 +211,15 @@ function LandlordsPanel({ showNotification }) {
     setSelectedLandlord(landlord.id);
   };
 
+  // Handle pagination
+  const handlePageChange = (page) => {
+    setCurrentPage(page);
+  };
+
+  const handleItemsPerPageChange = (newItemsPerPage) => {
+    setItemsPerPage(newItemsPerPage);
+  };
+
   // If a landlord is selected, show landlord details
   if (selectedLandlord) {
     return (
@@ -257,108 +285,127 @@ function LandlordsPanel({ showNotification }) {
                 No landlords found. Add landlords using the button above.
               </Alert>
             ) : (
-              <TableContainer component={Paper} variant="outlined">
-                <Table>
-                  <TableHead sx={{ bgcolor: 'primary.light' }}>
-                    <TableRow>
-                      <TableCell>Company Name</TableCell>
-                      <TableCell>Landlord Name</TableCell>
-                      <TableCell>Contact Information</TableCell>
-                      <TableCell>Properties</TableCell>
-                      <TableCell align="right">Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {filteredLandlords.map((landlord) => (
-                      <TableRow
-                        key={landlord.id}
-                        hover
-                        sx={{
-                          cursor: 'pointer',
-                          '&:hover': { bgcolor: 'action.hover' }
-                        }}
-                        onClick={() => handleViewLandlord(landlord)}
-                      >
-                        <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                            <BusinessIcon sx={{ mr: 1, color: 'primary.main' }} />
-                            <Typography variant="subtitle1">
-                              {landlord.company_name}
-                            </Typography>
-                          </Box>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body1">{landlord.name}</Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Stack spacing={1}>
-                            {landlord.email && (
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <EmailIcon fontSize="small" color="action" />
-                                <Typography variant="body2">{landlord.email}</Typography>
-                              </Box>
-                            )}
-                            {landlord.phone && (
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <PhoneIcon fontSize="small" color="action" />
-                                <Typography variant="body2">{landlord.phone}</Typography>
-                              </Box>
-                            )}
-                          </Stack>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            icon={<HomeIcon />}
-                            label={`${landlord.apartment_count || 0} properties`}
-                            color="primary"
-                            variant="outlined"
-                            size="small"
-                          />
-                        </TableCell>
-                        <TableCell align="right" onClick={(e) => e.stopPropagation()}>
-                          <Tooltip title="View Details">
-                            <IconButton
-                              color="info"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleViewLandlord(landlord);
-                              }}
-                              size="small"
-                            >
-                              <ViewIcon />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Edit Landlord">
-                            <IconButton
-                              color="primary"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenDialog(landlord);
-                              }}
-                              size="small"
-                            >
-                              <EditIcon />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Delete Landlord">
-                            <IconButton
-                              color="error"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openDeleteConfirmation(landlord);
-                              }}
-                              size="small"
-                              disabled={landlord.apartment_count > 0}
-                            >
-                              <DeleteIcon />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
+              <>
+                <TableContainer component={Paper} variant="outlined">
+                  <Table>
+                    <TableHead sx={{ bgcolor: 'primary.light' }}>
+                      <TableRow>
+                        <TableCell>Company Name</TableCell>
+                        <TableCell>Landlord Name</TableCell>
+                        <TableCell>Contact Information</TableCell>
+                        <TableCell>Properties</TableCell>
+                        <TableCell align="right">Actions</TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
+                    </TableHead>
+                    <TableBody>
+                      {paginatedLandlords.map((landlord) => (
+                        <TableRow
+                          key={landlord.id}
+                          hover
+                          sx={{
+                            cursor: 'pointer',
+                            '&:hover': { bgcolor: 'action.hover' }
+                          }}
+                          onClick={() => handleViewLandlord(landlord)}
+                        >
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                              <BusinessIcon sx={{ mr: 1, color: 'primary.main' }} />
+                              <Typography variant="subtitle1">
+                                {landlord.company_name}
+                              </Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            <Typography variant="body1">{landlord.name}</Typography>
+                          </TableCell>
+                          <TableCell>
+                            <Stack spacing={1}>
+                              {landlord.email && (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <EmailIcon fontSize="small" color="action" />
+                                  <Typography variant="body2">{landlord.email}</Typography>
+                                </Box>
+                              )}
+                              {landlord.phone && (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <PhoneIcon fontSize="small" color="action" />
+                                  <Typography variant="body2">{landlord.phone}</Typography>
+                                </Box>
+                              )}
+                              {landlord.company_address && (
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                  <LocationIcon fontSize="small" color="action" />
+                                  <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+                                    {landlord.company_address}
+                                  </Typography>
+                                </Box>
+                              )}
+                            </Stack>
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              icon={<HomeIcon />}
+                              label={`${landlord.apartment_count || 0} properties`}
+                              color="primary"
+                              variant="outlined"
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell align="right" onClick={(e) => e.stopPropagation()}>
+                            <Tooltip title="View Details">
+                              <IconButton
+                                color="info"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleViewLandlord(landlord);
+                                }}
+                                size="small"
+                              >
+                                <ViewIcon />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Edit Landlord">
+                              <IconButton
+                                color="primary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenDialog(landlord);
+                                }}
+                                size="small"
+                              >
+                                <EditIcon />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Delete Landlord">
+                              <IconButton
+                                color="error"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openDeleteConfirmation(landlord);
+                                }}
+                                size="small"
+                                disabled={landlord.apartment_count > 0}
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+
+                {/* Pagination component */}
+                <Pagination
+                  totalItems={filteredLandlords.length}
+                  itemsPerPage={itemsPerPage}
+                  currentPage={currentPage}
+                  onPageChange={handlePageChange}
+                  onItemsPerPageChange={handleItemsPerPageChange}
+                />
+              </>
             )}
           </>
         )}

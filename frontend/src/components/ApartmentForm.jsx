@@ -10,9 +10,7 @@ import {
   Avatar,
   Tooltip
 } from '@mui/material';
-import {
-  Person as PersonIcon
-} from '@mui/icons-material';
+import { Person as PersonIcon } from '@mui/icons-material';
 import api from '../utils/api';
 import ApartmentDetailsForm from './ApartmentDetailsForm';
 import { getUserData } from '../utils/api';
@@ -54,7 +52,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   const [availableTenants, setAvailableTenants] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Fetch the list of apartments once on component mount
+  // Fetch the list of tenants once on component mount
   useEffect(() => {
     const fetchTenants = async () => {
       try {
@@ -167,15 +165,37 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     }
   }, [isEdit, initialData, availableTenants]);
 
-  // Handle input changes for the main form fields
+  // Handle input changes for the main form fields with model-specific logic
   const handleChange = (e, isNumber) => {
     const { name, value } = e.target;
     const processedValue = isNumber ? (value ? parseFloat(value) : 0) : value;
 
-    setFormData({
-      ...formData,
-      [name]: processedValue
-    });
+    // When changing the model, clear data that doesn't apply to the new model
+    if (name === 'model') {
+      if (processedValue === 'management') {
+        setFormData(prev => ({
+          ...prev,
+          model: processedValue,
+          rentCost: 0  // Clear rental data when switching to management
+        }));
+      } else if (processedValue === 'rental') {
+        setFormData(prev => ({
+          ...prev,
+          model: processedValue,
+          managementFee: 0  // Clear management data when switching to rental
+        }));
+      } else {
+        setFormData(prev => ({
+          ...prev,
+          [name]: processedValue
+        }));
+      }
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [name]: processedValue
+      }));
+    }
   };
 
   // Handle changes for tenant fields

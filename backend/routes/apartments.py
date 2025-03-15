@@ -30,7 +30,7 @@ def add_apartment_route() -> Tuple[Response, int]:
         except ValidationError as e:
             return jsonify({"message": "Invalid data", "errors": e.errors()}), 400
 
-        apartment = Apartment(**data["new_apartment"].model_dump(exclude={"tenants"}))
+        apartment = Apartment(**data["new_apartment"])
 
         db.session.add(apartment)
         db.session.flush()  # Ensure apartment ID is assigned before adding tenants

@@ -1,4 +1,4 @@
-# app.py - Updated with logs blueprint
+# app.py
 from flask import Flask, current_app
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -7,7 +7,7 @@ from flasgger import Swagger
 from extentions import db, jwt, bcrypt
 from sqlalchemy.exc import OperationalError
 import time
-from models.models import Apartment, Tenant, User
+from models.models import Apartment, Tenant, User, Landlord
 from initalized.init_user import ensure_admin_user_exists
 from initalized.init_apartment import (
     ensure_default_apartment_exists,
@@ -83,11 +83,14 @@ def create_app():
             from routes.auth_routes import auth_bp
             from routes.apartments import apartments_bp
             from routes.tenants import tenants_bp
+            from routes.landlords import (
+                landlords_bp,
+            )  # Import the new landlords blueprint
             from routes.adminPanel.user_actions import adminPanel_bp
             from routes.payments import payments_bp
             from routes.analytics import analytics_bp
             from routes.documents import documents_bp
-            from routes.logs import logs_bp  # Import the new logs blueprint
+            from routes.logs import logs_bp
             from routes.payment_history import payment_history_bp
             from routes.contracts import contracts_bp
 
@@ -95,14 +98,15 @@ def create_app():
             app.register_blueprint(adminPanel_bp, url_prefix="/api/adminPanel")
             app.register_blueprint(apartments_bp, url_prefix="/api/")
             app.register_blueprint(tenants_bp, url_prefix="/api/")
+            app.register_blueprint(
+                landlords_bp, url_prefix="/api/"
+            )  # Register landlords blueprint
             app.register_blueprint(payments_bp, url_prefix="/api/")
             app.register_blueprint(analytics_bp, url_prefix="/api/")
             app.register_blueprint(payment_history_bp, url_prefix="/api")
             app.register_blueprint(documents_bp, url_prefix="/api/documents")
             app.register_blueprint(contracts_bp, url_prefix="/api/documents")
-            app.register_blueprint(
-                logs_bp, url_prefix="/api"
-            )  # Register logs blueprint
+            app.register_blueprint(logs_bp, url_prefix="/api")
             app.logger.info("Blueprints registered")
         except Exception as e:
             app.logger.error(f"Error registering blueprints: {e}")

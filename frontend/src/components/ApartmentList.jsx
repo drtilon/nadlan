@@ -1,4 +1,3 @@
-// Updated ApartmentList.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -43,6 +42,17 @@ import FilterListIcon from '@mui/icons-material/FilterList';
 import DescriptionIcon from '@mui/icons-material/Description';
 import api, { getUserData } from '../utils/api';
 
+// Function to fetch landlord data
+const fetchLandlordData = async (landlordId) => {
+  try {
+    const response = await api.get(`/landlords/${landlordId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching landlord data:', error);
+    return null;
+  }
+};
+
 function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   const [apartments, setApartments] = useState([]);
   const [filteredApartments, setFilteredApartments] = useState([]);
@@ -50,6 +60,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   const [selectedApartment, setSelectedApartment] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [landlordData, setLandlordData] = useState({});
 
   // Get user data to check if admin
   const userData = getUserData();
@@ -66,21 +77,36 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     }
     try {
       const response = await api.get('/list');
-      const normalizedApartments = response.data.map(apartment => {
-        let normalizedStatus = apartment.status;
-        if (apartment.status === 'מושכר' || apartment.status === 'Rented') {
-          normalizedStatus = 'occupied';
-        } else if (apartment.status === 'פנוי' || apartment.status === 'Available') {
-          normalizedStatus = 'vacant';
-        } else if (apartment.status === 'חוזה נשלח' || apartment.status === 'Contract Sent') {
-          normalizedStatus = 'contract_sent';
-        }
-        return {
-          ...apartment,
-          status: normalizedStatus,
-          displayStatus: apartment.status
-        };
-      });
+      const normalizedApartments = await Promise.all(
+        response.data.map(async (apartment) => {
+          let normalizedStatus = apartment.status;
+          if (apartment.status === 'מושכר' || apartment.status === 'Rented') {
+            normalizedStatus = 'occupied';
+          } else if (apartment.status === 'פנוי' || apartment.status === 'Available') {
+            normalizedStatus = 'vacant';
+          } else if (apartment.status === 'חוזה נשלח' || apartment.status === 'Contract Sent') {
+            normalizedStatus = 'contract_sent';
+          }
+
+          // Fetch landlord data if only landlord_id is provided
+          let landlordInfo = {};
+          if (apartment.landlord_id && !apartment.landlord) {
+            const landlord = await fetchLandlordData(apartment.landlord_id);
+            landlordInfo = landlord || {};
+            setLandlordData(prev => ({
+              ...prev,
+              [apartment.landlord_id]: landlordInfo
+            }));
+          }
+
+          return {
+            ...apartment,
+            status: normalizedStatus,
+            displayStatus: apartment.status,
+            landlord: apartment.landlord || landlordInfo
+          };
+        })
+      );
       setApartments(normalizedApartments);
       setFilteredApartments(normalizedApartments);
     } catch (error) {
@@ -95,18 +121,16 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     }
   };
 
-  // More reliable handler for contract generation
   const handleGenerateContract = (apartmentId, e) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
     }
-    
-    setDetailsOpen(false); // Close details dialog if open
+
+    setDetailsOpen(false);
     generateContract(apartmentId);
   };
-  
-  // Separate function for contract generation logic
+
   const generateContract = async (apartmentId) => {
     try {
       const response = await api.post('/documents/createContract', {
@@ -115,15 +139,12 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         responseType: 'blob'
       });
 
-      // Create a blob from the response data
       const blob = new Blob([response.data], {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
       });
 
-      // Create a link element and trigger download
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
-      // Get apartment details for filename
       const apartment = apartments.find(apt => apt.id === apartmentId);
       const fileName = `Rental_Contract_${apartment ? (apartment.address || 'Apartment') : 'Apartment'}.docx`;
 
@@ -234,31 +255,26 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     return address && address.charAt(0).toUpperCase();
   };
 
-  // Improved handler for edit button
   const handleEditClick = (apartment, e) => {
     e.preventDefault();
     e.stopPropagation();
     onEdit(apartment);
   };
 
-  // Improved handler for payment button
   const handlePaymentClick = (apartmentId, e) => {
     e.preventDefault();
     e.stopPropagation();
     onGoToPayments(apartmentId);
   };
-  
-  // Improved handler for details button
+
   const handleDetailsClick = (apartment, e) => {
     e.preventDefault();
     e.stopPropagation();
     openDetails(apartment);
   };
 
-  // Format currency
   const formatCurrency = (amount) => {
     if (amount === undefined || amount === null) return '';
-    
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
@@ -267,20 +283,95 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     }).format(amount);
   };
 
-  // Format date
   const formatDate = (dateString) => {
     if (!dateString) return 'Not provided';
-
     try {
       const date = new Date(dateString);
       if (isNaN(date.getTime())) {
-        // If not a valid date object, return as is
         return dateString;
       }
       return date.toLocaleDateString();
     } catch (error) {
       return dateString;
     }
+  };
+
+  const getLandlordInfo = (apartment) => {
+    if (apartment.landlord) {
+      return {
+        name: apartment.landlord.name || 'Not specified',
+        email: apartment.landlord.email || '',
+        phone: apartment.landlord.phone || ''
+      };
+    }
+
+    if (apartment.landlord_id && landlordData[apartment.landlord_id]) {
+      return {
+        name: landlordData[apartment.landlord_id].name || 'Not specified',
+        email: landlordData[apartment.landlord_id].email || '',
+        phone: landlordData[apartment.landlord_id].phone || ''
+      };
+    }
+
+    return {
+      name: apartment.landlordName || 'Not specified',
+      email: apartment.landlordEmail || '',
+      phone: apartment.landlordPhone || ''
+    };
+  };
+
+  const LandlordSection = ({ apartment }) => {
+    const landlordInfo = getLandlordInfo(apartment);
+
+    return (
+      <Grid item xs={12} sx={{ mt: 2 }}>
+        <Typography
+          variant="subtitle1"
+          sx={{
+            fontWeight: 600,
+            mb: 2,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1
+          }}
+        >
+          <PersonIcon color="primary" fontSize="small" />
+          Landlord Information
+        </Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={4}>
+            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                Name
+              </Typography>
+              <Typography variant="body2" fontWeight={500}>
+                {landlordInfo.name}
+              </Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={12} sm={4}>
+            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                Email
+              </Typography>
+              <Typography variant="body2" fontWeight={500}>
+                {landlordInfo.email || 'Not provided'}
+              </Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={12} sm={4}>
+            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                Phone
+              </Typography>
+              <Typography variant="body2" fontWeight={500}>
+                {landlordInfo.phone || 'Not provided'}
+              </Typography>
+            </Box>
+          </Grid>
+        </Grid>
+      </Grid>
+    );
   };
 
   if (isLoading) {
@@ -302,7 +393,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
-      {/* Header */}
       <Box
         sx={{
           display: 'flex',
@@ -332,42 +422,41 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             width: { xs: '100%', md: 'auto' }
           }}
         >
-            <Button
-              variant="outlined"
-              startIcon={<FileDownloadIcon />}
-              onClick={handleExport}
-              sx={{
-                borderRadius: 1,
-                textTransform: 'none',
-                fontWeight: 500,
-                borderWidth: 1.5,
-                px: 3,
-                height: '48px'
-              }}
-            >
-              Export
-            </Button>
+          <Button
+            variant="outlined"
+            startIcon={<FileDownloadIcon />}
+            onClick={handleExport}
+            sx={{
+              borderRadius: 1,
+              textTransform: 'none',
+              fontWeight: 500,
+              borderWidth: 1.5,
+              px: 3,
+              height: '48px'
+            }}
+          >
+            Export
+          </Button>
 
-            <Button
-              variant="contained"
-              startIcon={<ApartmentIcon />}
-              onClick={() => onEdit(null)}
-              sx={{
-                borderRadius: 1,
-                textTransform: 'none',
-                fontWeight: 500,
-                backgroundColor: 'primary.main',
-                px: 3,
-                height: '48px',
-                boxShadow: 2
-              }}
-            >
-              Add Property
-            </Button>
+          <Button
+            variant="contained"
+            startIcon={<ApartmentIcon />}
+            onClick={() => onEdit(null)}
+            sx={{
+              borderRadius: 1,
+              textTransform: 'none',
+              fontWeight: 500,
+              backgroundColor: 'primary.main',
+              px: 3,
+              height: '48px',
+              boxShadow: 2
+            }}
+          >
+            Add Property
+          </Button>
         </Box>
       </Box>
 
-      {/* Search and Filter */}
       <Box
         sx={{
           display: 'flex',
@@ -416,7 +505,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         </Button>
       </Box>
 
-      {/* Empty State */}
       {filteredApartments.length === 0 ? (
         <Box
           sx={{
@@ -453,7 +541,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
           )}
         </Box>
       ) : (
-        /* Property Grid */
         <Grid container spacing={3}>
           {filteredApartments.map((apartment) => (
             <Grid item xs={12} sm={6} md={4} lg={3} key={apartment.id}>
@@ -475,7 +562,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   cursor: 'pointer'
                 }}
               >
-                {/* Property Header */}
                 <Box
                   sx={{
                     p: 2,
@@ -516,7 +602,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   {getStatusChip(apartment.status)}
                 </Box>
 
-                {/* Property Content */}
                 <CardContent sx={{ p: 2 }}>
                   <Box sx={{ mb: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5, gap: 1 }}>
@@ -562,7 +647,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   </Box>
                   <Divider sx={{ my: 2 }} />
 
-                  {/* Action Buttons */}
                   <Box
                     sx={{
                       display: 'flex',
@@ -570,13 +654,12 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       mt: 1
                     }}
                   >
-                    {/* Payment Button - Fixed by making it an IconButton with text */}
-                    <Box 
+                    <Box
                       onClick={(e) => handlePaymentClick(apartment.id, e)}
-                      sx={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: 0.5, 
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.5,
                         cursor: 'pointer',
                         borderRadius: 1,
                         py: 0.5,
@@ -585,10 +668,10 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       }}
                     >
                       <PaymentIcon fontSize="small" color="primary" />
-                      <Typography 
-                        variant="body2" 
+                      <Typography
+                        variant="body2"
                         color="primary"
-                        sx={{ 
+                        sx={{
                           fontWeight: 500,
                           fontSize: '0.8rem',
                           userSelect: 'none'
@@ -597,9 +680,8 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                         Payments
                       </Typography>
                     </Box>
-                    
+
                     <Box sx={{ display: 'flex', gap: 1 }}>
-                      {/* Contract Generation Button */}
                       <Tooltip title="Generate Contract">
                         <IconButton
                           size="small"
@@ -609,20 +691,17 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                           <DescriptionIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-                      
-                      {/* Edit Property Button - Only for admins */}
-                        <Tooltip title="Edit Property">
-                          <IconButton
-                            size="small"
-                            onClick={(e) => handleEditClick(apartment, e)}
-                            sx={{ color: 'primary.main' }}
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      
-                      
-                      {/* Details Button */}
+
+                      <Tooltip title="Edit Property">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => handleEditClick(apartment, e)}
+                          sx={{ color: 'primary.main' }}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+
                       <Button
                         size="small"
                         variant="outlined"
@@ -647,7 +726,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         </Grid>
       )}
 
-      {/* Property Details Dialog */}
       <Dialog
         open={detailsOpen}
         onClose={() => setDetailsOpen(false)}
@@ -690,7 +768,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             </DialogTitle>
 
             <DialogContent dividers sx={{ p: 0 }}>
-              {/* Property Status Banner */}
               <Box
                 sx={{
                   p: 2,
@@ -711,19 +788,19 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       selectedApartment.status === 'occupied'
                         ? 'Occupied'
                         : selectedApartment.status === 'vacant'
-                        ? 'Vacant'
-                        : selectedApartment.status === 'contract_sent'
-                        ? 'Contract Sent'
-                        : selectedApartment.status || 'Unknown'
+                          ? 'Vacant'
+                          : selectedApartment.status === 'contract_sent'
+                            ? 'Contract Sent'
+                            : selectedApartment.status || 'Unknown'
                     }
                     color={
                       selectedApartment.status === 'occupied'
                         ? 'success'
                         : selectedApartment.status === 'vacant'
-                        ? 'primary'
-                        : selectedApartment.status === 'contract_sent'
-                        ? 'warning'
-                        : 'default'
+                          ? 'primary'
+                          : selectedApartment.status === 'contract_sent'
+                            ? 'warning'
+                            : 'default'
                     }
                     size="small"
                   />
@@ -802,7 +879,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                           </Typography>
                         </Box>
                       </Grid>
-                      {/* Only show model to admins */}
                       {isAdmin && (
                         <Grid item xs={12} sm={6} md={3}>
                           <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
@@ -813,12 +889,22 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                               {selectedApartment.model === 'management'
                                 ? 'Property Management'
                                 : selectedApartment.model === 'rental'
-                                ? 'Rental Property'
-                                : selectedApartment.model || 'Not specified'}
+                                  ? 'Rental Property'
+                                  : selectedApartment.model || 'Not specified'}
                             </Typography>
                           </Box>
                         </Grid>
                       )}
+                      <Grid item xs={12} sm={6} md={3}>
+                        <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                          <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                            Monthly Rent
+                          </Typography>
+                          <Typography variant="body2" fontWeight={500}>
+                            {formatCurrency(selectedApartment.rent)}
+                          </Typography>
+                        </Box>
+                      </Grid>
                     </Grid>
                   </Grid>
 
@@ -844,7 +930,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                             Move-In Date
                           </Typography>
                           <Typography variant="body2" fontWeight={500}>
-                            {selectedApartment.moveInDate ? new Date(selectedApartment.moveInDate).toLocaleDateString() : 'Not set'}
+                            {formatDate(selectedApartment.moveInDate)}
                           </Typography>
                         </Box>
                       </Grid>
@@ -854,15 +940,15 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                             Contract End Date
                           </Typography>
                           <Typography variant="body2" fontWeight={500}>
-                            {selectedApartment.contractEndDate ? new Date(selectedApartment.contractEndDate).toLocaleDateString() : 'Not set'}
+                            {formatDate(selectedApartment.contractEndDate)}
                           </Typography>
                         </Box>
                       </Grid>
                     </Grid>
                   </Grid>
 
-                  {/* Landlord Information - Only shown to admins */}
-                  {isAdmin && (
+                  {/* Tenant Information */}
+                  {selectedApartment.tenants && (
                     <Grid item xs={12} sx={{ mt: 2 }}>
                       <Typography
                         variant="subtitle1"
@@ -875,230 +961,49 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                         }}
                       >
                         <PersonIcon color="primary" fontSize="small" />
-                        Landlord Information
-                      </Typography>
-                      <Box
-                        sx={{
-                          p: 2,
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 1,
-                          display: 'flex',
-                          flexDirection: { xs: 'column', sm: 'row' },
-                          gap: 2,
-                          justifyContent: 'space-between'
-                        }}
-                      >
-                        <Box>
-                          <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                            Name
-                          </Typography>
-                          <Typography variant="body2" fontWeight={500}>
-                            {selectedApartment.landlordName || 'Not specified'}
-                          </Typography>
-                        </Box>
-                        {selectedApartment.landlordPhone && (
-                          <Box>
-                            <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                              Phone
-                            </Typography>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                              <PhoneIcon color="primary" fontSize="small" />
-                              <Typography variant="body2" fontWeight={500}>
-                                {selectedApartment.landlordPhone}
-                              </Typography>
-                            </Box>
-                          </Box>
-                        )}
-                        {selectedApartment.landlordEmail && (
-                          <Box>
-                            <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                              Email
-                            </Typography>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                              <EmailIcon color="primary" fontSize="small" />
-                              <Typography variant="body2" fontWeight={500}>
-                                {selectedApartment.landlordEmail}
-                              </Typography>
-                            </Box>
-                          </Box>
-                        )}
-                      </Box>
-                    </Grid>
-                  )}
-
-                  {/* Tenants */}
-                  <Grid item xs={12} sx={{ mt: 2 }}>
-                    <Typography                    
-                      variant="subtitle1"
-                      sx={{
-                        fontWeight: 600,
-                        mb: 2,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 1
-                      }}
-                    >
-                      <PersonIcon color="primary" fontSize="small" />
-                      Current Tenants
-                    </Typography>
-                    <Box
-                      sx={{
-                        p: 2,
-                        border: '1px solid',
-                        borderColor: 'divider',
-                        borderRadius: 1
-                      }}
-                    >
-                      {selectedApartment.tenants ? (
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                          {Array.isArray(selectedApartment.tenants) ? (
-                            selectedApartment.tenants.map((tenant, index) => (
-                              <Chip
-                                key={tenant.id || index}
-                                label={
-                                  tenant.firstName && tenant.lastName
-                                    ? `${tenant.firstName} ${tenant.lastName}`
-                                    : tenant.name || 'Unnamed Tenant'
-                                }
-                                icon={<PersonIcon />}
-                                variant="outlined"
-                                color="primary"
-                                sx={{
-                                  borderRadius: 1,
-                                  fontWeight: tenant.isPrimary ? 600 : 400
-                                }}
-                              />
-                            ))
-                          ) : (
-                            selectedApartment.tenants.split(',').map((tenant, index) => (
-                              <Chip
-                                key={index}
-                                label={tenant.trim()}
-                                icon={<PersonIcon />}
-                                variant="outlined"
-                                color="primary"
-                                sx={{
-                                  borderRadius: 1
-                                }}
-                              />
-                            ))
-                          )}
-                        </Box>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">
-                          No tenants assigned to this property
-                        </Typography>
-                      )}
-                    </Box>
-                  </Grid>
-
-                  {/* Financial Information - Only visible to admins */}
-                  {isAdmin && (
-                    <Grid item xs={12} sx={{ mt: 2 }}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
-                        Financial Information
+                        Tenant Information
                       </Typography>
                       <Grid container spacing={2}>
-                        <Grid item xs={12} sm={6}>
+                        <Grid item xs={12}>
                           <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                             <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                              Monthly Rent
+                              Tenants
                             </Typography>
                             <Typography variant="body2" fontWeight={500}>
-                              {formatCurrency(selectedApartment.rent || 0)}
+                              {Array.isArray(selectedApartment.tenants)
+                                ? selectedApartment.tenants.map(t => t.firstName && t.lastName ? `${t.firstName} ${t.lastName}` : t.name).join(', ')
+                                : selectedApartment.tenants}
                             </Typography>
                           </Box>
                         </Grid>
-                        <Grid item xs={12} sm={6}>
-                          <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                            <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                              Security Deposit
-                            </Typography>
-                            <Typography variant="body2" fontWeight={500}>
-                              {formatCurrency(selectedApartment.deposit || 0)}
-                            </Typography>
-                          </Box>
-                        </Grid>
-                        {selectedApartment.model === 'management' && (
-                          <Grid item xs={12} sm={6}>
-                            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                                Management Fee
-                              </Typography>
-                              <Typography variant="body2" fontWeight={500}>
-                                {selectedApartment.managementFee || 0}%
-                              </Typography>
-                            </Box>
-                          </Grid>
-                        )}
-                        {selectedApartment.model === 'rental' && (
-                          <Grid item xs={12} sm={6}>
-                            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                                Rental Cost
-                              </Typography>
-                              <Typography variant="body2" fontWeight={500}>
-                                {formatCurrency(selectedApartment.rentCost || 0)}
-                              </Typography>
-                            </Box>
-                          </Grid>
-                        )}
                       </Grid>
                     </Grid>
                   )}
 
-                  {/* Notes - Only visible to admins */}
-                  {isAdmin && selectedApartment.notes && (
-                    <Grid item xs={12} sx={{ mt: 2 }}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
-                        Notes
-                      </Typography>
-                      <Box
-                        sx={{
-                          p: 2,
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 1,
-                          bgcolor: 'background.default'
-                        }}
-                      >
-                        <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
-                          {selectedApartment.notes}
-                        </Typography>
-                      </Box>
-                    </Grid>
-                  )}
+                  {/* Landlord Information */}
+                  {isAdmin && <LandlordSection apartment={selectedApartment} />}
                 </Grid>
               </Box>
             </DialogContent>
 
-            {/* Updated Dialog Actions with Generate Contract Button */}
-            <DialogActions sx={{ px: 3, pb: 3 }}>
+            <DialogActions sx={{ p: 2 }}>
               <Button
                 onClick={() => setDetailsOpen(false)}
                 variant="outlined"
-                sx={{
-                  borderRadius: 1,
-                  textTransform: 'none',
-                  px: 3
-                }}
+                sx={{ borderRadius: 1, textTransform: 'none' }}
               >
                 Close
               </Button>
-              <Button
-                onClick={() => handleGenerateContract(selectedApartment.id)}
-                variant="contained"
-                color="primary"
-                startIcon={<DescriptionIcon />}
-                sx={{
-                  borderRadius: 1,
-                  textTransform: 'none',
-                  px: 3
-                }}
-              >
-                Generate Contract
-              </Button>
+              {isAdmin && (
+                <Button
+                  onClick={() => handleGenerateContract(selectedApartment.id)}
+                  variant="contained"
+                  startIcon={<DescriptionIcon />}
+                  sx={{ borderRadius: 1, textTransform: 'none' }}
+                >
+                  Generate Contract
+                </Button>
+              )}
             </DialogActions>
           </>
         )}

@@ -1,7 +1,45 @@
+# models/models.py
 from datetime import date
 from flask_bcrypt import Bcrypt
 from extentions import db, bcrypt
 from datetime import datetime
+
+
+class Landlord(db.Model):
+    """Landlord model to store landlord details separate from apartments"""
+
+    __tablename__ = "landlords"
+    id = db.Column(db.Integer, primary_key=True)
+    company_name = db.Column(db.String(255), nullable=False)
+    name = db.Column(db.String(255), nullable=False)
+    email = db.Column(db.String(255), nullable=False)
+    phone = db.Column(db.String(255), nullable=False)
+    iban = db.Column(db.String(255), nullable=False)
+    company_address = db.Column(db.String(255), nullable=False)
+    notes = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+    # Relationship with apartments
+    apartments = db.relationship("Apartment", backref="landlord", lazy=True)
+
+    def to_dict(self):
+        """Convert Landlord object to dictionary"""
+        return {
+            "id": self.id,
+            "company_name": self.company_name,
+            "name": self.name,
+            "email": self.email,
+            "phone": self.phone,
+            "iban": self.iban,
+            "company_address": self.company_address,
+            "notes": self.notes,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "apartment_count": len(self.apartments) if self.apartments else 0,
+        }
 
 
 class Apartment(db.Model):
@@ -10,12 +48,10 @@ class Apartment(db.Model):
     address = db.Column(db.String(255), nullable=False)
     rooms = db.Column(db.Integer, nullable=False)
     size = db.Column(db.Float, nullable=False)
-    landlordCompanyName = db.Column(db.String(255), nullable=False)
-    landlordName = db.Column(db.String(255), nullable=False)
-    landlordEmail = db.Column(db.String(255), nullable=False)
-    landlordPhone = db.Column(db.String(255), nullable=False)
-    landlordIban = db.Column(db.String(255), nullable=False)
-    landlordCompanyAddress = db.Column(db.String(255), nullable=False)
+
+    # Foreign key to landlords table
+    landlord_id = db.Column(db.Integer, db.ForeignKey("landlords.id"), nullable=True)
+
     moveInDate = db.Column(db.Date, nullable=True)
     contractEndDate = db.Column(db.Date, nullable=True)
     rent = db.Column(db.Float, nullable=False)
@@ -44,6 +80,10 @@ class Apartment(db.Model):
         # Add tenants data if there are any
         if tenant_data:
             result["tenants"] = tenant_data
+
+        # Add landlord data if available
+        if self.landlord:
+            result["landlord"] = self.landlord.to_dict()
 
         return result
 
@@ -74,6 +114,8 @@ class Tenant(db.Model):
             "lastName": last_name,
             "email": self.email,
             "phone": self.phone,
+            "bornOn": self.bornOn,
+            "refundIban": self.refundIban,
             "apartment_id": self.apartment_id,
         }
 
@@ -118,7 +160,7 @@ class Payment(db.Model):
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
-    # New fields for payment history
+    # Fields for payment history
     paymentDate = db.Column(db.DateTime, nullable=True)
     paymentMethod = db.Column(db.String(50), nullable=True, default="bank_transfer")
     extraPayments = db.Column(db.Text, nullable=True)  # stored as JSON

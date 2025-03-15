@@ -1,8 +1,10 @@
-from models.models import Apartment, Tenant, User, Payment
+# initalized/init_apartment.py
+from models.models import Apartment, Tenant, User, Payment, Landlord
 from extentions import db
 from flask import current_app
 from datetime import date, datetime
 from sqlalchemy import inspect, text
+from .init_landlord import ensure_default_landlords_exist
 
 
 def ensure_db_schema():
@@ -43,6 +45,14 @@ def ensure_db_schema():
 
 
 def ensure_default_apartment_exists(new_tenants_data=None):
+    # First ensure that landlords exist
+    ensure_default_landlords_exist()
+
+    # Get the default landlord
+    default_landlord = Landlord.query.filter_by(
+        company_name="Default Company Name"
+    ).first()
+
     default_address = "Default Apartment Address"
     default_apartment = Apartment.query.filter_by(address=default_address).first()
 
@@ -52,12 +62,7 @@ def ensure_default_apartment_exists(new_tenants_data=None):
             address=default_address,
             rooms=3,
             size=100.0,
-            landlordCompanyName="Default Company Name",
-            landlordName="Default Landlord",
-            landlordEmail="landlord@example.com",
-            landlordPhone="1234567890",
-            landlordIban="DEFAULTIBAN",
-            landlordCompanyAddress="Default Company Address",
+            landlord_id=default_landlord.id if default_landlord else None,
             moveInDate=None,
             contractEndDate=None,
             rent=1200.00,
@@ -90,15 +95,15 @@ def ensure_default_apartment_exists(new_tenants_data=None):
             updated = True
             current_app.logger.info("Added missing model field to default apartment.")
 
+        # Update landlord_id if it's missing
+        if default_apartment.landlord_id is None and default_landlord is not None:
+            default_apartment.landlord_id = default_landlord.id
+            updated = True
+            current_app.logger.info("Set landlord_id for default apartment.")
+
         default_attrs = {
             "rooms": 3,
             "size": 100.0,
-            "landlordCompanyName": "Default Company Name",
-            "landlordName": "Default Landlord",
-            "landlordEmail": "landlord@example.com",
-            "landlordPhone": "1234567890",
-            "landlordIban": "DEFAULTIBAN",
-            "landlordCompanyAddress": "Default Company Address",
             "moveInDate": None,
             "contractEndDate": None,
             "rent": 1200.00,
@@ -162,6 +167,11 @@ def ensure_default_apartment_exists(new_tenants_data=None):
 
 
 def ensure_new_apartment_exists(new_tenants_data=None):
+    # Get the second landlord
+    second_landlord = Landlord.query.filter_by(
+        company_name="Second Company Name"
+    ).first()
+
     new_address = "New Apartment Address"
     new_apartment = Apartment.query.filter_by(address=new_address).first()
 
@@ -171,12 +181,7 @@ def ensure_new_apartment_exists(new_tenants_data=None):
             address=new_address,
             rooms=3,
             size=100.0,
-            landlordCompanyName="New Company Name",
-            landlordName="New Landlord",
-            landlordEmail="newlandlord@example.com",
-            landlordPhone="0987654321",
-            landlordIban="NEWIBAN",
-            landlordCompanyAddress="New Company Address",
+            landlord_id=second_landlord.id if second_landlord else None,
             moveInDate=None,
             contractEndDate=None,
             rent=1500.00,
@@ -209,15 +214,15 @@ def ensure_new_apartment_exists(new_tenants_data=None):
             updated = True
             current_app.logger.info("Added missing model field to new apartment.")
 
+        # Update landlord_id if it's missing
+        if new_apartment.landlord_id is None and second_landlord is not None:
+            new_apartment.landlord_id = second_landlord.id
+            updated = True
+            current_app.logger.info("Set landlord_id for new apartment.")
+
         default_attrs = {
             "rooms": 3,
             "size": 100.0,
-            "landlordCompanyName": "New Company Name",
-            "landlordName": "New Landlord",
-            "landlordEmail": "newlandlord@example.com",
-            "landlordPhone": "0987654321",
-            "landlordIban": "NEWIBAN",
-            "landlordCompanyAddress": "New Company Address",
             "moveInDate": None,
             "contractEndDate": None,
             "rent": 1500.00,

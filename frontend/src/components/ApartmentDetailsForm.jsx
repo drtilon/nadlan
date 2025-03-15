@@ -1,5 +1,5 @@
-// Updated ApartmentDetailsForm.jsx
-import React from 'react';
+// src/components/ApartmentDetailsForm.jsx
+import React, { useState, useEffect } from 'react';
 import {
   Typography,
   TextField,
@@ -12,7 +12,8 @@ import {
   CircularProgress,
   Box,
   Paper,
-  Divider
+  Divider,
+  Autocomplete
 } from '@mui/material';
 import {
   Home as HomeIcon,
@@ -21,8 +22,10 @@ import {
   Delete as DeleteIcon,
   Save as SaveIcon,
   Business as BusinessIcon,
-  AccountBalance as BankIcon
+  AccountBalance as BankIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
+import api from '../utils/api';
 
 const ApartmentDetailsForm = ({
   formData,
@@ -35,6 +38,46 @@ const ApartmentDetailsForm = ({
   tenantSelection,
   isAdmin // Property to check admin status
 }) => {
+  const [landlords, setLandlords] = useState([]);
+  const [selectedLandlord, setSelectedLandlord] = useState(null);
+  const [loadingLandlords, setLoadingLandlords] = useState(false);
+
+  // Fetch landlords on component mount
+  useEffect(() => {
+    fetchLandlords();
+  }, []);
+
+  // Set selected landlord when formData changes or when landlords are loaded
+  useEffect(() => {
+    if (landlords.length > 0 && formData.landlord_id) {
+      const landlord = landlords.find(l => l.id === formData.landlord_id);
+      setSelectedLandlord(landlord || null);
+    }
+  }, [formData.landlord_id, landlords]);
+
+  const fetchLandlords = async () => {
+    setLoadingLandlords(true);
+    try {
+      const response = await api.get('/landlords/list');
+      setLandlords(response.data || []);
+    } catch (error) {
+      console.error('Error fetching landlords:', error);
+    } finally {
+      setLoadingLandlords(false);
+    }
+  };
+
+  const handleLandlordChange = (event, newValue) => {
+    setSelectedLandlord(newValue);
+    // Update the formData with the selected landlord's ID
+    handleChange({
+      target: {
+        name: 'landlord_id',
+        value: newValue ? newValue.id : null
+      }
+    });
+  };
+
   // Section title component for consistent styling
   const SectionTitle = ({ icon, title }) => (
     <Box
@@ -122,6 +165,56 @@ const ApartmentDetailsForm = ({
             </Box>
           </Grid>
 
+          {/* Landlord Section */}
+          <Grid item xs={12} sx={{ mt: 2 }}>
+            <SectionTitle
+              icon={<BusinessIcon sx={{ color: 'grey.700' }} />}
+              title="Landlord Details"
+            />
+          </Grid>
+
+          <Grid item xs={12}>
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Select Landlord *</Typography>
+              <Autocomplete
+                fullWidth
+                options={landlords}
+                getOptionLabel={(option) => option.company_name || ''}
+                value={selectedLandlord}
+                onChange={handleLandlordChange}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    variant="outlined"
+                    placeholder={loadingLandlords ? 'Loading landlords...' : 'Select a landlord'}
+                    InputLabelProps={{ shrink: true }}
+                    required
+                  />
+                )}
+                loading={loadingLandlords}
+                renderOption={(props, option) => (
+                  <Box component="li" {...props}>
+                    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+                      <Typography variant="body1">{option.company_name}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {option.name} - {option.email}
+                      </Typography>
+                    </Box>
+                  </Box>
+                )}
+              />
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
+                <Button
+                  size="small"
+                  onClick={fetchLandlords}
+                  startIcon={<RefreshIcon />}
+                >
+                  Refresh
+                </Button>
+              </Box>
+            </Box>
+          </Grid>
+
           {/* Tenant Details */}
           <Grid item xs={12} sx={{ mt: 2 }}>
             <SectionTitle
@@ -137,112 +230,6 @@ const ApartmentDetailsForm = ({
             </Typography>
             {tenantSelection}
           </Grid>
-          {isAdmin && (
-            <>
-              {/* Landlord Details */}
-              <Grid item xs={12} sx={{ mt: 2 }}>
-                <SectionTitle
-                  icon={<BusinessIcon sx={{ color: 'grey.700' }} />}
-                  title="Landlord Details"
-                />
-              </Grid>
-
-              <Grid item xs={12} sm={6}>
-                <Box>
-                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord Company Name *</Typography>
-                  <TextField
-                    fullWidth
-                    name="landlordCompanyName"
-                    value={formData.landlordCompanyName}
-                    onChange={(e) => handleChange(e)}
-                    required
-                    variant="outlined"
-                    InputLabelProps={{ shrink: true }}
-                    placeholder="Enter company name"
-                  />
-                </Box>
-              </Grid>
-
-              <Grid item xs={12} sm={6}>
-                <Box>
-                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord Name *</Typography>
-                  <TextField
-                    fullWidth
-                    name="landlordName"
-                    value={formData.landlordName}
-                    onChange={(e) => handleChange(e)}
-                    required
-                    variant="outlined"
-                    InputLabelProps={{ shrink: true }}
-                    placeholder="Enter landlord name"
-                  />
-                </Box>
-              </Grid>
-
-              <Grid item xs={12} sm={6}>
-                <Box>
-                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord Company Address *</Typography>
-                  <TextField
-                    fullWidth
-                    name="landlordCompanyAddress"
-                    value={formData.landlordCompanyAddress}
-                    onChange={(e) => handleChange(e)}
-                    required
-                    variant="outlined"
-                    InputLabelProps={{ shrink: true }}
-                    placeholder="Enter company address"
-                  />
-                </Box>
-              </Grid>
-
-              <Grid item xs={12} sm={6}>
-                <Box>
-                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord IBAN *</Typography>
-                  <TextField
-                    fullWidth
-                    name="landlordIban"
-                    value={formData.landlordIban}
-                    onChange={(e) => handleChange(e)}
-                    required
-                    variant="outlined"
-                    InputLabelProps={{ shrink: true }}
-                    placeholder="Enter IBAN"
-                  />
-                </Box>
-              </Grid>
-
-              <Grid item xs={12} sm={6}>
-                <Box>
-                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord Email *</Typography>
-                  <TextField
-                    fullWidth
-                    type="email"
-                    name="landlordEmail"
-                    value={formData.landlordEmail}
-                    onChange={(e) => handleChange(e)}
-                    required
-                    variant="outlined"
-                    InputLabelProps={{ shrink: true }}
-                    placeholder="Enter landlord email"
-                  />
-                </Box>
-              </Grid>
-
-              <Grid item xs={12} sm={6}>
-                <Box>
-                  <Typography variant="body1" sx={{ mb: 1 }}>Landlord Phone *</Typography>
-                  <TextField
-                    fullWidth
-                    name="landlordPhone"
-                    value={formData.landlordPhone}
-                    onChange={(e) => handleChange(e)}
-                    required
-                    variant="outlined"
-                    InputLabelProps={{ shrink: true }}
-                    placeholder="Enter landlord phone"
-                  />
-                </Box>
-              </Grid></>)}
 
           {/* Contract Details */}
           <Grid item xs={12} sx={{ mt: 2 }}>

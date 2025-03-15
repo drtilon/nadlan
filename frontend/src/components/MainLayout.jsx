@@ -1,4 +1,4 @@
-// Updated MainLayout.jsx with Contract Manager navigation
+// src/components/MainLayout.jsx
 import React, { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -36,6 +36,7 @@ import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutli
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FileOpenIcon from '@mui/icons-material/FileOpen';
+import BusinessIcon from '@mui/icons-material/Business';
 
 import { getUserData } from '../utils/api';
 
@@ -67,6 +68,7 @@ function MainLayout({ onLogout, showNotification }) {
   const navItems = [
     { title: 'Apartments', icon: <HomeIcon />, path: 'dashboard', adminOnly: false },
     { title: 'Tenants', icon: <PersonIcon />, path: 'tenants', adminOnly: false },
+    { title: 'Landlords', icon: <BusinessIcon />, path: 'landlords', adminOnly: false },
     { title: 'Payments', icon: <AttachMoneyIcon />, path: 'payments', adminOnly: false },
     {
       title: 'Contracts',

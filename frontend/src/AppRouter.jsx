@@ -1,4 +1,4 @@
-// src/AppRouter.jsx
+// src/AppRouter.jsx - Updated with Landlords routes
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Box, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
@@ -13,11 +13,13 @@ import PaymentScreen from './components/PaymentScreen';
 import AdminPanel from './components/AdminPanel';
 import AnalyticsPanel from './components/AnalyticsPanel';
 import TenantsPanel from './components/TenantsPanel';
+import LandlordsPanel from './components/LandlordsPanel';
 import ContractGenerator from './components/ContractGenerator';
-import ContractManager from './components/ContractManager'; // Import the new ContractManager component
+import ContractManager from './components/ContractManager';
 import LogsViewer from './components/LogsViewer';
 import MainLayout from './components/MainLayout';
 import TenantDetails from './components/TenantDetails';
+import LandlordDetails from './components/LandlordDetails';
 
 // Utils and theme
 import theme from './theme';
@@ -257,6 +259,19 @@ const AppRouterContainer = () => {
 
           <Route path="tenants/:tenantId" element={
             <TenantDetails
+              showNotification={showNotification}
+            />
+          } />
+
+          {/* Landlords Routes */}
+          <Route path="landlords" element={
+            <LandlordsPanel
+              showNotification={showNotification}
+            />
+          } />
+
+          <Route path="landlords/:landlordId" element={
+            <LandlordDetails
               showNotification={showNotification}
             />
           } />

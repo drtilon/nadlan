@@ -26,16 +26,11 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     address: '',
     rooms: 0,
     size: 0,
-    landlordCompanyName: '', // Matches DB column name
-    landlordName: '',
-    landlordEmail: '',
-    landlordPhone: '',
-    landlordIban: '', // Matches DB column name
-    landlordCompanyAddress: '', // Matches DB column name
+    landlord_id: null, // Using the new landlord_id field
     moveInDate: '',
     contractEndDate: '',
     rent: 0,
-    rentInSentance: '', // Matches DB column name
+    rentInSentance: '',
     deposit: 0,
     notes: '',
     status: 'vacant', // Set a default status
@@ -45,11 +40,13 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   };
 
   const [tenantData, setTenantData] = useState([]);
-  // Clean up initialData to ensure status is valid
+  // Use initialData if provided, otherwise use emptyForm
   const validStatusOptions = ['occupied', 'vacant', 'contract_sent', ''];
   const cleanedInitialData = isEdit ? {
     ...initialData,
-    status: validStatusOptions.includes(initialData.status) ? initialData.status : 'vacant'
+    status: validStatusOptions.includes(initialData.status) ? initialData.status : 'vacant',
+    // If there's a landlord object nested in initialData, use its ID
+    landlord_id: initialData.landlord ? initialData.landlord.id : initialData.landlord_id
   } : emptyForm;
 
   const [formData, setFormData] = useState(cleanedInitialData);
@@ -57,7 +54,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   const [availableTenants, setAvailableTenants] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Fetch available tenants from database
+  // Fetch the list of apartments once on component mount
   useEffect(() => {
     const fetchTenants = async () => {
       try {

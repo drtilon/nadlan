@@ -1,18 +1,16 @@
-// src/components/ApartmentDetailsForm.jsx
+// Updated ApartmentDetailsForm.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Typography,
   TextField,
   Button,
   FormControl,
-  InputLabel,
   Select,
   MenuItem,
   Grid,
   CircularProgress,
   Box,
   Paper,
-  Divider,
   Autocomplete
 } from '@mui/material';
 import {
@@ -139,7 +137,7 @@ const ApartmentDetailsForm = ({
                 fullWidth
                 type="number"
                 name="rooms"
-                value={formData.rooms}
+                value={formData.rooms === 0 ? '' : formData.rooms}
                 onChange={(e) => handleChange(e, true)}
                 required
                 variant="outlined"
@@ -155,7 +153,7 @@ const ApartmentDetailsForm = ({
                 fullWidth
                 type="number"
                 name="size"
-                value={formData.size}
+                value={formData.size === 0 ? '' : formData.size}
                 onChange={(e) => handleChange(e, true)}
                 required
                 variant="outlined"
@@ -284,29 +282,12 @@ const ApartmentDetailsForm = ({
                 fullWidth
                 type="number"
                 name="rent"
-                value={formData.rent}
+                value={formData.rent === 0 ? '' : formData.rent}
                 onChange={(e) => handleChange(e, true)}
                 required
                 variant="outlined"
                 InputLabelProps={{ shrink: true }}
                 placeholder="0"
-              />
-            </Box>
-          </Grid>
-
-          <Grid item xs={12} sm={6}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Rent in Words *</Typography>
-              <TextField
-                fullWidth
-                name="rentInSentance"
-                value={formData.rentInSentance}
-                onChange={(e) => handleChange(e)}
-                required
-                variant="outlined"
-                InputLabelProps={{ shrink: true }}
-                placeholder="e.g., One thousand two hundred"
-                helperText="Write out the rent amount in words"
               />
             </Box>
           </Grid>
@@ -318,7 +299,7 @@ const ApartmentDetailsForm = ({
                 fullWidth
                 type="number"
                 name="deposit"
-                value={formData.deposit}
+                value={formData.deposit === 0 ? '' : formData.deposit}
                 onChange={(e) => handleChange(e, true)}
                 required
                 variant="outlined"
@@ -328,6 +309,7 @@ const ApartmentDetailsForm = ({
             </Box>
           </Grid>
 
+          {/* Status Field */}
           <Grid item xs={12} sm={6}>
             <Box>
               <Typography variant="body1" sx={{ mb: 1 }}>Status *</Typography>
@@ -373,7 +355,7 @@ const ApartmentDetailsForm = ({
                       fullWidth
                       type="number"
                       name="managementFee"
-                      value={formData.managementFee}
+                      value={formData.managementFee === 0 ? '' : formData.managementFee}
                       onChange={(e) => handleChange(e, true)}
                       variant="outlined"
                       InputLabelProps={{ shrink: true }}
@@ -391,7 +373,7 @@ const ApartmentDetailsForm = ({
                       fullWidth
                       type="number"
                       name="rentCost"
-                      value={formData.rentCost}
+                      value={formData.rentCost === 0 ? '' : formData.rentCost}
                       onChange={(e) => handleChange(e, true)}
                       variant="outlined"
                       InputLabelProps={{ shrink: true }}

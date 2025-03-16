@@ -30,7 +30,6 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     moveInDate: '',
     contractEndDate: '',
     rent: 0,
-    rentInSentance: '',
     deposit: 0,
     notes: '',
     status: 'vacant', // Set a default status
@@ -48,6 +47,11 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     // If there's a landlord object nested in initialData, use its ID
     landlord_id: initialData.landlord ? initialData.landlord.id : initialData.landlord_id
   } : emptyForm;
+
+  // Remove rentInSentance from initialData if it exists
+  if (cleanedInitialData.rentInSentance) {
+    delete cleanedInitialData.rentInSentance;
+  }
 
   const [formData, setFormData] = useState(cleanedInitialData);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -171,6 +175,10 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   // Handle input changes for the main form fields with model-specific logic
   const handleChange = (e, isNumber) => {
     const { name, value } = e.target;
+
+    // Skip rentInSentance field if it's somehow passed
+    if (name === 'rentInSentance') return;
+
     const processedValue = isNumber ? (value ? parseFloat(value) : 0) : value;
 
     // When changing the model, clear data that doesn't apply to the new model
@@ -280,14 +288,12 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         return;
       }
 
-      // Make sure rentInSentance is set if not already
-      if (!formData.rentInSentance) {
-        // Simple conversion of rent to words
-        formData.rentInSentance = `${formData.rent} dollars`;
-      }
+      // Create a clean copy of formData without the rentInSentance field
+      const cleanedFormData = { ...formData };
+      delete cleanedFormData.rentInSentance;
 
       const payload = {
-        new_apartment: formData,
+        new_apartment: cleanedFormData,
         new_tenants: tenantData
       };
 

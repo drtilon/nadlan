@@ -1,4 +1,4 @@
-// components/AdminPanel.jsx
+// components/AdminPanel.jsx - Fixed version
 import React, { useEffect, useState } from 'react';
 import {
   Container,
@@ -109,16 +109,16 @@ function AdminPanel({ showNotification }) {
   // Filter users based on search query and current tab
   useEffect(() => {
     let result = [...users];
-
+    
     // Apply search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       result = result.filter(
-        user => user.username.toLowerCase().includes(query) ||
+        user => user.username.toLowerCase().includes(query) || 
           user.id.toString().includes(query)
       );
     }
-
+    
     // Apply tab filter
     if (currentTab === 1) { // Pending Approval
       result = result.filter(user => !user.is_approved);
@@ -205,7 +205,8 @@ function AdminPanel({ showNotification }) {
       const newRole = roleUpdates[userId];
       const oldRole = users.find(user => user.id === userId)?.role;
 
-      await api.put(`/auth/users/${userId}`, { role: newRole });
+      // Make API call to update the role
+      await api.put(`/adminPanel/users/${userId}`, { role: newRole });
       showNotification('User role updated successfully', 'success');
 
       // Update the local users state with the new role

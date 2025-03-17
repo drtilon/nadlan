@@ -1,12 +1,8 @@
-// src/components/MainLayout.jsx
 import React, { useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
-  AppBar,
-  Toolbar,
   Typography,
   IconButton,
-  Tooltip,
   Badge,
   Divider,
   Drawer,
@@ -18,14 +14,10 @@ import {
   useMediaQuery,
   useTheme,
   Container,
-  Button,
-  Menu,
-  MenuItem,
-  ListItemButton
+  CssBaseline,
 } from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import HomeIcon from '@mui/icons-material/Home';
-import AddCircleIcon from '@mui/icons-material/AddCircle';
 import LogoutIcon from '@mui/icons-material/Logout';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
@@ -34,37 +26,41 @@ import PersonIcon from '@mui/icons-material/Person';
 import DescriptionIcon from '@mui/icons-material/Description';
 import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutline';
 import AssessmentIcon from '@mui/icons-material/Assessment';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FileOpenIcon from '@mui/icons-material/FileOpen';
 import BusinessIcon from '@mui/icons-material/Business';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 
 import { getUserData } from '../utils/api';
 
-function MainLayout({ onLogout, showNotification }) {
+function MainLayout({ onLogout }) {
   const navigate = useNavigate();
   const location = useLocation();
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [contractsMenuAnchor, setContractsMenuAnchor] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(true);
+  const [contractsMenuOpen, setContractsMenuOpen] = useState(false);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
 
-  // Get user data from localStorage
+  const colors = {
+    primary: '#1976d2',
+    primaryDark: '#1565c0',
+    secondary: '#2196f3',
+    textPrimary: '#ffffff',
+    divider: 'rgba(255,255,255,0.2)',
+    background: '#f5f5f5',
+  };
+
   const userData = getUserData();
   const userIsAdmin = userData && userData.role === 'admin';
-
-  // Current active path for highlighting
   const currentPath = location.pathname.split('/')[1] || 'dashboard';
   const contractsPath = location.pathname.includes('contracts');
 
-  // Toggle drawer for mobile
-  const toggleDrawer = (open) => (event) => {
-    if (event.type === 'keydown' && (event.key === 'Tab' || event.key === 'Shift')) {
-      return;
-    }
-    setDrawerOpen(open);
+  const toggleDrawer = () => {
+    setDrawerOpen(!drawerOpen);
+    if (contractsMenuOpen) setContractsMenuOpen(false);
   };
 
-  // Navigation items configuration
   const navItems = [
     { title: 'Apartments', icon: <HomeIcon />, path: 'dashboard', adminOnly: false },
     { title: 'Tenants', icon: <PersonIcon />, path: 'tenants', adminOnly: false },
@@ -75,260 +71,264 @@ function MainLayout({ onLogout, showNotification }) {
       icon: <DescriptionIcon />,
       children: [
         { title: 'Generate Contract', icon: <DriveFileRenameOutlineIcon />, path: 'contracts/generate' },
-        { title: 'Contract Manager', icon: <FileOpenIcon />, path: 'contracts/manage' }
+        { title: 'Contract Manager', icon: <FileOpenIcon />, path: 'contracts/manage' },
       ],
-      adminOnly: true
+      adminOnly: true,
     },
     { title: 'Analytics', icon: <InsightsIcon />, path: 'analytics', adminOnly: true },
     { title: 'Admin Panel', icon: <AdminPanelSettingsIcon />, path: 'admin', adminOnly: true },
     { title: 'System Logs', icon: <AssessmentIcon />, path: 'logs', adminOnly: true },
   ];
 
-  // Navigate to a path and close the drawer
   const navigateTo = (path) => {
     navigate(`/${path}`);
-    setDrawerOpen(false);
-    setContractsMenuAnchor(null);
+    if (isMobile) setDrawerOpen(false);
+    setContractsMenuOpen(false);
   };
 
-  // Handle navigate to dashboard when clicking on app title
   const handleTitleClick = () => {
     navigate('/dashboard');
   };
 
-  // Handle contracts menu
-  const handleContractsMenuOpen = (event) => {
-    setContractsMenuAnchor(event.currentTarget);
+  const handleContractsMenuToggle = () => {
+    setContractsMenuOpen(!contractsMenuOpen);
   };
 
-  const handleContractsMenuClose = () => {
-    setContractsMenuAnchor(null);
-  };
+  // Calculate drawer width
+  const drawerWidth = drawerOpen ? 240 : 60;
 
-  // Sidebar navigation for mobile
   const sidebarNav = (
     <Box
-      sx={{ width: 250 }}
-      role="presentation"
-      onClick={toggleDrawer(false)}
-      onKeyDown={toggleDrawer(false)}
+      sx={{
+        width: drawerWidth,
+        height: '100vh',
+        bgcolor: colors.primary,
+        color: colors.textPrimary,
+        display: 'flex',
+        flexDirection: 'column',
+        transition: 'width 0.3s ease',
+        overflowX: 'hidden',
+      }}
     >
-      <List>
+      <Box
+        sx={{
+          p: 2,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: drawerOpen ? 'space-between' : 'center',
+        }}
+      >
+        {drawerOpen && (
+          <Typography 
+            variant="h6" 
+            sx={{ 
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              '&:hover': { opacity: 0.85 },
+            }}
+            onClick={handleTitleClick}
+          >
+           Shefa UG 
+          </Typography>
+        )}
+        <IconButton onClick={toggleDrawer} sx={{ color: colors.textPrimary }}>
+          {drawerOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
+        </IconButton>
+      </Box>
+
+      <Divider sx={{ bgcolor: colors.divider }} />
+
+      <List sx={{ flexGrow: 1 }}>
         {navItems
-          .filter(item => !item.adminOnly || userIsAdmin)
-          .map((item) => (
+          .filter((item) => !item.adminOnly || userIsAdmin)
+          .map((item) =>
             item.children ? (
               <React.Fragment key={item.title}>
                 <ListItem
+                  button
+                  onClick={handleContractsMenuToggle}
                   sx={{
-                    '&.Mui-selected': {
-                      backgroundColor: theme.palette.primary.light,
-                      '&:hover': {
-                        backgroundColor: theme.palette.primary.light,
-                      }
-                    }
+                    py: 1.5,
+                    cursor: 'pointer',
+                    bgcolor: contractsMenuOpen || contractsPath ? colors.primaryDark : 'transparent',
+                    '&:hover': { bgcolor: colors.primaryDark },
+                    transition: 'background-color 0.2s',
                   }}
                 >
-                  <ListItemIcon>
-                    {contractsPath ? (
-                      <Badge color="primary" variant="dot">
+                  <ListItemIcon sx={{ color: colors.textPrimary, minWidth: 40 }}>
+                    {contractsPath || contractsMenuOpen ? (
+                      <Badge color="secondary" variant="dot">
                         {item.icon}
                       </Badge>
                     ) : (
                       item.icon
                     )}
                   </ListItemIcon>
-                  <ListItemText primary={item.title} />
+                  {drawerOpen && (
+                    <>
+                      <ListItemText primary={item.title} />
+                      <ExpandMoreIcon
+                        sx={{
+                          transform: contractsMenuOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                          transition: 'transform 0.2s',
+                        }}
+                      />
+                    </>
+                  )}
                 </ListItem>
-                {item.children.map(child => (
-                  <ListItem
-                    key={child.path}
-                    button
-                    onClick={() => navigateTo(child.path)}
-                    selected={location.pathname.includes(child.path)}
-                    sx={{
-                      pl: 4,
-                      '&.Mui-selected': {
-                        backgroundColor: theme.palette.primary.light,
-                        '&:hover': {
-                          backgroundColor: theme.palette.primary.light,
-                        }
-                      }
-                    }}
-                  >
-                    <ListItemIcon>
-                      {location.pathname.includes(child.path) ? (
-                        <Badge color="primary" variant="dot">
-                          {child.icon}
-                        </Badge>
-                      ) : (
-                        child.icon
-                      )}
-                    </ListItemIcon>
-                    <ListItemText primary={child.title} />
-                  </ListItem>
-                ))}
+                {contractsMenuOpen && drawerOpen && (
+                  <List component="div" disablePadding sx={{ bgcolor: 'rgba(0,0,0,0.1)' }}>
+                    {item.children.map((child) => (
+                      <ListItem
+                        button
+                        key={child.path}
+                        onClick={() => navigateTo(child.path)}
+                        sx={{
+                          pl: 4,
+                          py: 1,
+                          cursor: 'pointer',
+                          bgcolor: location.pathname.includes(child.path) ? colors.primaryDark : 'rgba(255,255,255,0.1)',
+                          '&:hover': { bgcolor: colors.primaryDark },
+                        }}
+                      >
+                        <ListItemIcon sx={{ color: 'rgba(255,255,255,0.9)' }}>{child.icon}</ListItemIcon>
+                        <ListItemText primary={child.title} sx={{ '& .MuiListItemText-primary': { color: 'rgba(255,255,255,0.9)' } }} />
+                      </ListItem>
+                    ))}
+                  </List>
+                )}
               </React.Fragment>
             ) : (
               <ListItem
                 button
                 key={item.path}
                 onClick={() => navigateTo(item.path)}
-                selected={currentPath === item.path ||
-                  (item.path === 'dashboard' && currentPath === '')}
                 sx={{
-                  '&.Mui-selected': {
-                    backgroundColor: theme.palette.primary.light,
-                    '&:hover': {
-                      backgroundColor: theme.palette.primary.light,
-                    }
-                  }
+                  py: 1.5,
+                  cursor: 'pointer',
+                  bgcolor: currentPath === item.path ? colors.primaryDark : 'transparent',
+                  '&:hover': { bgcolor: colors.primaryDark },
+                  transition: 'background-color 0.2s',
                 }}
               >
-                <ListItemIcon>
+                <ListItemIcon sx={{ color: colors.textPrimary, minWidth: 40 }}>
                   {item.path === currentPath || (item.path === 'dashboard' && currentPath === '') ? (
-                    <Badge color="primary" variant="dot">
+                    <Badge color="secondary" variant="dot">
                       {item.icon}
                     </Badge>
                   ) : (
                     item.icon
                   )}
                 </ListItemIcon>
-                <ListItemText primary={item.title} />
+                {drawerOpen && <ListItemText primary={item.title} />}
               </ListItem>
             )
-          ))}
-        <Divider />
-        <ListItem button onClick={onLogout}>
-          <ListItemIcon>
-            <LogoutIcon />
-          </ListItemIcon>
-          <ListItemText primary="Logout" />
-        </ListItem>
+          )}
       </List>
+
+      <Divider sx={{ bgcolor: colors.divider }} />
+      <ListItem
+        button
+        onClick={onLogout}
+        sx={{
+          py: 1.5,
+          cursor: 'pointer',
+          '&:hover': { bgcolor: colors.primaryDark },
+        }}
+      >
+        <ListItemIcon sx={{ color: colors.textPrimary, minWidth: 40 }}>
+          <LogoutIcon />
+        </ListItemIcon>
+        {drawerOpen && <ListItemText primary="Logout" />}
+      </ListItem>
     </Box>
   );
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <AppBar position="static" color="primary">
-        <Toolbar>
-          {isMobile && (
-            <IconButton
-              color="inherit"
-              edge="start"
-              onClick={toggleDrawer(true)}
-              sx={{ mr: 2 }}
-            >
-              <MenuIcon />
-            </IconButton>
-          )}
+    <Box sx={{ display: 'flex', bgcolor: colors.background, minHeight: '100vh' }}>
+      <CssBaseline />
 
-          {/* Make the title clickable to navigate to dashboard */}
-          <Typography
-            variant="h6"
-            sx={{
-              flexGrow: 1,
-              direction: 'ltr',
-              cursor: 'pointer',
-              '&:hover': {
-                opacity: 0.85
-              }
-            }}
-            onClick={handleTitleClick}
-          >
-            Apartment Rental Management
-          </Typography>
+      {/* Mobile drawer toggle button */}
+      {isMobile && !drawerOpen && (
+        <IconButton
+          sx={{
+            position: 'fixed',
+            top: '10px',
+            left: '10px',
+            zIndex: theme.zIndex.drawer + 2,
+            bgcolor: colors.primary,
+            color: colors.textPrimary,
+            '&:hover': { bgcolor: colors.primaryDark },
+          }}
+          onClick={toggleDrawer}
+        >
+          <MenuIcon />
+        </IconButton>
+      )}
 
-          {/* Desktop navigation */}
-          {!isMobile && (
-            <>
-              {navItems
-                .filter(item => !item.adminOnly || userIsAdmin)
-                .map((item) => (
-                  item.children ? (
-                    <React.Fragment key={item.title}>
-                      <Tooltip title={item.title}>
-                        <IconButton
-                          color={contractsPath ? "secondary" : "inherit"}
-                          onClick={handleContractsMenuOpen}
-                          aria-haspopup="true"
-                        >
-                          {contractsPath ? (
-                            <Badge color="secondary" variant="dot">
-                              {item.icon}
-                            </Badge>
-                          ) : (
-                            item.icon
-                          )}
-                        </IconButton>
-                      </Tooltip>
-                      <Menu
-                        anchorEl={contractsMenuAnchor}
-                        open={Boolean(contractsMenuAnchor)}
-                        onClose={handleContractsMenuClose}
-                        MenuListProps={{
-                          'aria-labelledby': 'contracts-button',
-                        }}
-                      >
-                        {item.children.map(child => (
-                          <MenuItem
-                            key={child.path}
-                            onClick={() => navigateTo(child.path)}
-                            selected={location.pathname.includes(child.path)}
-                          >
-                            <ListItemIcon>
-                              {child.icon}
-                            </ListItemIcon>
-                            <ListItemText>{child.title}</ListItemText>
-                          </MenuItem>
-                        ))}
-                      </Menu>
-                    </React.Fragment>
-                  ) : (
-                    <Tooltip key={item.path} title={item.title}>
-                      <IconButton
-                        color={currentPath === item.path || (item.path === 'dashboard' && currentPath === '') ? "secondary" : "inherit"}
-                        onClick={() => navigateTo(item.path)}
-                      >
-                        {item.path === currentPath || (item.path === 'dashboard' && currentPath === '') ? (
-                          <Badge color="secondary" variant="dot">
-                            {item.icon}
-                          </Badge>
-                        ) : (
-                          item.icon
-                        )}
-                      </IconButton>
-                    </Tooltip>
-                  )
-                ))}
-
-              <Divider orientation="vertical" flexItem sx={{ mx: 0.5, bgcolor: 'rgba(255,255,255,0.3)' }} />
-
-              {/* Logout - accessible to all users */}
-              <Tooltip title="Logout">
-                <IconButton color="inherit" onClick={onLogout}>
-                  <LogoutIcon />
-                </IconButton>
-              </Tooltip>
-            </>
-          )}
-        </Toolbar>
-      </AppBar>
-
-      {/* Mobile navigation drawer */}
       <Drawer
-        anchor="left"
-        open={drawerOpen}
-        onClose={toggleDrawer(false)}
+        variant={isMobile ? 'temporary' : 'permanent'}
+        open={isMobile ? drawerOpen : true}
+        onClose={toggleDrawer}
+        sx={{
+          width: drawerWidth,
+          flexShrink: 0,
+          '& .MuiDrawer-paper': {
+            width: drawerWidth,
+            boxSizing: 'border-box',
+            transition: 'width 0.3s ease',
+            overflowX: 'hidden',
+          },
+        }}
       >
         {sidebarNav}
       </Drawer>
 
-      {/* Main content - renders the active route via outlet */}
-      <Container component="main" sx={{ mt: 4, mb: 4, flexGrow: 1 }}>
-        <Outlet />
-      </Container>
+      {/* Main content */}
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          p: 3,
+          transition: 'margin-left 0.3s ease',
+          width: { xs: '100%', md: `calc(100% - ${drawerWidth}px)` },
+          ml: { xs: 0, md: 0 }, // No left margin on mobile, drawer will overlay content
+        }}
+      >
+        {/* App title for mobile when drawer is closed */}
+        {isMobile && !drawerOpen && (
+          <Box 
+            sx={{ 
+              display: 'flex', 
+              justifyContent: 'center',
+              mb: 2,
+              pt: 2 
+            }}
+          >
+            <Typography
+              variant="h6"
+              sx={{
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                '&:hover': { opacity: 0.85 },
+              }}
+              onClick={handleTitleClick}
+            >
+              Apartment Rental Management
+            </Typography>
+          </Box>
+        )}
+        
+        <Container 
+          maxWidth="xl" 
+          sx={{ 
+            mt: { xs: 4, sm: 2 },
+            px: { xs: 1, sm: 2, md: 3 }, // Responsive padding
+          }}
+        >
+          <Outlet />
+        </Container>
+      </Box>
     </Box>
   );
 }

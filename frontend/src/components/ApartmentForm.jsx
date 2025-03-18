@@ -1,4 +1,4 @@
-// src/components/ApartmentForm.jsx
+// src/components/ApartmentForm.jsx - Fixed tenant duplication issue
 import React, { useState, useEffect } from 'react';
 import {
   Paper,
@@ -58,6 +58,8 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   const [availableTenants, setAvailableTenants] = useState([]);
   const [loading, setLoading] = useState(false);
   const [tenantFormOpen, setTenantFormOpen] = useState(false);
+  // Track tenant IDs to prevent duplication
+  const [addedTenantIds, setAddedTenantIds] = useState(new Set());
 
   // Fetch the list of tenants once on component mount
   useEffect(() => {
@@ -101,6 +103,10 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
             }));
 
             setTenantData(tenantsWithPrimary);
+
+            // Update the set of added tenant IDs
+            const tenantIdSet = new Set(tenantsWithPrimary.map(t => t.id).filter(Boolean));
+            setAddedTenantIds(tenantIdSet);
           }
         }
       } catch (error) {
@@ -156,6 +162,10 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         });
 
         setTenantData(initialTenantData);
+
+        // Update the set of added tenant IDs
+        const tenantIdSet = new Set(initialTenantData.map(t => t.id).filter(id => !id.toString().startsWith('temp-')));
+        setAddedTenantIds(tenantIdSet);
       } else if (Array.isArray(initialData.tenants)) {
         // If it's already an array, ensure each tenant has the expected fields
         const processedTenants = initialData.tenants.map((tenant, index) => ({
@@ -168,6 +178,10 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         }));
 
         setTenantData(processedTenants);
+
+        // Update the set of added tenant IDs
+        const tenantIdSet = new Set(processedTenants.map(t => t.id).filter(Boolean));
+        setAddedTenantIds(tenantIdSet);
       }
     }
   }, [isEdit, initialData, availableTenants]);
@@ -231,6 +245,12 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   // Add a selected tenant
   const handleTenantSelection = (event, tenant) => {
     if (tenant) {
+      // Check if tenant is already added (prevent duplication)
+      if (tenant.id && addedTenantIds.has(tenant.id)) {
+        showNotification('This tenant is already added to the apartment', 'warning');
+        return;
+      }
+
       // If this is the first tenant, make them primary
       const isPrimary = tenantData.length === 0;
 
@@ -243,11 +263,23 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       };
 
       setTenantData([...tenantData, enrichedTenant]);
+
+      // Add to the set of tenant IDs to prevent duplication
+      if (tenant.id) {
+        setAddedTenantIds(new Set([...addedTenantIds, tenant.id]));
+      }
     }
   };
 
   // Add a newly created tenant to the list
   const handleNewTenantCreated = (newTenant) => {
+    // Check if tenant is already added (prevent duplication)
+    if (newTenant.id && addedTenantIds.has(newTenant.id)) {
+      showNotification('This tenant is already added to the apartment', 'warning');
+      setTenantFormOpen(false);
+      return;
+    }
+
     // If this is the first tenant, make them primary
     const isPrimary = tenantData.length === 0;
 
@@ -256,6 +288,11 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       ...newTenant,
       isPrimary
     }]);
+
+    // Add to the set of tenant IDs to prevent duplication
+    if (newTenant.id) {
+      setAddedTenantIds(new Set([...addedTenantIds, newTenant.id]));
+    }
 
     // Close the tenant form dialog
     setTenantFormOpen(false);
@@ -273,6 +310,13 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     }
 
     setTenantData(newTenantData);
+
+    // Remove from the set of added tenant IDs
+    if (removedTenant.id) {
+      const newAddedTenantIds = new Set(addedTenantIds);
+      newAddedTenantIds.delete(removedTenant.id);
+      setAddedTenantIds(newAddedTenantIds);
+    }
   };
 
   // Handle form submission
@@ -405,6 +449,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
           <Autocomplete
             options={availableTenants.filter(
+              // Filter out tenants that are already added to prevent duplication
               tenant => !tenantData.some(t => t.id === tenant.id)
             )}
             getOptionLabel={(option) => {

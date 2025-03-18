@@ -188,7 +188,7 @@ function MainLayout({ onLogout }) {
   const sidebarNav = (
     <Box
       sx={{
-        height: '100vh',
+        height: '100vh', // Full viewport height
         display: 'flex',
         flexDirection: 'column',
         bgcolor: 'background.paper',
@@ -197,6 +197,7 @@ function MainLayout({ onLogout }) {
           easing: theme.transitions.easing.sharp,
           duration: theme.transitions.duration.enteringScreen,
         }),
+        overflowY: 'auto', // Scroll within sidebar if content overflows
         overflowX: 'hidden',
         borderRight: '1px solid',
         borderColor: 'divider',
@@ -405,7 +406,7 @@ function MainLayout({ onLogout }) {
       <CssBaseline />
 
       <AppBar
-        position="fixed"
+        position="fixed" // Top bar remains fixed
         color="default"
         elevation={0}
         sx={{
@@ -414,10 +415,6 @@ function MainLayout({ onLogout }) {
           borderBottom: '1px solid',
           borderColor: 'divider',
           bgcolor: 'background.paper',
-          transition: theme.transitions.create(['width', 'margin'], {
-            easing: theme.transitions.easing.sharp,
-            duration: theme.transitions.duration.enteringScreen,
-          }),
         }}
       >
         <Toolbar sx={{ px: { xs: 2, sm: 3 } }}>
@@ -504,24 +501,17 @@ function MainLayout({ onLogout }) {
           keepMounted: true, // Better open performance on mobile
         }}
         sx={{
-          display: { xs: 'block', md: 'block' },
           '& .MuiDrawer-paper': {
-            position: 'relative',
-            whiteSpace: 'nowrap',
+            position: 'fixed', // Fix the sidebar in place
+            top: 0,
+            left: 0,
+            height: '100vh', // Full height of viewport
             width: drawerWidth,
             transition: theme.transitions.create('width', {
               easing: theme.transitions.easing.sharp,
               duration: theme.transitions.duration.enteringScreen,
             }),
             boxSizing: 'border-box',
-            ...(!drawerOpen && {
-              overflowX: 'hidden',
-              transition: theme.transitions.create('width', {
-                easing: theme.transitions.easing.sharp,
-                duration: theme.transitions.duration.leavingScreen,
-              }),
-              width: drawerWidth,
-            }),
           },
         }}
       >
@@ -534,22 +524,13 @@ function MainLayout({ onLogout }) {
         sx={{
           flexGrow: 1,
           overflow: 'auto',
-          pt: { xs: 8, sm: 9 },
+          pt: { xs: 8, sm: 9 }, // Space for the fixed AppBar
           px: { xs: 2, sm: 3 },
+          ml: { xs: 0, md: `${drawerWidth}px` }, // Offset by sidebar width on desktop
           width: { xs: '100%', md: `calc(100% - ${drawerWidth}px)` },
-          ml: { xs: 0, md: 0 },
-          transition: theme.transitions.create(['width', 'margin'], {
-            easing: theme.transitions.easing.sharp,
-            duration: theme.transitions.duration.enteringScreen,
-          }),
         }}
       >
-        <Container
-          maxWidth="xl"
-          sx={{
-            py: 3,
-          }}
-        >
+        <Container maxWidth="xl" sx={{ py: 3 }}>
           <Outlet />
         </Container>
       </Box>

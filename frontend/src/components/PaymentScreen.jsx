@@ -77,7 +77,7 @@ const STATUS_COLORS = {
 };
 
 function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
-  const {apartmentId} = useParams();
+  const { apartmentId } = useParams();
   const theme = useTheme();
   // Use the initialApartment prop (if provided) as the default selection
   const [selectedApartment, setSelectedApartment] = useState(apartmentId || '');
@@ -206,9 +206,21 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
         setApartmentDetails(apartmentResponse.data);
 
         // Determine the rent value based on the model
-        const rentValue = apartmentResponse.data.model === 'rental'
-          ? parseFloat(apartmentResponse.data.rent_cost) || 0
-          : parseFloat(apartmentResponse.data.rent) || 0;
+        let rentValue = 0;
+        const apartmentData = apartmentResponse.data;
+
+        if (apartmentData.rent !== undefined && apartmentData.rent !== null) {
+          // Use rent directly if it's available
+          rentValue = parseFloat(apartmentData.rent);
+        } else if (apartmentData.model === 'rental' && apartmentData.rentCost !== undefined) {
+          // For rental model, use rent_cost if rent is not available
+          rentValue = parseFloat(apartmentData.rentCost);
+        }
+
+        // Log for debugging
+        console.log('Apartment Details:', apartmentData);
+        console.log('Setting Total Rent:', rentValue);
+
         setTotalRent(rentValue);
 
         // Get payment data
@@ -255,7 +267,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
         );
 
         setPaymentData(updatedData);
-        
+
         // Fetch payment history
         try {
           const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
@@ -264,7 +276,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
           console.error('Error fetching payment history:', error);
           setPaymentHistory([]);
         }
-        
+
         setLoading(false);
       } catch (error) {
         console.error('Error fetching data:', error);
@@ -389,7 +401,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
         }
       };
     });
-    showNotification(`Rent split evenly: $${amountPerTenant.toFixed(2)} per tenant`, 'success');
+    showNotification(`Rent split evenly: ${formatCurrency(amountPerTenant)} per tenant`, 'success');
   };
 
   // Mark all tenants as paid for a month
@@ -399,7 +411,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
       showNotification('No tenants available for this month', 'warning');
       return;
     }
-    
+
     setPaymentData((prev) => {
       const updatedTenants = tenants.map((tenant) => ({
         ...tenant,
@@ -415,10 +427,10 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
         }
       };
     });
-    
+
     showNotification(`All tenants marked as paid for ${month}`, 'success');
   };
-  
+
   // Mark all tenants as unpaid for a month
   const markAllAsUnpaid = (month) => {
     const tenants = paymentData[month]?.tenants || [];
@@ -426,7 +438,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
       showNotification('No tenants available for this month', 'warning');
       return;
     }
-    
+
     setPaymentData((prev) => {
       const updatedTenants = tenants.map((tenant) => ({
         ...tenant,
@@ -442,7 +454,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
         }
       };
     });
-    
+
     showNotification(`All tenants marked as unpaid for ${month}`, 'success');
   };
 
@@ -571,7 +583,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
 
       await api.post(`/payments/${selectedApartment}`, formattedData);
       showNotification('Payment data saved successfully!', 'success');
-      
+
       // Refresh payment history after saving
       try {
         const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
@@ -579,7 +591,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
       } catch (error) {
         console.error('Error fetching payment history:', error);
       }
-      
+
       setIsSaving(false);
     } catch (error) {
       console.error(error);
@@ -597,22 +609,22 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
       maximumFractionDigits: 2
     }).format(amount);
   };
-  
+
   // Format date
   const formatDate = (dateString) => {
     if (!dateString) return '';
     try {
       const date = new Date(dateString);
-      return date.toLocaleDateString(undefined, { 
-        year: 'numeric', 
-        month: 'short', 
+      return date.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'short',
         day: 'numeric'
       });
     } catch (e) {
       return dateString;
     }
   };
-  
+
   // Get payment method display text
   const getPaymentMethodText = (method) => {
     const methodMap = {
@@ -624,18 +636,18 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
     };
     return methodMap[method] || method;
   };
-  
+
   // Generate receipt for a payment
   const generateReceipt = (month) => {
     // In a real application, this would generate a PDF receipt
     showNotification(`Receipt generation for ${month} is not implemented yet`, 'info');
   };
-  
+
   // Is this month current, past, or future?
   const getMonthStatus = (month) => {
     const monthIndex = MONTH_LIST.indexOf(month);
     const currentMonthIndex = new Date().getMonth();
-    
+
     if (monthIndex < currentMonthIndex) return 'past';
     if (monthIndex === currentMonthIndex) return 'current';
     return 'future';
@@ -717,10 +729,10 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                       <Typography variant="h6" sx={{ color: 'primary.main' }}>
                         {formatCurrency(totalRent)}<Typography component="span" variant="body2">/month</Typography>
                       </Typography>
-                      
+
                       <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                        <strong>Contract:</strong> {apartmentDetails.contractEndDate ? 
-                          `Until ${formatDate(apartmentDetails.contractEndDate)}` : 
+                        <strong>Contract:</strong> {apartmentDetails.contractEndDate ?
+                          `Until ${formatDate(apartmentDetails.contractEndDate)}` :
                           'No end date specified'}
                       </Typography>
                     </Box>
@@ -729,7 +741,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
               </CardContent>
             </Card>
           )}
-          
+
           {/* Payment History Collapse */}
           <Collapse in={showHistory}>
             <Paper sx={{ p: 3, mb: 4 }}>
@@ -737,9 +749,9 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                 <Typography variant="h6">
                   Payment History
                 </Typography>
-                <Button 
-                  size="small" 
-                  startIcon={<RefreshIcon />} 
+                <Button
+                  size="small"
+                  startIcon={<RefreshIcon />}
                   onClick={async () => {
                     try {
                       setLoading(true);
@@ -755,7 +767,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                   Refresh
                 </Button>
               </Box>
-              
+
               {paymentHistory.length === 0 ? (
                 <Alert severity="info">No payment history available for this apartment.</Alert>
               ) : (
@@ -778,10 +790,10 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                           <TableCell>{formatDate(record.paymentDate)}</TableCell>
                           <TableCell>{record.month} {record.year || currentYear}</TableCell>
                           <TableCell>
-                            <Chip 
+                            <Chip
                               label={record.status === 'paid' ? 'Paid' : record.status === 'partial' ? 'Partial' : 'Not Paid'}
                               size="small"
-                              sx={{ 
+                              sx={{
                                 bgcolor: STATUS_COLORS[record.status],
                                 color: 'white'
                               }}
@@ -808,7 +820,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
 
           {/* Current Month Payment Entry */}
           <Card sx={{ mb: 4, borderLeft: 4, borderColor: 'primary.main' }}>
-            <CardHeader 
+            <CardHeader
               title={
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   <CalendarIcon sx={{ mr: 1, color: 'primary.main' }} />
@@ -819,10 +831,10 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
               }
               action={
                 <Chip
-                  label={paymentData[currentMonth]?.status === 'paid' ? 'Paid' : 
-                         paymentData[currentMonth]?.status === 'partial' ? 'Partial' : 'Not Paid'}
-                  color={paymentData[currentMonth]?.status === 'paid' ? 'success' : 
-                         paymentData[currentMonth]?.status === 'partial' ? 'warning' : 'error'}
+                  label={paymentData[currentMonth]?.status === 'paid' ? 'Paid' :
+                    paymentData[currentMonth]?.status === 'partial' ? 'Partial' : 'Not Paid'}
+                  color={paymentData[currentMonth]?.status === 'paid' ? 'success' :
+                    paymentData[currentMonth]?.status === 'partial' ? 'warning' : 'error'}
                 />
               }
             />
@@ -845,9 +857,9 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                         borderRadius: 1,
                         backgroundColor: 'rgba(0,0,0,0.1)',
                         '& .MuiLinearProgress-bar': {
-                          backgroundColor: paymentData[currentMonth]?.status === 'paid' ? STATUS_COLORS.paid : 
-                                           paymentData[currentMonth]?.status === 'partial' ? STATUS_COLORS.partial : 
-                                           STATUS_COLORS.not_paid
+                          backgroundColor: paymentData[currentMonth]?.status === 'paid' ? STATUS_COLORS.paid :
+                            paymentData[currentMonth]?.status === 'partial' ? STATUS_COLORS.partial :
+                              STATUS_COLORS.not_paid
                         }
                       }}
                     />
@@ -858,13 +870,13 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                     </Box>
                   </Box>
                 </Grid>
-                
+
                 {/* Tenant Payment Grid */}
                 <Grid item xs={12}>
                   <Typography variant="subtitle1" gutterBottom>
                     Tenant Payments
                   </Typography>
-                  
+
                   {!paymentData[currentMonth]?.tenants || paymentData[currentMonth]?.tenants.length === 0 ? (
                     <Alert severity="info">
                       No tenants available for this apartment. Please add tenants to the apartment first.
@@ -920,12 +932,12 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                                     color="success"
                                   />
                                   <Chip
-                                    label={tenant.paid ? 'Paid' : 
-                                           tenant.amountPaid > 0 ? 'Partial' : 'Unpaid'}
+                                    label={tenant.paid ? 'Paid' :
+                                      tenant.amountPaid > 0 ? 'Partial' : 'Unpaid'}
                                     size="small"
                                     sx={{
-                                      bgcolor: tenant.paid ? STATUS_COLORS.paid : 
-                                              tenant.amountPaid > 0 ? STATUS_COLORS.partial : STATUS_COLORS.not_paid,
+                                      bgcolor: tenant.paid ? STATUS_COLORS.paid :
+                                        tenant.amountPaid > 0 ? STATUS_COLORS.partial : STATUS_COLORS.not_paid,
                                       color: 'white',
                                       ml: 1
                                     }}
@@ -934,8 +946,8 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                               </TableCell>
                               <TableCell align="right">
                                 <Tooltip title={tenant.paid ? 'Mark as Unpaid' : 'Mark as Paid'}>
-                                  <IconButton 
-                                    size="small" 
+                                  <IconButton
+                                    size="small"
                                     color={tenant.paid ? 'error' : 'success'}
                                     onClick={() => handleTenantStatusChange(currentMonth, index, !tenant.paid)}
                                   >
@@ -950,7 +962,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                     </TableContainer>
                   )}
                 </Grid>
-                
+
                 {/* Additional Payments */}
                 <Grid item xs={12}>
                   <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
@@ -998,7 +1010,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                     </Grid>
                   </Grid>
                 </Grid>
-                
+
                 {/* Payment Details */}
                 <Grid item xs={12}>
                   <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
@@ -1034,7 +1046,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                     </Grid>
                   </Grid>
                 </Grid>
-                
+
                 {/* Quick Actions */}
                 <Grid item xs={12}>
                   <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
@@ -1072,7 +1084,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
               </Grid>
             </CardContent>
           </Card>
-          
+
           {/* Save Button */}
           <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
             <Button
@@ -1086,7 +1098,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
               {isSaving ? 'Saving...' : 'Save Payment Data'}
             </Button>
           </Box>
-          
+
           {/* All Months Overview */}
           <Box sx={{ mt: 5 }}>
             <Typography variant="h6" gutterBottom>
@@ -1108,9 +1120,9 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                     const monthStatus = getMonthStatus(month);
                     const percentage = calculatePaymentPercentage(month);
                     return (
-                      <TableRow 
-                        key={month} 
-                        sx={{ 
+                      <TableRow
+                        key={month}
+                        sx={{
                           bgcolor: monthStatus === 'current' ? 'rgba(25, 118, 210, 0.05)' : undefined,
                           '&:hover': {
                             bgcolor: 'rgba(0, 0, 0, 0.04)',
@@ -1122,9 +1134,9 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                         <TableCell>
                           <Box sx={{ display: 'flex', alignItems: 'center' }}>
                             {monthStatus === 'current' && (
-                              <Chip 
+                              <Chip
                                 label="Current"
-                                color="primary" 
+                                color="primary"
                                 size="small"
                                 sx={{ mr: 1 }}
                               />
@@ -1139,16 +1151,16 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                         <TableCell align="right">
                           <Box sx={{ display: 'flex', alignItems: 'center' }}>
                             <Box sx={{ width: '100%', mr: 1 }}>
-                              <LinearProgress 
-                                variant="determinate" 
-                                value={percentage} 
+                              <LinearProgress
+                                variant="determinate"
+                                value={percentage}
                                 sx={{
                                   height: 6,
                                   borderRadius: 1,
                                   '& .MuiLinearProgress-bar': {
-                                    backgroundColor: percentage === 100 ? STATUS_COLORS.paid : 
-                                                    percentage > 0 ? STATUS_COLORS.partial : 
-                                                    STATUS_COLORS.not_paid
+                                    backgroundColor: percentage === 100 ? STATUS_COLORS.paid :
+                                      percentage > 0 ? STATUS_COLORS.partial :
+                                        STATUS_COLORS.not_paid
                                   }
                                 }}
                               />
@@ -1161,14 +1173,14 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                           </Box>
                         </TableCell>
                         <TableCell>
-                          <Chip 
-                            label={paymentData[month]?.status === 'paid' ? 'Paid' : 
-                                 paymentData[month]?.status === 'partial' ? 'Partial' : 'Not Paid'}
+                          <Chip
+                            label={paymentData[month]?.status === 'paid' ? 'Paid' :
+                              paymentData[month]?.status === 'partial' ? 'Partial' : 'Not Paid'}
                             size="small"
-                            sx={{ 
-                              bgcolor: paymentData[month]?.status === 'paid' ? STATUS_COLORS.paid : 
-                                      paymentData[month]?.status === 'partial' ? STATUS_COLORS.partial : 
-                                      STATUS_COLORS.not_paid,
+                            sx={{
+                              bgcolor: paymentData[month]?.status === 'paid' ? STATUS_COLORS.paid :
+                                paymentData[month]?.status === 'partial' ? STATUS_COLORS.partial :
+                                  STATUS_COLORS.not_paid,
                               color: 'white'
                             }}
                           />
@@ -1182,7 +1194,7 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
           </Box>
         </>
       )}
-      
+
       {/* Receipts Dialog */}
       <Dialog
         open={receiptsDialogOpen}

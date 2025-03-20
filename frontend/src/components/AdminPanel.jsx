@@ -1,4 +1,4 @@
-// components/AdminPanel.jsx - Fixed version with working delete
+// Updated components/AdminPanel.jsx with password change functionality
 import React, { useEffect, useState } from 'react';
 import {
   Container,
@@ -46,9 +46,11 @@ import {
   AdminPanelSettings as AdminIcon,
   Person as UserIcon,
   PersonAdd as PendingIcon,
-  FilterList as FilterIcon
+  FilterList as FilterIcon,
+  Lock as LockIcon
 } from '@mui/icons-material';
 import api from '../utils/api';
+import PasswordChangeDialog from './PasswordChangeDialog';
 
 function AdminPanel({ showNotification }) {
   const [users, setUsers] = useState([]);
@@ -66,6 +68,10 @@ function AdminPanel({ showNotification }) {
     admins: 0,
     pendingApproval: 0,
   });
+
+  // Password change state
+  const [passwordChangeOpen, setPasswordChangeOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
 
   // Fetch all users from the backend
   const fetchUsers = async () => {
@@ -224,6 +230,18 @@ function AdminPanel({ showNotification }) {
     } finally {
       setUpdatingUserId(null);
     }
+  };
+
+  // Open password change dialog
+  const handleOpenPasswordChange = (user) => {
+    setSelectedUser(user);
+    setPasswordChangeOpen(true);
+  };
+
+  // Close password change dialog
+  const handleClosePasswordChange = () => {
+    setPasswordChangeOpen(false);
+    setSelectedUser(null);
   };
 
   // Handle tab change
@@ -422,6 +440,19 @@ function AdminPanel({ showNotification }) {
                                   </span>
                                 </Tooltip>
                               )}
+
+                              <Tooltip title="Change password" arrow>
+                                <span>
+                                  <IconButton
+                                    color="primary"
+                                    onClick={() => handleOpenPasswordChange(user)}
+                                    size="small"
+                                  >
+                                    <LockIcon />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+
                               <Tooltip title="Delete user" arrow>
                                 <span>
                                   <IconButton
@@ -475,6 +506,17 @@ function AdminPanel({ showNotification }) {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Password Change Dialog */}
+      {selectedUser && (
+        <PasswordChangeDialog
+          open={passwordChangeOpen}
+          onClose={handleClosePasswordChange}
+          userId={selectedUser.id}
+          username={selectedUser.username}
+          showNotification={showNotification}
+        />
+      )}
     </Container>
   );
 }

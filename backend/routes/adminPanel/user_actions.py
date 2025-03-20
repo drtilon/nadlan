@@ -82,3 +82,28 @@ def delete_user(user_id):
         current_app.logger.error(f"Error deleting user: {e}")
         db.session.rollback()
         return jsonify({"message": "Error deleting user", "error": str(e)}), 500
+
+
+@adminPanel_bp.route("/users/<int:user_id>/change-password", methods=["PUT"])
+@token_required
+@role_required("admin")
+def change_user_password(user_id):
+    try:
+        data = request.get_json()
+        if not data or "password" not in data:
+            return jsonify({"message": "No password provided"}), 400
+
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"message": "User not found"}), 404
+
+        # Set the new password
+        user.set_password(data["password"])
+        db.session.commit()
+
+        current_app.logger.info(f"Password changed for user: {user.username}")
+        return jsonify({"message": "Password changed successfully"}), 200
+    except Exception as e:
+        current_app.logger.error(f"Error changing password: {e}")
+        db.session.rollback()
+        return jsonify({"message": "Error changing password", "error": str(e)}), 500

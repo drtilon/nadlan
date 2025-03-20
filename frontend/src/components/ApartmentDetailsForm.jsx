@@ -246,9 +246,27 @@ const ApartmentDetailsForm = ({
                 type="date"
                 name="moveInDate"
                 value={formData.moveInDate || ''}
-                onChange={(e) => handleChange(e)}
+                onChange={(e) => {
+                  // If the date field is empty, pass an empty string
+                  // The backend will convert this to NULL
+                  const value = e.target.value || '';
+                  handleChange({
+                    target: {
+                      name: e.target.name,
+                      value: value
+                    }
+                  });
+                }}
                 variant="outlined"
                 InputLabelProps={{ shrink: true }}
+                // Make the input accept empty values (by removing the 'required' attribute)
+                InputProps={{
+                  // This allows clearing the date field
+                  inputProps: {
+                    min: "1900-01-01",
+                    max: "2100-12-31"
+                  }
+                }}
               />
             </Box>
           </Grid>
@@ -261,9 +279,27 @@ const ApartmentDetailsForm = ({
                 type="date"
                 name="contractEndDate"
                 value={formData.contractEndDate || ''}
-                onChange={(e) => handleChange(e)}
+                onChange={(e) => {
+                  // If the date field is empty, pass an empty string
+                  // The backend will convert this to NULL
+                  const value = e.target.value || '';
+                  handleChange({
+                    target: {
+                      name: e.target.name,
+                      value: value
+                    }
+                  });
+                }}
                 variant="outlined"
                 InputLabelProps={{ shrink: true }}
+                // Make the input accept empty values (by removing the 'required' attribute)
+                InputProps={{
+                  // This allows clearing the date field
+                  inputProps: {
+                    min: "1900-01-01",
+                    max: "2100-12-31"
+                  }
+                }}
               />
             </Box>
           </Grid>

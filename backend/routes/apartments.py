@@ -29,7 +29,26 @@ def add_apartment_route() -> Tuple[Response, int]:
         except ValidationError as e:
             return jsonify({"message": "Invalid data", "errors": e.errors()}), 400
 
-        apartment = Apartment(**data["new_apartment"])
+        # Create a cleaned copy of the apartment data
+        apartment_data = data["new_apartment"].copy()
+
+        # Handle empty date strings by converting them to None
+        if "moveInDate" in apartment_data and apartment_data["moveInDate"] == "":
+            apartment_data["moveInDate"] = None
+
+        if (
+            "contractEndDate" in apartment_data
+            and apartment_data["contractEndDate"] == ""
+        ):
+            apartment_data["contractEndDate"] = None
+
+        # Also handle any other empty string values that should be None
+        for field in ["notes"]:
+            if field in apartment_data and apartment_data[field] == "":
+                apartment_data[field] = None
+
+        # Create apartment with the cleaned data
+        apartment = Apartment(**apartment_data)
 
         db.session.add(apartment)
         db.session.flush()  # Ensure apartment ID is assigned before adding tenants
@@ -74,21 +93,39 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
         # Update apartment fields
         for field, value in apartment_data.items():
             # Handle date fields separately
-            if field == "moveInDate" and value:
-                try:
-                    apartment.moveInDate = datetime.strptime(value, "%Y-%m-%d").date()
-                except (ValueError, TypeError):
-                    current_app.logger.error(f"Invalid moveInDate format: {value}")
-            elif field == "contractEndDate" and value:
-                try:
-                    apartment.contractEndDate = datetime.strptime(
-                        value, "%Y-%m-%d"
-                    ).date()
-                except (ValueError, TypeError):
-                    current_app.logger.error(f"Invalid contractEndDate format: {value}")
+            if field == "moveInDate":
+                if value and value != "":
+                    try:
+                        apartment.moveInDate = datetime.strptime(
+                            value, "%Y-%m-%d"
+                        ).date()
+                    except (ValueError, TypeError):
+                        current_app.logger.error(f"Invalid moveInDate format: {value}")
+                        continue
+                else:
+                    apartment.moveInDate = None
+
+            elif field == "contractEndDate":
+                if value and value != "":
+                    try:
+                        apartment.contractEndDate = datetime.strptime(
+                            value, "%Y-%m-%d"
+                        ).date()
+                    except (ValueError, TypeError):
+                        current_app.logger.error(
+                            f"Invalid contractEndDate format: {value}"
+                        )
+                        continue
+                else:
+                    apartment.contractEndDate = None
+
             # Skip tenants field as we'll handle it separately
             elif field != "tenants" and hasattr(apartment, field):
-                setattr(apartment, field, value)
+                # Handle empty strings for text fields
+                if value == "" and field in ["notes"]:
+                    setattr(apartment, field, None)
+                else:
+                    setattr(apartment, field, value)
 
         # Unassign all existing tenants from this apartment
         existing_tenants = Tenant.query.filter_by(apartment_id=apartment_id).all()

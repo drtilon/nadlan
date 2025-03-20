@@ -62,7 +62,13 @@ function MainLayout({ onLogout }) {
 
   const userData = getUserData();
   const userIsAdmin = userData && userData.role === 'admin';
-  const currentPath = location.pathname.split('/')[1] || 'dashboard';
+
+  // Get current path segment
+  const pathSegment = location.pathname.split('/')[1] || 'dashboard';
+  const currentPath = pathSegment;
+  // Flag to check if we're on the dashboard or root path
+  const isDashboardPath = pathSegment === 'dashboard' || pathSegment === '';
+
   const contractsPath = location.pathname.includes('contracts');
 
   useEffect(() => {
@@ -107,7 +113,7 @@ function MainLayout({ onLogout }) {
 
   const navItems = [
     { title: 'Dashboard', icon: <DashboardIcon />, path: 'dashboard', adminOnly: false },
-    { title: 'Properties', icon: <HomeIcon />, path: 'dashboard', adminOnly: false },
+    { title: 'Properties', icon: <HomeIcon />, path: 'properties', adminOnly: false }, // Changed from 'dashboard' to 'properties'
     { title: 'Tenants', icon: <PersonIcon />, path: 'tenants', adminOnly: false },
     { title: 'Landlords', icon: <BusinessIcon />, path: 'landlords', adminOnly: false },
     { title: 'Payments', icon: <AttachMoneyIcon />, path: 'payments', adminOnly: false },
@@ -126,7 +132,9 @@ function MainLayout({ onLogout }) {
   ];
 
   const navigateTo = (path) => {
-    navigate(`/${path}`);
+    // Special case for 'properties' - redirect to dashboard
+    const targetPath = path === 'properties' ? 'dashboard' : path;
+    navigate(`/${targetPath}`);
     if (isMobile) setDrawerOpen(false);
     setContractsMenuOpen(false);
   };
@@ -333,17 +341,24 @@ function MainLayout({ onLogout }) {
                   sx={{
                     py: 1,
                     borderRadius: 1,
-                    bgcolor: currentPath === item.path ? 'action.selected' : 'transparent',
+                    bgcolor:
+                      // Special case for properties button to be highlighted when on dashboard
+                      item.path === 'properties'
+                        ? (isDashboardPath ? 'action.selected' : 'transparent')
+                        : (currentPath === item.path ? 'action.selected' : 'transparent'),
                     '&:hover': { bgcolor: 'action.hover' },
                   }}
                 >
                   <ListItemIcon sx={{
                     minWidth: 40,
-                    color: currentPath === item.path || (item.path === 'dashboard' && currentPath === '')
-                      ? 'primary.main'
-                      : 'text.primary'
+                    color:
+                      (item.path === 'properties' && isDashboardPath) ||
+                        (currentPath === item.path)
+                        ? 'primary.main'
+                        : 'text.primary'
                   }}>
-                    {item.path === currentPath || (item.path === 'dashboard' && currentPath === '') ? (
+                    {(item.path === 'properties' && isDashboardPath) ||
+                      (currentPath === item.path) ? (
                       <Badge color="secondary" variant="dot">
                         {item.icon}
                       </Badge>
@@ -356,7 +371,11 @@ function MainLayout({ onLogout }) {
                       primary={item.title}
                       primaryTypographyProps={{
                         fontSize: 14,
-                        fontWeight: currentPath === item.path || (item.path === 'dashboard' && currentPath === '') ? 600 : 400
+                        fontWeight:
+                          (item.path === 'properties' && isDashboardPath) ||
+                            (currentPath === item.path)
+                            ? 600
+                            : 400
                       }}
                     />
                   )}

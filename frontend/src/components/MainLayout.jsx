@@ -21,7 +21,10 @@ import {
   Avatar,
   Menu,
   MenuItem,
-  Collapse
+  Collapse,
+  Badge,
+  Tooltip,
+  alpha
 } from '@mui/material';
 
 // Icons
@@ -41,11 +44,15 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import NotificationsIcon from '@mui/icons-material/Notifications';
+import SettingsIcon from '@mui/icons-material/Settings';
+import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
+import NightsStayIcon from '@mui/icons-material/NightsStay';
 
 import { getUserData } from '../utils/api';
 
 function MainLayout({ onLogout }) {
-  const drawerWidth = 240;
+  const drawerWidth = 280;
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -59,6 +66,10 @@ function MainLayout({ onLogout }) {
   const userData = getUserData();
   const userIsAdmin = userData && userData.role === 'admin';
   const [userName, setUserName] = useState('User');
+  const [notifications, setNotifications] = useState(3);
+
+  // Current path for highlighting active link
+  const currentPath = location.pathname.split('/')[1] || 'dashboard';
 
   useEffect(() => {
     if (userData && userData.username) {
@@ -100,7 +111,6 @@ function MainLayout({ onLogout }) {
     const targetPath = path === 'properties' ? 'dashboard' : path;
     navigate(`/${targetPath}`);
     setMobileOpen(false);
-    setContractsMenuOpen(false);
   };
 
   // Toggle contracts submenu
@@ -122,65 +132,222 @@ function MainLayout({ onLogout }) {
     onLogout();
   };
 
+  // Check if a path is active
+  const isActivePath = (path) => {
+    if (path === 'properties') return currentPath === 'dashboard' || currentPath === '';
+    if (path.includes('/')) {
+      return location.pathname.includes(path);
+    }
+    return currentPath === path;
+  };
+
   // Drawer content
   const drawerContent = (
-    <div>
-      <Toolbar>
-        <Typography variant="h6" noWrap component="div" sx={{ cursor: 'pointer' }} onClick={() => navigateTo('dashboard')}>
+    <Box sx={{
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      backgroundColor: theme.palette.mode === 'light' ? '#fff' : '#1A202C'
+    }}>
+      <Box
+        sx={{
+          p: 2,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderBottom: '1px solid',
+          borderColor: theme.palette.divider,
+          backgroundColor: theme.palette.primary.main,
+          color: 'white'
+        }}
+      >
+        <Typography
+          variant="h5"
+          sx={{
+            fontWeight: 'bold',
+            textAlign: 'center',
+            letterSpacing: '0.5px',
+            cursor: 'pointer'
+          }}
+          onClick={() => navigateTo('dashboard')}
+        >
           Shefa UG
         </Typography>
-      </Toolbar>
-      <Divider />
+      </Box>
 
-      <List>
-        {navItems
-          .filter(item => !item.adminOnly || userIsAdmin)
-          .map((item) =>
-            item.hasChildren ? (
-              <React.Fragment key={item.id}>
-                <ListItem disablePadding>
-                  <ListItemButton onClick={handleContractsToggle}>
-                    <ListItemIcon>{item.icon}</ListItemIcon>
-                    <ListItemText primary={item.title} />
-                    {contractsMenuOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+      {/* User profile section */}
+      <Box
+        sx={{
+          p: 2,
+          display: 'flex',
+          alignItems: 'center',
+          borderBottom: '1px solid',
+          borderColor: theme.palette.divider,
+          backgroundColor: theme.palette.mode === 'light'
+            ? alpha(theme.palette.primary.light, 0.1)
+            : alpha(theme.palette.primary.dark, 0.2)
+        }}
+      >
+        <Avatar
+          sx={{
+            width: 40,
+            height: 40,
+            bgcolor: theme.palette.primary.main,
+            boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
+          }}
+        >
+          {userName.charAt(0).toUpperCase()}
+        </Avatar>
+        <Box sx={{ ml: 2 }}>
+          <Typography variant="subtitle1" fontWeight="bold">{userName}</Typography>
+          <Typography variant="caption" color="text.secondary">
+            {userIsAdmin ? 'Administrator' : 'User'}
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* Navigation menu */}
+      <Box sx={{ flexGrow: 1, overflow: 'auto', px: 1, py: 2 }}>
+        <List component="nav" sx={{ px: 1 }}>
+          {navItems
+            .filter(item => !item.adminOnly || userIsAdmin)
+            .map((item) =>
+              item.hasChildren ? (
+                <React.Fragment key={item.id}>
+                  <ListItem disablePadding sx={{ mb: 0.5 }}>
+                    <ListItemButton
+                      onClick={handleContractsToggle}
+                      sx={{
+                        borderRadius: 1.5,
+                        py: 1,
+                        backgroundColor: location.pathname.includes('contracts')
+                          ? alpha(theme.palette.primary.main, 0.12)
+                          : 'transparent',
+                        '&:hover': {
+                          backgroundColor: alpha(theme.palette.primary.main, 0.08)
+                        }
+                      }}
+                    >
+                      <ListItemIcon sx={{
+                        minWidth: 40,
+                        color: location.pathname.includes('contracts')
+                          ? theme.palette.primary.main
+                          : theme.palette.text.primary
+                      }}>
+                        {item.icon}
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={item.title}
+                        primaryTypographyProps={{
+                          fontWeight: location.pathname.includes('contracts') ? 600 : 400,
+                          fontSize: '0.95rem'
+                        }}
+                      />
+                      {contractsMenuOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                    </ListItemButton>
+                  </ListItem>
+
+                  <Collapse in={contractsMenuOpen} timeout="auto" unmountOnExit>
+                    <List component="div" disablePadding sx={{ pl: 2 }}>
+                      {item.children.map(child => (
+                        <ListItem key={child.id} disablePadding sx={{ mb: 0.5 }}>
+                          <ListItemButton
+                            onClick={() => navigateTo(child.path)}
+                            sx={{
+                              borderRadius: 1.5,
+                              py: 0.75,
+                              backgroundColor: location.pathname.includes(child.path)
+                                ? alpha(theme.palette.primary.main, 0.12)
+                                : 'transparent',
+                              '&:hover': {
+                                backgroundColor: alpha(theme.palette.primary.main, 0.08)
+                              }
+                            }}
+                          >
+                            <ListItemIcon sx={{
+                              minWidth: 36,
+                              color: location.pathname.includes(child.path)
+                                ? theme.palette.primary.main
+                                : theme.palette.text.secondary
+                            }}>
+                              {child.icon}
+                            </ListItemIcon>
+                            <ListItemText
+                              primary={child.title}
+                              primaryTypographyProps={{
+                                fontWeight: location.pathname.includes(child.path) ? 600 : 400,
+                                fontSize: '0.875rem'
+                              }}
+                            />
+                          </ListItemButton>
+                        </ListItem>
+                      ))}
+                    </List>
+                  </Collapse>
+                </React.Fragment>
+              ) : (
+                <ListItem key={item.id} disablePadding sx={{ mb: 0.5 }}>
+                  <ListItemButton
+                    onClick={() => navigateTo(item.path)}
+                    sx={{
+                      borderRadius: 1.5,
+                      py: 1,
+                      backgroundColor: isActivePath(item.path)
+                        ? alpha(theme.palette.primary.main, 0.12)
+                        : 'transparent',
+                      '&:hover': {
+                        backgroundColor: alpha(theme.palette.primary.main, 0.08)
+                      }
+                    }}
+                  >
+                    <ListItemIcon sx={{
+                      minWidth: 40,
+                      color: isActivePath(item.path)
+                        ? theme.palette.primary.main
+                        : theme.palette.text.primary
+                    }}>
+                      {isActivePath(item.path) ? (
+                        <Badge color="secondary" variant="dot" overlap="circular">
+                          {item.icon}
+                        </Badge>
+                      ) : (
+                        item.icon
+                      )}
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={item.title}
+                      primaryTypographyProps={{
+                        fontWeight: isActivePath(item.path) ? 600 : 400,
+                        fontSize: '0.95rem'
+                      }}
+                    />
                   </ListItemButton>
                 </ListItem>
+              )
+            )}
+        </List>
+      </Box>
 
-                <Collapse in={contractsMenuOpen} timeout="auto" unmountOnExit>
-                  <List component="div" disablePadding>
-                    {item.children.map(child => (
-                      <ListItem key={child.id} disablePadding sx={{ pl: 4 }}>
-                        <ListItemButton onClick={() => navigateTo(child.path)}>
-                          <ListItemIcon>{child.icon}</ListItemIcon>
-                          <ListItemText primary={child.title} />
-                        </ListItemButton>
-                      </ListItem>
-                    ))}
-                  </List>
-                </Collapse>
-              </React.Fragment>
-            ) : (
-              <ListItem key={item.id} disablePadding>
-                <ListItemButton onClick={() => navigateTo(item.path)}>
-                  <ListItemIcon>{item.icon}</ListItemIcon>
-                  <ListItemText primary={item.title} />
-                </ListItemButton>
-              </ListItem>
-            )
-          )}
-      </List>
-
-      <Divider />
-
-      <List>
-        <ListItem disablePadding>
-          <ListItemButton onClick={onLogout}>
-            <ListItemIcon><LogoutIcon color="error" /></ListItemIcon>
-            <ListItemText primary="Logout" />
-          </ListItemButton>
-        </ListItem>
-      </List>
-    </div>
+      {/* Bottom actions */}
+      <Box sx={{ p: 2, borderTop: '1px solid', borderColor: theme.palette.divider }}>
+        <Button
+          fullWidth
+          variant="outlined"
+          color="error"
+          startIcon={<LogoutIcon />}
+          onClick={onLogout}
+          sx={{
+            py: 1,
+            borderRadius: 1.5,
+            justifyContent: 'flex-start',
+            textTransform: 'none',
+            fontWeight: 500
+          }}
+        >
+          Logout
+        </Button>
+      </Box>
+    </Box>
   );
 
   return (
@@ -190,9 +357,14 @@ function MainLayout({ onLogout }) {
       {/* App Bar */}
       <AppBar
         position="fixed"
+        elevation={0}
         sx={{
           width: { md: `calc(100% - ${drawerWidth}px)` },
           ml: { md: `${drawerWidth}px` },
+          backgroundColor: 'background.paper',
+          color: 'text.primary',
+          borderBottom: '1px solid',
+          borderColor: 'divider',
         }}
       >
         <Toolbar>
@@ -211,31 +383,66 @@ function MainLayout({ onLogout }) {
             noWrap
             component="div"
             sx={{
-              flexGrow: 1,
-              display: { xs: 'block', md: 'block' },
-              cursor: 'pointer'
+              display: { xs: 'block', md: 'none' },
+              fontWeight: 'bold',
+              color: theme.palette.primary.main
             }}
-            onClick={() => navigateTo('dashboard')}
           >
             Shefa UG
           </Typography>
 
-          <IconButton
-            size="large"
-            edge="end"
-            color="inherit"
-            aria-label="account of current user"
-            aria-controls="menu-appbar"
-            aria-haspopup="true"
-            onClick={handleUserMenuOpen}
-          >
-            <Avatar sx={{ bgcolor: 'primary.dark' }}>
-              {userName.charAt(0).toUpperCase()}
-            </Avatar>
-          </IconButton>
+          <Box sx={{ flexGrow: 1 }} />
+
+          {/* Action buttons */}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Tooltip title="Help">
+              <IconButton color="inherit" sx={{ borderRadius: 1.5 }}>
+                <HelpOutlineIcon />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Dark Mode">
+              <IconButton color="inherit" sx={{ borderRadius: 1.5 }}>
+                <NightsStayIcon />
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Notifications">
+              <IconButton color="inherit" sx={{ borderRadius: 1.5 }}>
+                <Badge badgeContent={notifications} color="error">
+                  <NotificationsIcon />
+                </Badge>
+              </IconButton>
+            </Tooltip>
+
+            <Tooltip title="Account">
+              <IconButton
+                onClick={handleUserMenuOpen}
+                sx={{
+                  ml: 1,
+                  borderRadius: 1.5,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  p: 0.75
+                }}
+              >
+                <Avatar
+                  sx={{
+                    width: 32,
+                    height: 32,
+                    bgcolor: theme.palette.primary.main,
+                    fontSize: '0.875rem',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  {userName.charAt(0).toUpperCase()}
+                </Avatar>
+              </IconButton>
+            </Tooltip>
+          </Box>
 
           <Menu
-            id="menu-appbar"
+            id="user-menu"
             anchorEl={userMenuAnchorEl}
             anchorOrigin={{
               vertical: 'bottom',
@@ -248,19 +455,56 @@ function MainLayout({ onLogout }) {
             }}
             open={Boolean(userMenuAnchorEl)}
             onClose={handleUserMenuClose}
+            PaperProps={{
+              sx: {
+                width: 220,
+                mt: 1.5,
+                boxShadow: '0 8px 16px rgba(0,0,0,0.1)'
+              }
+            }}
           >
-            <MenuItem>
+            <Box sx={{ px: 2, py: 1.5, textAlign: 'center' }}>
+              <Avatar
+                sx={{
+                  width: 56,
+                  height: 56,
+                  mx: 'auto',
+                  mb: 1,
+                  bgcolor: theme.palette.primary.main,
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.1)'
+                }}
+              >
+                {userName.charAt(0).toUpperCase()}
+              </Avatar>
+              <Typography variant="subtitle1" fontWeight="bold">{userName}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                {userIsAdmin ? 'Administrator' : 'User'}
+              </Typography>
+            </Box>
+
+            <Divider />
+
+            <MenuItem onClick={handleUserMenuClose} sx={{ py: 1.5 }}>
               <ListItemIcon>
                 <AccountCircleIcon fontSize="small" />
               </ListItemIcon>
-              <Typography variant="inherit">Profile</Typography>
+              <ListItemText primary="My Profile" />
             </MenuItem>
+
+            <MenuItem onClick={handleUserMenuClose} sx={{ py: 1.5 }}>
+              <ListItemIcon>
+                <SettingsIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText primary="Settings" />
+            </MenuItem>
+
             <Divider />
-            <MenuItem onClick={handleLogout}>
+
+            <MenuItem onClick={handleLogout} sx={{ py: 1.5 }}>
               <ListItemIcon>
                 <LogoutIcon fontSize="small" color="error" />
               </ListItemIcon>
-              <Typography variant="inherit" color="error">Logout</Typography>
+              <ListItemText primary="Logout" primaryTypographyProps={{ color: 'error' }} />
             </MenuItem>
           </Menu>
         </Toolbar>
@@ -282,7 +526,11 @@ function MainLayout({ onLogout }) {
           }}
           sx={{
             display: { xs: 'block', md: 'none' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+            '& .MuiDrawer-paper': {
+              boxSizing: 'border-box',
+              width: drawerWidth,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.12)'
+            },
           }}
         >
           {drawerContent}
@@ -293,7 +541,12 @@ function MainLayout({ onLogout }) {
           variant="permanent"
           sx={{
             display: { xs: 'none', md: 'block' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+            '& .MuiDrawer-paper': {
+              boxSizing: 'border-box',
+              width: drawerWidth,
+              borderRight: '1px solid',
+              borderColor: 'divider',
+            },
           }}
           open
         >
@@ -306,14 +559,16 @@ function MainLayout({ onLogout }) {
         component="main"
         sx={{
           flexGrow: 1,
-          p: 3,
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          pt: { xs: 2, md: 3 },
+          px: { xs: 2, md: 3 },
+          pb: 4,
+          width: { md: `calc(100% - ${drawerWidth}px)` },
           minHeight: '100vh',
-          backgroundColor: '#f8f9fb'
+          backgroundColor: theme.palette.mode === 'light' ? '#f8f9fb' : '#121212'
         }}
       >
         <Toolbar /> {/* This creates space for the fixed app bar */}
-        <Container maxWidth="xl">
+        <Container maxWidth="xl" sx={{ mx: 'auto' }}>
           <Outlet />
         </Container>
       </Box>

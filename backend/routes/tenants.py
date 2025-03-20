@@ -59,7 +59,6 @@ def list_tenants() -> Tuple[Response, int]:
 
 @tenants_bp.route("/tenants/add", methods=["POST"])
 @token_required
-@role_required("admin")
 def add_tenant() -> Tuple[Response, int]:
     """
     Adds a new tenant to the system.
@@ -122,7 +121,6 @@ def get_tenant(tenant_id: int) -> Tuple[Response, int]:
 
 @tenants_bp.route("/tenants/<int:tenant_id>", methods=["PUT"])
 @token_required
-@role_required("admin")
 def update_tenant(tenant_id: int) -> Tuple[Response, int]:
     """
     Updates an existing tenant's information.
@@ -153,7 +151,6 @@ def update_tenant(tenant_id: int) -> Tuple[Response, int]:
 
 @tenants_bp.route("/tenants/<int:tenant_id>", methods=["DELETE"])
 @token_required
-@role_required("admin")
 def delete_tenant(tenant_id: int) -> Tuple[Response, int]:
     """
     Deletes a tenant from the system.

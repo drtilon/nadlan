@@ -16,7 +16,6 @@ apartments_bp = Blueprint("apartments_bp", __name__)
 
 @apartments_bp.route("/add", methods=["POST"])
 @token_required
-@role_required("admin")
 def add_apartment_route() -> Tuple[Response, int]:
     try:
         data = request.get_json()
@@ -51,7 +50,6 @@ def add_apartment_route() -> Tuple[Response, int]:
 
 @apartments_bp.route("/edit/<int:apartment_id>", methods=["PUT"])
 @token_required
-@role_required("admin")
 def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
     try:
         data = request.get_json()

@@ -1,30 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Typography,
-  IconButton,
-  Badge,
+  AppBar,
+  Box,
+  CssBaseline,
+  Divider,
   Drawer,
+  IconButton,
   List,
   ListItem,
+  ListItemButton,
   ListItemIcon,
   ListItemText,
-  Box,
+  Toolbar,
+  Typography,
+  Button,
   useMediaQuery,
   useTheme,
   Container,
-  CssBaseline,
-  AppBar,
-  Toolbar,
   Avatar,
   Menu,
   MenuItem,
-  Tooltip,
-  Collapse,
-  ListItemButton,
-  Divider,
-  Button
+  Collapse
 } from '@mui/material';
+
+// Icons
 import MenuIcon from '@mui/icons-material/Menu';
 import HomeIcon from '@mui/icons-material/Home';
 import LogoutIcon from '@mui/icons-material/Logout';
@@ -37,289 +37,122 @@ import DriveFileRenameOutlineIcon from '@mui/icons-material/DriveFileRenameOutli
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import FileOpenIcon from '@mui/icons-material/FileOpen';
 import BusinessIcon from '@mui/icons-material/Business';
-import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import DashboardIcon from '@mui/icons-material/Dashboard';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import DashboardIcon from '@mui/icons-material/Dashboard';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
-import NotificationsIcon from '@mui/icons-material/Notifications';
-import SettingsIcon from '@mui/icons-material/Settings';
-import HelpIcon from '@mui/icons-material/Help';
 
 import { getUserData } from '../utils/api';
 
 function MainLayout({ onLogout }) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [drawerOpen, setDrawerOpen] = useState(true);
-  const [contractsMenuOpen, setContractsMenuOpen] = useState(false);
+  const drawerWidth = 240;
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
-  const [anchorEl, setAnchorEl] = useState(null);
-  const [notifications, setNotifications] = useState(3); // Example notification count
-  const [userName, setUserName] = useState('');
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [contractsMenuOpen, setContractsMenuOpen] = useState(false);
+  const [userMenuAnchorEl, setUserMenuAnchorEl] = useState(null);
 
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // Get user data
   const userData = getUserData();
   const userIsAdmin = userData && userData.role === 'admin';
-
-  // Get current path segment
-  const pathSegment = location.pathname.split('/')[1] || 'dashboard';
-  const currentPath = pathSegment;
-  // Flag to check if we're on the dashboard or root path
-  const isDashboardPath = pathSegment === 'dashboard' || pathSegment === '';
-
-  const contractsPath = location.pathname.includes('contracts');
+  const [userName, setUserName] = useState('User');
 
   useEffect(() => {
-    // Set userName from userData or use default
-    if (userData) {
-      setUserName(userData.username || 'User');
+    if (userData && userData.username) {
+      setUserName(userData.username);
     }
+  }, [userData]);
 
-    // Close drawer on mobile when path changes
-    if (isMobile) {
-      setDrawerOpen(false);
-    }
-  }, [userData, location.pathname, isMobile]);
-
-  const toggleDrawer = () => {
-    setDrawerOpen(!drawerOpen);
-    if (contractsMenuOpen) setContractsMenuOpen(false);
+  // Handle drawer toggle
+  const handleDrawerToggle = () => {
+    setMobileOpen(!mobileOpen);
   };
 
-  const handleProfileMenuOpen = (event) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleMenuClose = () => {
-    setAnchorEl(null);
-  };
-
-  const handleProfileClick = () => {
-    handleMenuClose();
-    // Navigate to profile page or open profile dialog
-  };
-
-  const handleSettingsClick = () => {
-    handleMenuClose();
-    // Navigate to settings page
-  };
-
-  const handleLogout = () => {
-    handleMenuClose();
-    onLogout();
-  };
-
+  // Navigation items
   const navItems = [
-    { title: 'Dashboard', icon: <DashboardIcon />, path: 'dashboard', adminOnly: false },
-    { title: 'Properties', icon: <HomeIcon />, path: 'properties', adminOnly: false }, // Changed from 'dashboard' to 'properties'
-    { title: 'Tenants', icon: <PersonIcon />, path: 'tenants', adminOnly: false },
-    { title: 'Landlords', icon: <BusinessIcon />, path: 'landlords', adminOnly: false },
-    { title: 'Payments', icon: <AttachMoneyIcon />, path: 'payments', adminOnly: false },
+    { id: 1, title: 'Dashboard', icon: <DashboardIcon />, path: 'dashboard', adminOnly: false },
+    { id: 2, title: 'Properties', icon: <HomeIcon />, path: 'properties', adminOnly: false },
+    { id: 3, title: 'Tenants', icon: <PersonIcon />, path: 'tenants', adminOnly: false },
+    { id: 4, title: 'Landlords', icon: <BusinessIcon />, path: 'landlords', adminOnly: false },
+    { id: 5, title: 'Payments', icon: <AttachMoneyIcon />, path: 'payments', adminOnly: false },
     {
+      id: 6,
       title: 'Contracts',
       icon: <DescriptionIcon />,
-      children: [
-        { title: 'Generate Contract', icon: <DriveFileRenameOutlineIcon />, path: 'contracts/generate' },
-        { title: 'Contract Manager', icon: <FileOpenIcon />, path: 'contracts/manage' },
-      ],
+      hasChildren: true,
       adminOnly: true,
+      children: [
+        { id: 61, title: 'Generate Contract', icon: <DriveFileRenameOutlineIcon />, path: 'contracts/generate' },
+        { id: 62, title: 'Contract Manager', icon: <FileOpenIcon />, path: 'contracts/manage' },
+      ]
     },
-    { title: 'Analytics', icon: <InsightsIcon />, path: 'analytics', adminOnly: true },
-    { title: 'Admin Panel', icon: <AdminPanelSettingsIcon />, path: 'admin', adminOnly: true },
-    { title: 'System Logs', icon: <AssessmentIcon />, path: 'logs', adminOnly: true },
+    { id: 7, title: 'Analytics', icon: <InsightsIcon />, path: 'analytics', adminOnly: true },
+    { id: 8, title: 'Admin Panel', icon: <AdminPanelSettingsIcon />, path: 'admin', adminOnly: true },
+    { id: 9, title: 'System Logs', icon: <AssessmentIcon />, path: 'logs', adminOnly: true },
   ];
 
+  // Navigate to a path
   const navigateTo = (path) => {
-    // Special case for 'properties' - redirect to dashboard
+    // Correct redirect for properties
     const targetPath = path === 'properties' ? 'dashboard' : path;
     navigate(`/${targetPath}`);
-    if (isMobile) setDrawerOpen(false);
+    setMobileOpen(false);
     setContractsMenuOpen(false);
   };
 
-  const handleTitleClick = () => {
-    navigate('/dashboard');
-  };
-
-  const handleContractsMenuToggle = () => {
+  // Toggle contracts submenu
+  const handleContractsToggle = () => {
     setContractsMenuOpen(!contractsMenuOpen);
   };
 
-  // Calculate drawer width
-  const drawerWidth = drawerOpen ? 260 : 72;
+  // User menu handlers
+  const handleUserMenuOpen = (event) => {
+    setUserMenuAnchorEl(event.currentTarget);
+  };
 
-  const menuId = 'primary-account-menu';
-  const renderMenu = (
-    <Menu
-      anchorEl={anchorEl}
-      id={menuId}
-      keepMounted
-      open={Boolean(anchorEl)}
-      onClose={handleMenuClose}
-      transformOrigin={{ horizontal: 'right', vertical: 'top' }}
-      anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
-    >
-      <Box sx={{ px: 2, py: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <Avatar sx={{ width: 60, height: 60, mb: 1, bgcolor: 'primary.main' }}>
-          {userName.charAt(0).toUpperCase()}
-        </Avatar>
-        <Typography variant="subtitle1" fontWeight="bold">{userName}</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          {userIsAdmin ? 'Administrator' : 'User'}
+  const handleUserMenuClose = () => {
+    setUserMenuAnchorEl(null);
+  };
+
+  const handleLogout = () => {
+    setUserMenuAnchorEl(null);
+    onLogout();
+  };
+
+  // Drawer content
+  const drawerContent = (
+    <div>
+      <Toolbar>
+        <Typography variant="h6" noWrap component="div" sx={{ cursor: 'pointer' }} onClick={() => navigateTo('dashboard')}>
+          Shefa UG
         </Typography>
-      </Box>
+      </Toolbar>
       <Divider />
-      <MenuItem onClick={handleProfileClick}>
-        <ListItemIcon>
-          <AccountCircleIcon fontSize="small" />
-        </ListItemIcon>
-        <ListItemText>Profile</ListItemText>
-      </MenuItem>
-      <MenuItem onClick={handleSettingsClick}>
-        <ListItemIcon>
-          <SettingsIcon fontSize="small" />
-        </ListItemIcon>
-        <ListItemText>Settings</ListItemText>
-      </MenuItem>
-      <Divider />
-      <MenuItem onClick={handleLogout}>
-        <ListItemIcon>
-          <LogoutIcon fontSize="small" color="error" />
-        </ListItemIcon>
-        <ListItemText primary="Logout" primaryTypographyProps={{ color: 'error' }} />
-      </MenuItem>
-    </Menu>
-  );
 
-  const sidebarNav = (
-    <Box
-      sx={{
-        height: '100vh', // Full viewport height
-        display: 'flex',
-        flexDirection: 'column',
-        bgcolor: 'background.paper',
-        boxShadow: '0 0 10px rgba(0,0,0,0.05)',
-        transition: theme.transitions.create(['width'], {
-          easing: theme.transitions.easing.sharp,
-          duration: theme.transitions.duration.enteringScreen,
-        }),
-        overflowY: 'auto', // Scroll within sidebar if content overflows
-        overflowX: 'hidden',
-        borderRight: '1px solid',
-        borderColor: 'divider',
-      }}
-    >
-      <Box
-        sx={{
-          p: 2,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: drawerOpen ? 'space-between' : 'center',
-          borderBottom: '1px solid',
-          borderColor: 'divider',
-        }}
-      >
-        {drawerOpen && (
-          <Typography
-            variant="h6"
-            sx={{
-              fontWeight: 'bold',
-              cursor: 'pointer',
-              color: 'primary.main',
-              '&:hover': { opacity: 0.85 },
-            }}
-            onClick={handleTitleClick}
-          >
-            Shefa UG
-          </Typography>
-        )}
-        <IconButton onClick={toggleDrawer} sx={{ color: 'primary.main' }}>
-          {drawerOpen ? <ChevronLeftIcon /> : <ChevronRightIcon />}
-        </IconButton>
-      </Box>
-
-      <List component="nav" sx={{ flexGrow: 1, px: 1 }}>
+      <List>
         {navItems
-          .filter((item) => !item.adminOnly || userIsAdmin)
+          .filter(item => !item.adminOnly || userIsAdmin)
           .map((item) =>
-            item.children ? (
-              <React.Fragment key={item.title}>
-                <ListItem
-                  disablePadding
-                  button
-                  onClick={handleContractsMenuToggle}
-                  sx={{
-                    mb: 0.5,
-                    borderRadius: 1,
-                    overflow: 'hidden',
-                  }}
-                >
-                  <ListItemButton
-                    sx={{
-                      py: 1,
-                      borderRadius: 1,
-                      bgcolor: contractsMenuOpen || contractsPath ? 'action.selected' : 'transparent',
-                      '&:hover': { bgcolor: 'action.hover' },
-                    }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 40, color: contractsPath || contractsMenuOpen ? 'primary.main' : 'text.primary' }}>
-                      {contractsPath || contractsMenuOpen ? (
-                        <Badge color="secondary" variant="dot">
-                          {item.icon}
-                        </Badge>
-                      ) : (
-                        item.icon
-                      )}
-                    </ListItemIcon>
-                    {drawerOpen && (
-                      <>
-                        <ListItemText
-                          primary={item.title}
-                          primaryTypographyProps={{
-                            fontSize: 14,
-                            fontWeight: contractsPath || contractsMenuOpen ? 600 : 400
-                          }}
-                        />
-                        {contractsMenuOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                      </>
-                    )}
+            item.hasChildren ? (
+              <React.Fragment key={item.id}>
+                <ListItem disablePadding>
+                  <ListItemButton onClick={handleContractsToggle}>
+                    <ListItemIcon>{item.icon}</ListItemIcon>
+                    <ListItemText primary={item.title} />
+                    {contractsMenuOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                   </ListItemButton>
                 </ListItem>
-                <Collapse in={contractsMenuOpen && drawerOpen} timeout="auto" unmountOnExit>
+
+                <Collapse in={contractsMenuOpen} timeout="auto" unmountOnExit>
                   <List component="div" disablePadding>
-                    {item.children.map((child) => (
-                      <ListItem
-                        key={child.path}
-                        disablePadding
-                        sx={{ pl: 2 }}
-                      >
-                        <ListItemButton
-                          onClick={() => navigateTo(child.path)}
-                          sx={{
-                            borderRadius: 1,
-                            py: 0.75,
-                            mb: 0.5,
-                            bgcolor: location.pathname.includes(child.path) ? 'action.selected' : 'transparent',
-                            '&:hover': { bgcolor: 'action.hover' },
-                          }}
-                        >
-                          <ListItemIcon
-                            sx={{
-                              minWidth: 36,
-                              color: location.pathname.includes(child.path) ? 'primary.main' : 'text.secondary'
-                            }}
-                          >
-                            {child.icon}
-                          </ListItemIcon>
-                          <ListItemText
-                            primary={child.title}
-                            primaryTypographyProps={{
-                              fontSize: 13,
-                              fontWeight: location.pathname.includes(child.path) ? 600 : 400,
-                            }}
-                          />
+                    {item.children.map(child => (
+                      <ListItem key={child.id} disablePadding sx={{ pl: 4 }}>
+                        <ListItemButton onClick={() => navigateTo(child.path)}>
+                          <ListItemIcon>{child.icon}</ListItemIcon>
+                          <ListItemText primary={child.title} />
                         </ListItemButton>
                       </ListItem>
                     ))}
@@ -327,229 +160,160 @@ function MainLayout({ onLogout }) {
                 </Collapse>
               </React.Fragment>
             ) : (
-              <ListItem
-                key={item.path}
-                disablePadding
-                sx={{
-                  mb: 0.5,
-                  borderRadius: 1,
-                  overflow: 'hidden',
-                }}
-              >
-                <ListItemButton
-                  onClick={() => navigateTo(item.path)}
-                  sx={{
-                    py: 1,
-                    borderRadius: 1,
-                    bgcolor:
-                      // Special case for properties button to be highlighted when on dashboard
-                      item.path === 'properties'
-                        ? (isDashboardPath ? 'action.selected' : 'transparent')
-                        : (currentPath === item.path ? 'action.selected' : 'transparent'),
-                    '&:hover': { bgcolor: 'action.hover' },
-                  }}
-                >
-                  <ListItemIcon sx={{
-                    minWidth: 40,
-                    color:
-                      (item.path === 'properties' && isDashboardPath) ||
-                        (currentPath === item.path)
-                        ? 'primary.main'
-                        : 'text.primary'
-                  }}>
-                    {(item.path === 'properties' && isDashboardPath) ||
-                      (currentPath === item.path) ? (
-                      <Badge color="secondary" variant="dot">
-                        {item.icon}
-                      </Badge>
-                    ) : (
-                      item.icon
-                    )}
-                  </ListItemIcon>
-                  {drawerOpen && (
-                    <ListItemText
-                      primary={item.title}
-                      primaryTypographyProps={{
-                        fontSize: 14,
-                        fontWeight:
-                          (item.path === 'properties' && isDashboardPath) ||
-                            (currentPath === item.path)
-                            ? 600
-                            : 400
-                      }}
-                    />
-                  )}
+              <ListItem key={item.id} disablePadding>
+                <ListItemButton onClick={() => navigateTo(item.path)}>
+                  <ListItemIcon>{item.icon}</ListItemIcon>
+                  <ListItemText primary={item.title} />
                 </ListItemButton>
               </ListItem>
             )
           )}
       </List>
 
-      {drawerOpen && (
-        <Box sx={{ p: 2, borderTop: '1px solid', borderColor: 'divider' }}>
-          <Button
-            fullWidth
-            variant="outlined"
-            color="error"
-            startIcon={<LogoutIcon />}
-            onClick={onLogout}
-            sx={{
-              justifyContent: 'flex-start',
-              py: 0.8,
-              textTransform: 'none',
-              fontWeight: 500
-            }}
-          >
-            Logout
-          </Button>
-        </Box>
-      )}
+      <Divider />
 
-      {!drawerOpen && (
-        <Box sx={{ p: 1, borderTop: '1px solid', borderColor: 'divider', display: 'flex', justifyContent: 'center' }}>
-          <IconButton
-            color="error"
-            onClick={onLogout}
-            size="small"
-            sx={{ borderRadius: 1 }}
-          >
-            <LogoutIcon />
-          </IconButton>
-        </Box>
-      )}
-    </Box>
+      <List>
+        <ListItem disablePadding>
+          <ListItemButton onClick={onLogout}>
+            <ListItemIcon><LogoutIcon color="error" /></ListItemIcon>
+            <ListItemText primary="Logout" />
+          </ListItemButton>
+        </ListItem>
+      </List>
+    </div>
   );
 
   return (
-    <Box sx={{ display: 'flex', bgcolor: '#f8f9fb', minHeight: '100vh' }}>
+    <Box sx={{ display: 'flex' }}>
       <CssBaseline />
 
+      {/* App Bar */}
       <AppBar
-        position="fixed" // Top bar remains fixed
-        color="default"
-        elevation={0}
+        position="fixed"
         sx={{
-          width: { xs: '100%', md: `calc(100% - ${drawerWidth}px)` },
-          ml: { xs: 0, md: `${drawerWidth}px` },
-          borderBottom: '1px solid',
-          borderColor: 'divider',
-          bgcolor: 'background.paper',
+          width: { md: `calc(100% - ${drawerWidth}px)` },
+          ml: { md: `${drawerWidth}px` },
         }}
       >
-        <Toolbar sx={{ px: { xs: 2, sm: 3 } }}>
-          {isMobile && (
-            <IconButton
-              edge="start"
-              color="inherit"
-              aria-label="open drawer"
-              onClick={toggleDrawer}
-              sx={{ mr: 2 }}
-            >
-              <MenuIcon />
-            </IconButton>
-          )}
+        <Toolbar>
+          <IconButton
+            color="inherit"
+            aria-label="open drawer"
+            edge="start"
+            onClick={handleDrawerToggle}
+            sx={{ mr: 2, display: { md: 'none' } }}
+          >
+            <MenuIcon />
+          </IconButton>
 
-          {isMobile && (
-            <Typography
-              variant="h6"
-              component="div"
-              sx={{
-                flexGrow: 1,
-                fontWeight: 'bold',
-                cursor: 'pointer',
-                color: 'primary.main',
-                display: { xs: 'block', md: 'none' }
-              }}
-              onClick={handleTitleClick}
-            >
-              Shefa UG
-            </Typography>
-          )}
+          <Typography
+            variant="h6"
+            noWrap
+            component="div"
+            sx={{
+              flexGrow: 1,
+              display: { xs: 'block', md: 'block' },
+              cursor: 'pointer'
+            }}
+            onClick={() => navigateTo('dashboard')}
+          >
+            Shefa UG
+          </Typography>
 
-          <Box sx={{ flexGrow: 1 }} />
+          <IconButton
+            size="large"
+            edge="end"
+            color="inherit"
+            aria-label="account of current user"
+            aria-controls="menu-appbar"
+            aria-haspopup="true"
+            onClick={handleUserMenuOpen}
+          >
+            <Avatar sx={{ bgcolor: 'primary.dark' }}>
+              {userName.charAt(0).toUpperCase()}
+            </Avatar>
+          </IconButton>
 
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <Tooltip title="Help">
-              <IconButton size="large" color="inherit">
-                <HelpIcon />
-              </IconButton>
-            </Tooltip>
-
-            <Tooltip title="Notifications">
-              <IconButton size="large" color="inherit">
-                <Badge badgeContent={notifications} color="error">
-                  <NotificationsIcon />
-                </Badge>
-              </IconButton>
-            </Tooltip>
-
-            <Tooltip title="Account settings">
-              <IconButton
-                size="large"
-                edge="end"
-                aria-label="account of current user"
-                aria-controls={menuId}
-                aria-haspopup="true"
-                onClick={handleProfileMenuOpen}
-                color="inherit"
-                sx={{ ml: 1 }}
-              >
-                <Avatar
-                  sx={{
-                    width: 32,
-                    height: 32,
-                    bgcolor: 'primary.main',
-                    fontSize: '0.9rem',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  {userName.charAt(0).toUpperCase()}
-                </Avatar>
-              </IconButton>
-            </Tooltip>
-          </Box>
+          <Menu
+            id="menu-appbar"
+            anchorEl={userMenuAnchorEl}
+            anchorOrigin={{
+              vertical: 'bottom',
+              horizontal: 'right',
+            }}
+            keepMounted
+            transformOrigin={{
+              vertical: 'top',
+              horizontal: 'right',
+            }}
+            open={Boolean(userMenuAnchorEl)}
+            onClose={handleUserMenuClose}
+          >
+            <MenuItem>
+              <ListItemIcon>
+                <AccountCircleIcon fontSize="small" />
+              </ListItemIcon>
+              <Typography variant="inherit">Profile</Typography>
+            </MenuItem>
+            <Divider />
+            <MenuItem onClick={handleLogout}>
+              <ListItemIcon>
+                <LogoutIcon fontSize="small" color="error" />
+              </ListItemIcon>
+              <Typography variant="inherit" color="error">Logout</Typography>
+            </MenuItem>
+          </Menu>
         </Toolbar>
       </AppBar>
-      {renderMenu}
 
-      <Drawer
-        variant={isMobile ? 'temporary' : 'permanent'}
-        open={isMobile ? drawerOpen : true}
-        onClose={toggleDrawer}
-        ModalProps={{
-          keepMounted: true, // Better open performance on mobile
-        }}
-        sx={{
-          '& .MuiDrawer-paper': {
-            position: 'fixed', // Fix the sidebar in place
-            top: 0,
-            left: 0,
-            height: '100vh', // Full height of viewport
-            width: drawerWidth,
-            transition: theme.transitions.create('width', {
-              easing: theme.transitions.easing.sharp,
-              duration: theme.transitions.duration.enteringScreen,
-            }),
-            boxSizing: 'border-box',
-          },
-        }}
+      {/* Navigation drawer */}
+      <Box
+        component="nav"
+        sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}
+        aria-label="mailbox folders"
       >
-        {sidebarNav}
-      </Drawer>
+        {/* Mobile drawer */}
+        <Drawer
+          variant="temporary"
+          open={mobileOpen}
+          onClose={handleDrawerToggle}
+          ModalProps={{
+            keepMounted: true, // Better mobile performance
+          }}
+          sx={{
+            display: { xs: 'block', md: 'none' },
+            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+          }}
+        >
+          {drawerContent}
+        </Drawer>
+
+        {/* Desktop drawer */}
+        <Drawer
+          variant="permanent"
+          sx={{
+            display: { xs: 'none', md: 'block' },
+            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
+          }}
+          open
+        >
+          {drawerContent}
+        </Drawer>
+      </Box>
 
       {/* Main content */}
       <Box
         component="main"
         sx={{
           flexGrow: 1,
-          overflow: 'auto',
-          pt: { xs: 8, sm: 9 }, // Space for the fixed AppBar
-          px: { xs: 2, sm: 3 },
-          ml: { xs: 0, md: `${drawerWidth}px` }, // Offset by sidebar width on desktop
-          width: { xs: '100%', md: `calc(100% - ${drawerWidth}px)` },
+          p: 3,
+          width: { sm: `calc(100% - ${drawerWidth}px)` },
+          minHeight: '100vh',
+          backgroundColor: '#f8f9fb'
         }}
       >
-        <Container maxWidth="xl" sx={{ py: 3 }}>
+        <Toolbar /> {/* This creates space for the fixed app bar */}
+        <Container maxWidth="xl">
           <Outlet />
         </Container>
       </Box>

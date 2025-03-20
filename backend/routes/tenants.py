@@ -134,11 +134,19 @@ def update_tenant(tenant_id: int) -> Tuple[Response, int]:
         if not tenant:
             return jsonify({"message": "Tenant not found"}), 404
 
-        # Update tenant fields
+        # Update all tenant fields
         tenant.name = data.get("name", tenant.name)
         tenant.email = data.get("email", tenant.email)
         tenant.phone = data.get("phone", tenant.phone)
         tenant.apartment_id = data.get("apartment_id", tenant.apartment_id)
+
+        # Add the missing fields
+        tenant.bornOn = data.get("bornOn", tenant.bornOn)
+        tenant.refundIban = data.get("refundIban", tenant.refundIban)
+
+        # Log the update for debugging
+        current_app.logger.info(f"Updating tenant {tenant_id} with data: {data}")
+        current_app.logger.info(f"Updated tenant: {tenant.to_dict()}")
 
         db.session.commit()
         return jsonify({"message": "Tenant updated successfully"}), 200

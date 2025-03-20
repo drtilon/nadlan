@@ -70,8 +70,6 @@ const COLORS = {
   pie: ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#8b5cf6', '#10b981']
 };
 
-const MANAGEMENT_FEE_PERCENTAGE = 0.1; // 10% for management model
-
 function AnalyticsPanel({ showNotification }) {
   const [tabIndex, setTabIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -94,28 +92,9 @@ function AnalyticsPanel({ showNotification }) {
         api.get('/analytics/tenant-payments')
       ]);
 
-      // Enhance apartment metrics with price per square meter and net profit
-      const enhancedApartmentMetrics = apartmentResponse.data.map(apt => {
-        const pricePerMeter = apt.rent && apt.size ? (apt.rent / apt.size).toFixed(2) : 0;
-        let netProfit = 0;
-
-        // Calculate net profit based on model
-        if (apt.model === 'rental') {
-          netProfit = apt.rent && apt.rentCost ? apt.rent - apt.rentCost : apt.rent || 0;
-        } else if (apt.model === 'management') {
-          netProfit = apt.rent ? apt.rent * MANAGEMENT_FEE_PERCENTAGE : 0;
-        }
-
-        return {
-          ...apt,
-          pricePerMeter,
-          netProfit
-        };
-      });
-
       setSummaryData(summaryResponse.data);
       setPaymentTrends(trendsResponse.data);
-      setApartmentMetrics(enhancedApartmentMetrics);
+      setApartmentMetrics(apartmentResponse.data);
       setTenantPayments(tenantResponse.data);
       setLoading(false);
     } catch (err) {
@@ -145,6 +124,17 @@ function AnalyticsPanel({ showNotification }) {
     { name: 'Partial', value: summaryData.payment_status.partial },
     { name: 'Not Paid', value: summaryData.payment_status.not_paid }
   ] : [];
+
+  // Calculate total net profit from all apartments
+  const calculateTotalNetProfit = () => {
+    if (!apartmentMetrics || apartmentMetrics.length === 0) return 0;
+
+    return apartmentMetrics.reduce((sum, apt) => {
+      // Get net profit value from the backend data
+      const netProfit = apt.netProfit || 0;
+      return sum + netProfit;
+    }, 0);
+  };
 
   const filteredApartments = apartmentMetrics.filter(apt =>
     apt.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -219,7 +209,7 @@ function AnalyticsPanel({ showNotification }) {
                     <Box>
                       <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>Net Profit</Typography>
                       <Typography variant="h4" sx={{ fontWeight: 600 }}>
-                        {formatCurrency(apartmentMetrics.reduce((sum, apt) => sum + apt.netProfit, 0))}
+                        {formatCurrency(calculateTotalNetProfit())}
                       </Typography>
                       <Typography variant="body2" sx={{ mt: 1 }}>
                         Across all units
@@ -239,7 +229,11 @@ function AnalyticsPanel({ showNotification }) {
                     <Box>
                       <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>Avg Price/m²</Typography>
                       <Typography variant="h4" sx={{ fontWeight: 600 }}>
-                        {formatCurrency(apartmentMetrics.reduce((sum, apt) => sum + Number(apt.pricePerMeter), 0) / (apartmentMetrics.length || 1))}
+                        {formatCurrency(
+                          apartmentMetrics.length > 0
+                            ? apartmentMetrics.reduce((sum, apt) => sum + (apt.pricePerMeter || 0), 0) / apartmentMetrics.length
+                            : 0
+                        )}
                       </Typography>
                       <Typography variant="body2" sx={{ mt: 1 }}>Across units</Typography>
                     </Box>
@@ -388,6 +382,7 @@ function AnalyticsPanel({ showNotification }) {
                       <TableCell align="right"><Typography fontWeight={600}>Model</Typography></TableCell>
                       <TableCell align="right"><Typography fontWeight={600}>Rent</Typography></TableCell>
                       <TableCell align="right"><Typography fontWeight={600}>Rent Cost</Typography></TableCell>
+                      <TableCell align="right"><Typography fontWeight={600}>Mgmt Fee</Typography></TableCell>
                       <TableCell align="right"><Typography fontWeight={600}>Size (m²)</Typography></TableCell>
                       <TableCell align="right"><Typography fontWeight={600}>Price/m²</Typography></TableCell>
                       <TableCell align="right"><Typography fontWeight={600}>Net Profit</Typography></TableCell>
@@ -407,6 +402,7 @@ function AnalyticsPanel({ showNotification }) {
                         </TableCell>
                         <TableCell align="right">{formatCurrency(apt.rent)}</TableCell>
                         <TableCell align="right">{apt.model === 'rental' ? formatCurrency(apt.rentCost) : 'N/A'}</TableCell>
+                        <TableCell align="right">{apt.model === 'management' ? `${apt.managementFee}%` : 'N/A'}</TableCell>
                         <TableCell align="right">{apt.size || 'N/A'}</TableCell>
                         <TableCell align="right">{formatCurrency(apt.pricePerMeter)}</TableCell>
                         <TableCell align="right">{formatCurrency(apt.netProfit)}</TableCell>

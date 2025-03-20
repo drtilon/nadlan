@@ -9,6 +9,7 @@ from sqlalchemy import func, extract, desc
 from itertools import groupby
 from operator import itemgetter
 from extentions import db
+from decimal import Decimal
 
 analytics_bp = Blueprint("analytics_bp", __name__)
 
@@ -192,7 +193,7 @@ def get_payment_trends():
 def get_apartment_metrics():
     """
     Returns metrics for individual apartments including occupancy status,
-    rent collection, and tenant information.
+    rent collection, and net profit calculations based on model type.
     """
     try:
         apartments = Apartment.query.all()
@@ -240,12 +241,36 @@ def get_apartment_metrics():
                     apt.contractEndDate - datetime.now().date()
                 ).days
 
+            # Calculate price per square meter
+            price_per_meter = 0
+            if apt.size and apt.size > 0 and apt.rent:
+                price_per_meter = float(apt.rent) / float(apt.size)
+
+            # Calculate net profit based on the apartment model
+            net_profit = 0
+            rent = float(apt.rent) if apt.rent else 0
+
+            if apt.model == "rental":
+                # For rental model: Net Profit = Rent - Rental Cost
+                rent_cost = float(apt.rentCost) if apt.rentCost else 0
+                net_profit = rent - rent_cost
+            elif apt.model == "management":
+                # For management model: Net Profit = Management Fee % of Rent
+                management_fee = float(apt.managementFee) if apt.managementFee else 0
+                net_profit = rent * (management_fee / 100)
+
             apartment_metrics.append(
                 {
                     "id": apt.id,
                     "address": apt.address,
                     "status": apt.status,
-                    "rent": float(apt.rent) if apt.rent else 0,
+                    "rent": rent,
+                    "rentCost": float(apt.rentCost) if apt.rentCost else 0,
+                    "managementFee": float(apt.managementFee)
+                    if apt.managementFee
+                    else 0,
+                    "model": apt.model
+                    or "management",  # Default to management if not specified
                     "collected": collected_amount,
                     "payment_status": payment_status,
                     "tenant_count": tenant_count,
@@ -253,6 +278,8 @@ def get_apartment_metrics():
                     "contract_end_date": contract_end_date,
                     "days_until_expiration": days_until_expiration,
                     "size": apt.size,
+                    "pricePerMeter": round(price_per_meter, 2),
+                    "netProfit": round(net_profit, 2),  # Add net profit calculation
                 }
             )
 

@@ -1,17 +1,31 @@
 // src/components/ApartmentForm.jsx - Fixed tenant duplication issue
 import React, { useState, useEffect } from 'react';
 import {
-  Paper,
   Typography,
-  Box,
-  Autocomplete,
   TextField,
-  Chip,
-  Avatar,
+  Button,
+  FormControl,
+  Select,
+  MenuItem,
+  Grid,
+  CircularProgress,
+  Box,
+  Paper,
+  Autocomplete,
   Tooltip,
-  Button
+  Avatar,
+  Chip
 } from '@mui/material';
-import { Person as PersonIcon, PersonAdd as PersonAddIcon } from '@mui/icons-material';
+import {
+  Home as HomeIcon,
+  Person as PersonIcon,
+  Description as DescriptionIcon,
+  Delete as DeleteIcon,
+  Save as SaveIcon,
+  Business as BusinessIcon,
+  AccountBalance as BankIcon,
+  Refresh as RefreshIcon,
+} from '@mui/icons-material';
 import api from '../utils/api';
 import ApartmentDetailsForm from './ApartmentDetailsForm';
 import TenantFormDialog from './TenantFormDialog';
@@ -336,9 +350,43 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       const cleanedFormData = { ...formData };
       delete cleanedFormData.rentInSentance;
 
+      // FIX: Modify the tenant data to identify existing vs. new tenants
+      // Existing tenants will already have an ID and should only be reassigned, not created again
+      // New tenants (without a real ID or with a temp ID) need to be created
+      const processedTenants = tenantData.map(tenant => {
+        // Check if this is a real tenant with a real ID (not a temp ID)
+        const isExistingTenant = tenant.id && !String(tenant.id).startsWith('temp-');
+
+        // For existing tenants, we only need to pass the ID for reassignment
+        // For new tenants, we need to pass all their details for creation
+        if (isExistingTenant) {
+          // For existing tenants, just send the ID and minimal info
+          return {
+            id: tenant.id,
+            name: tenant.name || `${tenant.firstName} ${tenant.lastName}`.trim(),
+            // Include these fields but don't update them if they're already set
+            email: tenant.email || '',
+            phone: tenant.phone || '',
+            // Explicitly flag this as an existing tenant for the backend
+            isExistingTenant: true
+          };
+        } else {
+          // For new tenants, send all details
+          return {
+            name: tenant.name || `${tenant.firstName} ${tenant.lastName}`.trim(),
+            email: tenant.email || '',
+            phone: tenant.phone || '',
+            bornOn: tenant.bornOn || '',
+            refundIban: tenant.refundIban || '',
+            // Explicitly flag this as a new tenant
+            isExistingTenant: false
+          };
+        }
+      });
+
       const payload = {
         new_apartment: cleanedFormData,
-        new_tenants: tenantData
+        new_tenants: processedTenants
       };
 
       if (isEdit) {
@@ -477,7 +525,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
           <Button
             variant="contained"
             color="primary"
-            startIcon={<PersonAddIcon />}
+            startIcon={<PersonIcon />}
             onClick={() => setTenantFormOpen(true)}
             sx={{ whiteSpace: 'nowrap' }}
           >

@@ -22,22 +22,46 @@ def add_apartment_route() -> Tuple[Response, int]:
         if not data:
             return jsonify({"message": "Invalid request: No data provided"}), 400
 
-        try:
-            new_tenants = [
-                TenantData(**tenant) for tenant in data.get("new_tenants", [])
-            ]
-        except ValidationError as e:
-            return jsonify({"message": "Invalid data", "errors": e.errors()}), 400
+        # Get apartment data
+        apartment_data = data.get("new_apartment", {})
+        if not apartment_data:
+            return jsonify({"message": "No apartment data provided"}), 400
 
-        apartment = Apartment(**data["new_apartment"])
-
+        # Create the apartment
+        apartment = Apartment(**apartment_data)
         db.session.add(apartment)
         db.session.flush()  # Ensure apartment ID is assigned before adding tenants
 
-        tenants = [
-            Tenant(**tenant.dict(), apartment_id=apartment.id) for tenant in new_tenants
-        ]
-        db.session.add_all(tenants)
+        # Get tenant data
+        tenants_data = data.get("new_tenants", [])
+
+        # Process tenant data, handling both existing and new tenants
+        for tenant_data in tenants_data:
+            # Check if this is an existing tenant or a new one
+            is_existing = tenant_data.get("isExistingTenant", False)
+            tenant_id = tenant_data.get("id")
+
+            if is_existing and tenant_id:
+                # For existing tenants, just update the apartment_id
+                existing_tenant = Tenant.query.get(tenant_id)
+                if existing_tenant:
+                    existing_tenant.apartment_id = apartment.id
+                    # Log the reassignment
+                    current_app.logger.info(
+                        f"Reassigned existing tenant {tenant_id} to apartment {apartment.id}"
+                    )
+            else:
+                # For new tenants, create them
+                # First, remove the isExistingTenant flag as it's not a database field
+                if "isExistingTenant" in tenant_data:
+                    del tenant_data["isExistingTenant"]
+
+                # Create and add the new tenant
+                new_tenant = Tenant(**tenant_data, apartment_id=apartment.id)
+                db.session.add(new_tenant)
+                current_app.logger.info(
+                    f"Created new tenant for apartment {apartment.id}"
+                )
 
         db.session.commit()
         return jsonify({"message": "Apartment added successfully"}), 201

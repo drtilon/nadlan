@@ -20,7 +20,7 @@ import LogsViewer from './components/LogsViewer';
 import MainLayout from './components/MainLayout';
 import TenantDetails from './components/TenantDetails';
 import LandlordDetails from './components/LandlordDetails';
-
+import UserAnalyticsPanel from './components/UserAnalyticsPanel';
 // Utils and theme
 import theme from './theme';
 import { setAuthToken, verifyToken, getUserData } from './utils/api';
@@ -311,12 +311,19 @@ const AppRouterContainer = () => {
           } />
 
           <Route path="analytics" element={
-            <ProtectedRoute adminOnly={true}>
-              <AnalyticsPanel
-                showNotification={showNotification}
-              />
-            </ProtectedRoute>
-          } />
+  (() => {
+    const userData = getUserData(); // Fetch user data
+    return userData && userData.role === 'admin' ? (
+      <ProtectedRoute adminOnly={true}>
+        <AnalyticsPanel showNotification={showNotification} />
+      </ProtectedRoute>
+    ) : (
+      <ProtectedRoute>
+        <UserAnalyticsPanel showNotification={showNotification} />
+      </ProtectedRoute>
+    );
+  })()
+} />
 
           {/* Contract Generator Route */}
           <Route path="contracts/generate" element={

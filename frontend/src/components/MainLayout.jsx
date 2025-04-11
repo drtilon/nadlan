@@ -100,7 +100,7 @@ function MainLayout({ onLogout }) {
         { id: 62, title: 'Contract Manager', icon: <FileOpenIcon />, path: 'contracts/manage' },
       ]
     },
-    { id: 7, title: 'Analytics', icon: <InsightsIcon />, path: 'analytics', adminOnly: true },
+    { id: 7, title: 'Analytics', icon: <InsightsIcon />, path: 'analytics', adminOnly: false },
     { id: 8, title: 'Admin Panel', icon: <AdminPanelSettingsIcon />, path: 'admin', adminOnly: true },
     { id: 9, title: 'System Logs', icon: <AssessmentIcon />, path: 'logs', adminOnly: true },
   ];

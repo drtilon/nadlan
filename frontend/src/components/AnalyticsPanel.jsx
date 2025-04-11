@@ -1,12 +1,10 @@
 // components/AnalyticsPanel.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Container,
   Grid,
   Paper,
   Typography,
-  Card,
-  CardContent,
   Box,
   Tabs,
   Tab,
@@ -25,8 +23,13 @@ import {
   InputAdornment,
   Tooltip,
   Chip,
-  Divider,
-  Avatar
+  Avatar,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Card,
+  CardContent
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -34,11 +37,8 @@ import {
   Person as PersonIcon,
   AttachMoney as MoneyIcon,
   TrendingUp as TrendingUpIcon,
-  Warning as WarningIcon,
   Search as SearchIcon,
-  CalendarToday as CalendarIcon,
   Payments as PaymentsIcon,
-  Description as DescriptionIcon,
   ArrowUpward as ArrowUpwardIcon,
   ArrowDownward as ArrowDownwardIcon
 } from '@mui/icons-material';
@@ -58,15 +58,16 @@ import {
   Cell
 } from 'recharts';
 import { useNavigate } from 'react-router-dom';
+import PropTypes from 'prop-types';
 import api from '../utils/api';
 
 const COLORS = {
-  primary: '#3b82f6', // Blue
-  secondary: '#ef4444', // Red
-  success: '#22c55e', // Green
-  warning: '#f97316', // Orange
-  info: '#8b5cf6', // Purple
-  muted: '#6b7280', // Gray
+  primary: '#3b82f6',
+  secondary: '#ef4444',
+  success: '#22c55e',
+  warning: '#f97316',
+  info: '#8b5cf6',
+  muted: '#6b7280',
   pie: ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#8b5cf6', '#10b981']
 };
 
@@ -79,9 +80,12 @@ function AnalyticsPanel({ showNotification }) {
   const [tenantPayments, setTenantPayments] = useState([]);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortField, setSortField] = useState('address');
+  const [sortDirection, setSortDirection] = useState('asc');
   const navigate = useNavigate();
 
-  const fetchAnalytics = async () => {
+  const fetchAnalytics = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -93,24 +97,24 @@ function AnalyticsPanel({ showNotification }) {
       ]);
 
       setSummaryData(summaryResponse.data);
-      setPaymentTrends(trendsResponse.data);
-      setApartmentMetrics(apartmentResponse.data);
-      setTenantPayments(tenantResponse.data);
-      setLoading(false);
+      setPaymentTrends(trendsResponse.data || []);
+      setApartmentMetrics(apartmentResponse.data || []);
+      setTenantPayments(tenantResponse.data || []);
     } catch (err) {
       console.error('Error fetching analytics:', err);
       setError('Failed to load analytics data.');
       showNotification('Error loading analytics data', 'error');
+    } finally {
       setLoading(false);
     }
-  };
+  }, [showNotification]);
 
   useEffect(() => {
     fetchAnalytics();
-  }, []);
+  }, [fetchAnalytics]);
 
   const formatCurrency = (amount) =>
-    amount === undefined || amount === null
+    amount == null
       ? '$0'
       : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amount);
 
@@ -119,33 +123,81 @@ function AnalyticsPanel({ showNotification }) {
       ? 'N/A'
       : new Date(dateString).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
-  const getPaymentStatusPieData = () => summaryData ? [
-    { name: 'Paid', value: summaryData.payment_status.paid },
-    { name: 'Partial', value: summaryData.payment_status.partial },
-    { name: 'Not Paid', value: summaryData.payment_status.not_paid }
-  ] : [];
+  const getPaymentStatusPieData = useMemo(() => {
+    if (!summaryData?.payment_status) return [];
+    return [
+      { name: 'Paid', value: summaryData.payment_status.paid || 0 },
+      { name: 'Partial', value: summaryData.payment_status.partial || 0 },
+      { name: 'Not Paid', value: summaryData.payment_status.not_paid || 0 }
+    ];
+  }, [summaryData]);
 
-  // Calculate total net profit from all apartments
-  const calculateTotalNetProfit = () => {
-    if (!apartmentMetrics || apartmentMetrics.length === 0) return 0;
+  const calculateTotalNetProfit = useMemo(() => {
+    if (!apartmentMetrics?.length) return 0;
+    return apartmentMetrics.reduce((sum, apt) => sum + (apt.netProfit || 0), 0);
+  }, [apartmentMetrics]);
 
-    return apartmentMetrics.reduce((sum, apt) => {
-      // Get net profit value from the backend data
-      const netProfit = apt.netProfit || 0;
-      return sum + netProfit;
-    }, 0);
+  const tenantApartmentMap = useMemo(() => {
+    const map = {};
+    apartmentMetrics.forEach(apt => {
+      if (apt.tenants) {
+        apt.tenants.forEach(tenant => {
+          map[tenant.name] = apt.address;
+        });
+      }
+    });
+    return map;
+  }, [apartmentMetrics]);
+
+  const getFilteredSortedApartments = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    let filtered = apartmentMetrics || [];
+
+    if (term) {
+      filtered = filtered.filter(apt =>
+        (apt.address || '').toLowerCase().includes(term) ||
+        String(apt.rent || '').includes(term) ||
+        String(apt.pricePerMeter || '').includes(term)
+      );
+    }
+
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(apt => apt.status === statusFilter);
+    }
+
+    return filtered.sort((a, b) => {
+      const aValue = a[sortField] ?? '';
+      const bValue = b[sortField] ?? '';
+
+      if (['rent', 'pricePerMeter', 'netProfit', 'size'].includes(sortField)) {
+        const aNum = parseFloat(aValue) || 0;
+        const bNum = parseFloat(bValue) || 0;
+        return sortDirection === 'asc' ? aNum - bNum : bNum - aNum;
+      }
+
+      return sortDirection === 'asc'
+        ? String(aValue).localeCompare(String(bValue))
+        : String(bValue).localeCompare(String(aValue));
+    });
+  }, [apartmentMetrics, searchTerm, statusFilter, sortField, sortDirection]);
+
+  const handleSort = useCallback((field) => {
+    setSortField(field);
+    setSortDirection(prev => sortField === field ? (prev === 'asc' ? 'desc' : 'asc') : 'asc');
+  }, [sortField]);
+
+  const getSortIcon = (field) => {
+    if (sortField !== field) return null;
+    return sortDirection === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />;
   };
 
-  const filteredApartments = apartmentMetrics.filter(apt =>
-    apt.address.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    String(apt.rent).includes(searchTerm) ||
-    String(apt.pricePerMeter).includes(searchTerm)
-  );
-
-  const filteredTenants = tenantPayments.filter(tenant =>
-    tenant.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    tenant.payment_history.some(p => p.month.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredTenants = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return tenantPayments.filter(tenant =>
+      (tenant.name || '').toLowerCase().includes(term) ||
+      tenant.payment_history?.some(p => (p.month || '').toLowerCase().includes(term))
+    );
+  }, [tenantPayments, searchTerm]);
 
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 8 }}>
@@ -162,13 +214,6 @@ function AnalyticsPanel({ showNotification }) {
         >
           <TrendingUpIcon fontSize="large" /> Financial Dashboard
         </Typography>
-        <IconButton
-          onClick={fetchAnalytics}
-          disabled={loading}
-          sx={{ bgcolor: COLORS.primary, color: 'white', '&:hover': { bgcolor: '#2563eb' } }}
-        >
-          <RefreshIcon />
-        </IconButton>
       </Box>
 
       {error && (
@@ -209,7 +254,7 @@ function AnalyticsPanel({ showNotification }) {
                     <Box>
                       <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>Net Profit</Typography>
                       <Typography variant="h4" sx={{ fontWeight: 600 }}>
-                        {formatCurrency(calculateTotalNetProfit())}
+                        {formatCurrency(calculateTotalNetProfit)}
                       </Typography>
                       <Typography variant="body2" sx={{ mt: 1 }}>
                         Across all units
@@ -230,7 +275,7 @@ function AnalyticsPanel({ showNotification }) {
                       <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>Avg Price/m²</Typography>
                       <Typography variant="h4" sx={{ fontWeight: 600 }}>
                         {formatCurrency(
-                          apartmentMetrics.length > 0
+                          apartmentMetrics.length
                             ? apartmentMetrics.reduce((sum, apt) => sum + (apt.pricePerMeter || 0), 0) / apartmentMetrics.length
                             : 0
                         )}
@@ -262,10 +307,9 @@ function AnalyticsPanel({ showNotification }) {
             </Grid>
           </Grid>
 
-          {/* Search Bar */}
-          <Box sx={{ mb: 4 }}>
+          {/* Search and Filters */}
+          <Box sx={{ mb: 4, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
             <TextField
-              fullWidth
               variant="outlined"
               placeholder="Search by apartment, tenant, or amount..."
               value={searchTerm}
@@ -274,7 +318,8 @@ function AnalyticsPanel({ showNotification }) {
                 '& .MuiOutlinedInput-root': {
                   borderRadius: 2,
                   bgcolor: 'white',
-                  boxShadow: 1
+                  flexGrow: 1,
+                  maxWidth: '480px'
                 }
               }}
               InputProps={{
@@ -282,16 +327,32 @@ function AnalyticsPanel({ showNotification }) {
                   <InputAdornment position="start">
                     <SearchIcon sx={{ color: COLORS.muted }} />
                   </InputAdornment>
-                ),
-                endAdornment: searchTerm && (
-                  <InputAdornment position="end">
-                    <IconButton onClick={() => setSearchTerm('')}>
-                      <ArrowDownwardIcon sx={{ color: COLORS.muted }} />
-                    </IconButton>
-                  </InputAdornment>
                 )
               }}
             />
+            <FormControl variant="outlined" sx={{ minWidth: 180 }}>
+              <InputLabel>Property Status</InputLabel>
+              <Select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                label="Property Status"
+              >
+                <MenuItem value="all">All Properties</MenuItem>
+                <MenuItem value="occupied">Occupied</MenuItem>
+                <MenuItem value="vacant">Vacant</MenuItem>
+                <MenuItem value="contract_sent">Contract Sent</MenuItem>
+              </Select>
+            </FormControl>
+            <Tooltip title="Refresh Data">
+              <IconButton
+                onClick={fetchAnalytics}
+                disabled={loading}
+                sx={{ bgcolor: 'white', boxShadow: 1, '&:hover': { bgcolor: 'rgba(0, 0, 0, 0.04)' } }}
+                aria-label="refresh analytics data"
+              >
+                <RefreshIcon />
+              </IconButton>
+            </Tooltip>
           </Box>
 
           {/* Tabs */}
@@ -329,15 +390,14 @@ function AnalyticsPanel({ showNotification }) {
                   <ResponsiveContainer width="100%" height={300}>
                     <PieChart>
                       <Pie
-                        data={getPaymentStatusPieData()}
+                        data={getPaymentStatusPieData}
                         cx="50%"
                         cy="50%"
                         outerRadius={100}
-                        fill="#8884d8"
                         dataKey="value"
                         label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
                       >
-                        {getPaymentStatusPieData().map((entry, index) => (
+                        {getPaymentStatusPieData.map((entry, index) => (
                           <Cell key={`cell-${index}`} fill={COLORS.pie[index % COLORS.pie.length]} />
                         ))}
                       </Pie>
@@ -375,46 +435,71 @@ function AnalyticsPanel({ showNotification }) {
                 Apartment Performance
               </Typography>
               <TableContainer>
-                <Table>
+                <Table aria-label="apartment performance table">
                   <TableHead>
                     <TableRow>
-                      <TableCell><Typography fontWeight={600}>Address</Typography></TableCell>
-                      <TableCell align="right"><Typography fontWeight={600}>Model</Typography></TableCell>
-                      <TableCell align="right"><Typography fontWeight={600}>Rent</Typography></TableCell>
-                      <TableCell align="right"><Typography fontWeight={600}>Rent Cost</Typography></TableCell>
-                      <TableCell align="right"><Typography fontWeight={600}>Mgmt Fee</Typography></TableCell>
-                      <TableCell align="right"><Typography fontWeight={600}>Size (m²)</Typography></TableCell>
-                      <TableCell align="right"><Typography fontWeight={600}>Price/m²</Typography></TableCell>
-                      <TableCell align="right"><Typography fontWeight={600}>Net Profit</Typography></TableCell>
-                      <TableCell align="right"><Typography fontWeight={600}>Status</Typography></TableCell>
+                      {[
+                        { key: 'address', label: 'Address' },
+                        { key: 'model', label: 'Model' },
+                        { key: 'rent', label: 'Rent', align: 'right' },
+                        { key: 'size', label: 'Size (m²)', align: 'right' },
+                        { key: 'pricePerMeter', label: 'Price/m²', align: 'right' },
+                        { key: 'netProfit', label: 'Net Profit', align: 'right' },
+                        { key: 'status', label: 'Status' }
+                      ].map(({ key, label, align }) => (
+                        <TableCell
+                          key={key}
+                          align={align}
+                          onClick={() => handleSort(key)}
+                          sx={{ cursor: 'pointer' }}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSort(key)}
+                        >
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: align === 'right' ? 'flex-end' : 'flex-start' }}>
+                            <Typography fontWeight={600}>{label}</Typography>
+                            {getSortIcon(key)}
+                          </Box>
+                        </TableCell>
+                      ))}
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {filteredApartments.map(apt => (
-                      <TableRow key={apt.id} hover sx={{ '&:hover': { bgcolor: '#f9fafb' } }}>
-                        <TableCell>{apt.address}</TableCell>
-                        <TableCell align="right">
-                          <Chip
-                            label={apt.model === 'rental' ? 'Rental' : 'Management'}
-                            color={apt.model === 'rental' ? 'primary' : 'info'}
-                            size="small"
-                          />
-                        </TableCell>
-                        <TableCell align="right">{formatCurrency(apt.rent)}</TableCell>
-                        <TableCell align="right">{apt.model === 'rental' ? formatCurrency(apt.rentCost) : 'N/A'}</TableCell>
-                        <TableCell align="right">{apt.model === 'management' ? `${apt.managementFee}%` : 'N/A'}</TableCell>
-                        <TableCell align="right">{apt.size || 'N/A'}</TableCell>
-                        <TableCell align="right">{formatCurrency(apt.pricePerMeter)}</TableCell>
-                        <TableCell align="right">{formatCurrency(apt.netProfit)}</TableCell>
-                        <TableCell align="right">
-                          <Chip
-                            label={apt.status === 'occupied' ? 'Occupied' : 'Vacant'}
-                            color={apt.status === 'occupied' ? 'success' : 'warning'}
-                            size="small"
-                          />
+                    {getFilteredSortedApartments.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} align="center">
+                          <Alert severity="info">No apartments match your search criteria</Alert>
                         </TableCell>
                       </TableRow>
-                    ))}
+                    ) : (
+                      getFilteredSortedApartments.map((apt) => (
+                        <TableRow key={apt.id} hover sx={{ '&:hover': { bgcolor: '#f9fafb' } }}>
+                          <TableCell>{apt.address || 'N/A'}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={apt.model === 'rental' ? 'Rental' : 'Management'}
+                              color={apt.model === 'rental' ? 'primary' : 'info'}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell align="right">{formatCurrency(apt.rent)}</TableCell>
+                          <TableCell align="right">{apt.size || 'N/A'}</TableCell>
+                          <TableCell align="right">{formatCurrency(apt.pricePerMeter)}</TableCell>
+                          <TableCell align="right">{formatCurrency(apt.netProfit)}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={apt.status === 'occupied' ? 'Occupied' :
+                                    apt.status === 'vacant' ? 'Vacant' :
+                                    apt.status === 'contract_sent' ? 'Contract Sent' : apt.status || 'Unknown'}
+                              color={apt.status === 'occupied' ? 'success' :
+                                    apt.status === 'vacant' ? 'primary' :
+                                    'warning'}
+                              size="small"
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
                   </TableBody>
                 </Table>
               </TableContainer>
@@ -428,7 +513,7 @@ function AnalyticsPanel({ showNotification }) {
                 Tenant Payment Overview
               </Typography>
               <TableContainer>
-                <Table>
+                <Table aria-label="tenant payment overview table">
                   <TableHead>
                     <TableRow>
                       <TableCell><Typography fontWeight={600}>Tenant</Typography></TableCell>
@@ -440,42 +525,51 @@ function AnalyticsPanel({ showNotification }) {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {filteredTenants.map(tenant => (
-                      <TableRow key={tenant.name} hover sx={{ '&:hover': { bgcolor: '#f9fafb' } }}>
-                        <TableCell>{tenant.name}</TableCell>
-                        <TableCell>
-                          {apartmentMetrics.find(apt => apt.tenants?.some(t => t.name === tenant.name))?.address || 'N/A'}
-                        </TableCell>
-                        <TableCell align="right">{formatCurrency(tenant.total_paid)}</TableCell>
-                        <TableCell align="right">{formatCurrency(tenant.total_due)}</TableCell>
-                        <TableCell align="center">
-                          <LinearProgress
-                            variant="determinate"
-                            value={tenant.payment_ratio}
-                            sx={{
-                              width: '80%',
-                              height: 6,
-                              borderRadius: 3,
-                              bgcolor: '#e5e7eb',
-                              '& .MuiLinearProgress-bar': {
-                                bgcolor: tenant.payment_ratio >= 90 ? COLORS.success : tenant.payment_ratio >= 50 ? COLORS.warning : COLORS.secondary
-                              }
-                            }}
-                          />
-                          <Typography variant="caption" sx={{ ml: 1 }}>{tenant.payment_ratio}%</Typography>
-                        </TableCell>
-                        <TableCell align="right">
-                          <Button
-                            size="small"
-                            variant="outlined"
-                            sx={{ borderColor: COLORS.primary, color: COLORS.primary }}
-                            onClick={() => navigate(`/tenants/${tenant.id || tenant.name}`)}
-                          >
-                            View
-                          </Button>
+                    {filteredTenants.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} align="center">
+                          <Alert severity="info">No tenants match your search criteria</Alert>
                         </TableCell>
                       </TableRow>
-                    ))}
+                    ) : (
+                      filteredTenants.map(tenant => (
+                        <TableRow key={tenant.id || tenant.name} hover sx={{ '&:hover': { bgcolor: '#f9fafb' } }}>
+                          <TableCell>{tenant.name || 'Unknown'}</TableCell>
+                          <TableCell>{tenantApartmentMap[tenant.name] || 'N/A'}</TableCell>
+                          <TableCell align="right">{formatCurrency(tenant.total_paid)}</TableCell>
+                          <TableCell align="right">{formatCurrency(tenant.total_due)}</TableCell>
+                          <TableCell align="center">
+                            <LinearProgress
+                              variant="determinate"
+                              value={tenant.payment_ratio || 0}
+                              sx={{
+                                width: '80%',
+                                height: 6,
+                                borderRadius: 3,
+                                bgcolor: '#e5e7eb',
+                                '& .MuiLinearProgress-bar': {
+                                  bgcolor: (tenant.payment_ratio || 0) >= 90 ? COLORS.success :
+                                          (tenant.payment_ratio || 0) >= 50 ? COLORS.warning : COLORS.secondary
+                                }
+                              }}
+                            />
+                            <Typography variant="caption" sx={{ ml: 1 }}>{tenant.payment_ratio || 0}%</Typography>
+                          </TableCell>
+                          <TableCell align="right">
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              sx={{ borderColor: COLORS.primary, color: COLORS.primary }}
+                              onClick={() => tenant.id && navigate(`/tenants/${tenant.id}`)}
+                              disabled={!tenant.id}
+                              aria-label={`View details for ${tenant.name}`}
+                            >
+                              View
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
                   </TableBody>
                 </Table>
               </TableContainer>
@@ -494,12 +588,13 @@ function AnalyticsPanel({ showNotification }) {
                   startIcon={<PaymentsIcon />}
                   sx={{ bgcolor: COLORS.primary, '&:hover': { bgcolor: '#2563eb' } }}
                   onClick={() => navigate('/payments')}
+                  aria-label="Manage payments"
                 >
                   Manage Payments
                 </Button>
               </Box>
               <TableContainer>
-                <Table>
+                <Table aria-label="payment history table">
                   <TableHead>
                     <TableRow>
                       <TableCell><Typography fontWeight={600}>Tenant</Typography></TableCell>
@@ -510,22 +605,34 @@ function AnalyticsPanel({ showNotification }) {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {filteredTenants.flatMap(tenant =>
-                      tenant.payment_history.map((payment, index) => (
-                        <TableRow key={`${tenant.name}-${index}`} hover sx={{ '&:hover': { bgcolor: '#f9fafb' } }}>
-                          <TableCell>{tenant.name}</TableCell>
-                          <TableCell>{payment.month}</TableCell>
-                          <TableCell align="right">{formatCurrency(payment.due)}</TableCell>
-                          <TableCell align="right">{formatCurrency(payment.paid)}</TableCell>
-                          <TableCell align="center">
-                            <Chip
-                              label={payment.status === 'paid' ? 'Paid' : payment.status === 'partial' ? 'Partial' : 'Unpaid'}
-                              color={payment.status === 'paid' ? 'success' : payment.status === 'partial' ? 'warning' : 'secondary'}
-                              size="small"
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))
+                    {filteredTenants.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} align="center">
+                          <Alert severity="info">No payment history matches your search criteria</Alert>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredTenants.flatMap(tenant =>
+                        (tenant.payment_history || []).map((payment, index) => (
+                          <TableRow key={`${tenant.id || tenant.name}-${index}`} hover sx={{ '&:hover': { bgcolor: '#f9fafb' } }}>
+                            <TableCell>{tenant.name || 'Unknown'}</TableCell>
+                            <TableCell>{payment.month || 'N/A'}</TableCell>
+                            <TableCell align="right">{formatCurrency(payment.due)}</TableCell>
+                            <TableCell align="right">{formatCurrency(payment.paid)}</TableCell>
+                            <TableCell align="center">
+                              <Chip
+                                label={payment.status === 'paid' ? 'Paid' :
+                                      payment.status === 'partial' ? 'Partial' :
+                                      payment.status === 'unpaid' ? 'Unpaid' : 'Unknown'}
+                                color={payment.status === 'paid' ? 'success' :
+                                      payment.status === 'partial' ? 'warning' :
+                                      payment.status === 'unpaid' ? 'error' : 'default'}
+                                size="small"
+                              />
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )
                     )}
                   </TableBody>
                 </Table>
@@ -537,5 +644,9 @@ function AnalyticsPanel({ showNotification }) {
     </Container>
   );
 }
+
+AnalyticsPanel.propTypes = {
+  showNotification: PropTypes.func.isRequired
+};
 
 export default AnalyticsPanel;

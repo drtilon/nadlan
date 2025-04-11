@@ -73,9 +73,9 @@ def create_app():
                 from initalized.init_apartment import ensure_db_schema
 
                 ensure_db_schema()
-                # ensure_admin_user_exists()
-                # ensure_default_apartment_exists()
-                # ensure_new_apartment_exists()
+                ensure_admin_user_exists()
+                ensure_default_apartment_exists()
+                ensure_new_apartment_exists()
         except Exception as e:
             app.logger.error(f"Error initializing DB: {e}")
 
@@ -93,6 +93,7 @@ def create_app():
             from routes.logs import logs_bp
             from routes.payment_history import payment_history_bp
             from routes.contracts import contracts_bp
+            from routes.contract_templates import contract_templates_bp
 
             app.register_blueprint(auth_bp, url_prefix="/api/auth")
             app.register_blueprint(adminPanel_bp, url_prefix="/api/adminPanel")
@@ -106,6 +107,7 @@ def create_app():
             app.register_blueprint(payment_history_bp, url_prefix="/api")
             app.register_blueprint(documents_bp, url_prefix="/api/documents")
             app.register_blueprint(contracts_bp, url_prefix="/api/documents")
+            app.register_blueprint(contract_templates_bp, url_prefix="/api/documents")
             app.register_blueprint(logs_bp, url_prefix="/api")
             app.logger.info("Blueprints registered")
         except Exception as e:

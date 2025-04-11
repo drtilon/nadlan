@@ -191,3 +191,31 @@ class Contract(db.Model):
             "uploadDate": self.upload_date.isoformat() if self.upload_date else None,
             "notes": self.notes,
         }
+
+
+class ContractTemplate(db.Model):
+    __tablename__ = "contract_templates"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False, unique=True)
+    description = db.Column(db.Text, nullable=True)
+    file_path = db.Column(db.String(255), nullable=True)  # Path to the template file
+    file_name = db.Column(db.String(255), nullable=True)  # Original filename
+    file_size = db.Column(db.Integer, nullable=True)      # File size in bytes
+    is_default = db.Column(db.Boolean, default=False)     # Is this the default template
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = db.Column(db.String(80), nullable=True)  # Username who created the template
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "file_name": self.file_name,
+            "file_size": self.file_size,
+            "is_default": self.is_default,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "created_by": self.created_by,
+            "has_file": bool(self.file_path and self.file_name)
+        }

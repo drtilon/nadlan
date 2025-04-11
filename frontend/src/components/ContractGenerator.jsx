@@ -1,8 +1,8 @@
 // components/ContractGenerator.jsx
 import React, { useState, useEffect } from 'react';
 import {
-  Typography,
   Paper,
+  Typography,
   Box,
   Button,
   CircularProgress,
@@ -15,15 +15,26 @@ import {
   Divider,
   Alert,
   Chip,
-  Autocomplete
+  Autocomplete,
+  Card,
+  CardContent,
+  IconButton,
+  Tooltip,
+  Tabs,
+  Tab
 } from '@mui/material';
 import {
   DescriptionOutlined as DescriptionIcon,
   SearchOutlined as SearchIcon,
   ApartmentOutlined as ApartmentIcon,
-  FileDownloadOutlined as DownloadIcon
+  FileDownloadOutlined as DownloadIcon,
+  Settings as SettingsIcon,
+  Add as AddIcon,
+  ListAlt as ListIcon
 } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
+import ContractTemplatesManager from './ContractTemplatesManager';
 
 function ContractGenerator({ showNotification }) {
   const [apartments, setApartments] = useState([]);
@@ -33,10 +44,16 @@ function ContractGenerator({ showNotification }) {
   const [generating, setGenerating] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredApartments, setFilteredApartments] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [selectedTemplate, setSelectedTemplate] = useState('');
+  const [defaultTemplate, setDefaultTemplate] = useState(null);
+  const [tabValue, setTabValue] = useState(0);
+  const navigate = useNavigate();
 
-  // Fetch apartments when component mounts
+  // Fetch apartments and templates when component mounts
   useEffect(() => {
     fetchApartments();
+    fetchTemplates();
   }, []);
 
   // Filter apartments based on search query
@@ -61,13 +78,29 @@ function ContractGenerator({ showNotification }) {
       setFilteredApartments(response.data || []);
     } catch (error) {
       console.error('Error fetching apartments:', error);
-      if (error.response && error.response.status === 401) {
-        showNotification('Your session has expired. Please log in again.', 'error');
-      } else {
-        showNotification('Failed to load apartments', 'error');
-      }
+      showNotification('Failed to load apartments', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchTemplates = async () => {
+    try {
+      const response = await api.get('/documents/templates');
+      setTemplates(response.data || []);
+      
+      // Find default template
+      const defaultTemplate = response.data.find(t => t.is_default);
+      if (defaultTemplate) {
+        setDefaultTemplate(defaultTemplate);
+        setSelectedTemplate(defaultTemplate.id);
+      } else if (response.data.length > 0) {
+        // If no default, set the first template as selected
+        setSelectedTemplate(response.data[0].id);
+      }
+    } catch (error) {
+      console.error('Error fetching templates:', error);
+      showNotification('Failed to load contract templates', 'error');
     }
   };
 
@@ -100,6 +133,14 @@ function ContractGenerator({ showNotification }) {
     }
   };
 
+  const handleTemplateChange = (event) => {
+    setSelectedTemplate(event.target.value);
+  };
+
+  const handleTabChange = (event, newValue) => {
+    setTabValue(newValue);
+  };
+
   const generateContract = async () => {
     if (!selectedApartment) {
       showNotification('Please select an apartment', 'error');
@@ -111,11 +152,17 @@ function ContractGenerator({ showNotification }) {
       return;
     }
 
+    if (!selectedTemplate && templates.length > 0) {
+      showNotification('Please select a contract template', 'error');
+      return;
+    }
+
     setGenerating(true);
     try {
-      // Simplified API call - only requires apartmentId
+      // API call with template selection
       const response = await api.post('/documents/createContract', {
-        apartmentId: selectedApartment
+        apartmentId: selectedApartment,
+        templateId: selectedTemplate
       }, {
         responseType: 'blob' // Important for file download
       });
@@ -149,119 +196,205 @@ function ContractGenerator({ showNotification }) {
   };
 
   return (
-    <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
-      <Box display="flex" alignItems="center" mb={3}>
-        <DescriptionIcon fontSize="large" color="primary" sx={{ mr: 2 }} />
-        <Typography variant="h5" component="h2">
-          Rental Contract Generator
-        </Typography>
-      </Box>
-
-      <Divider sx={{ mb: 3 }} />
-
-      {loading ? (
-        <Box display="flex" justifyContent="center" my={4}>
-          <CircularProgress />
+    <>
+      <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
+        <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+          <Tabs value={tabValue} onChange={handleTabChange} aria-label="contract management tabs">
+            <Tab 
+              icon={<DescriptionIcon />} 
+              iconPosition="start" 
+              label="Generate Contract" 
+              id="tab-0" 
+            />
+            <Tab 
+              icon={<SettingsIcon />} 
+              iconPosition="start" 
+              label="Manage Templates" 
+              id="tab-1" 
+            />
+            <Tab 
+              icon={<ListIcon />} 
+              iconPosition="start" 
+              label="Contract Manager"
+              id="tab-2"
+              onClick={() => navigate('/contracts/manage')}
+            />
+          </Tabs>
         </Box>
-      ) : (
-        <Box>
-          <Grid container spacing={3}>
-            <Grid item xs={12}>
-              <Autocomplete
-                options={filteredApartments}
-                getOptionLabel={(option) => option.address}
-                onChange={handleApartmentChange}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Search Apartments"
-                    variant="outlined"
-                    fullWidth
-                    placeholder="Type to search by address"
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    InputProps={{
-                      ...params.InputProps,
-                      startAdornment: (
-                        <>
-                          <SearchIcon color="action" sx={{ mr: 1 }} />
-                          {params.InputProps.startAdornment}
-                        </>
-                      )
-                    }}
-                  />
-                )}
-              />
-            </Grid>
 
-            {selectedApartment && (
-              <>
-                <Grid item xs={12}>
-                  <Paper variant="outlined" sx={{ p: 2 }}>
-                    <Typography variant="subtitle1" gutterBottom>
-                      Selected Apartment Details
+        {tabValue === 0 ? (
+          <>
+            <Box display="flex" alignItems="center" mb={3}>
+              <DescriptionIcon fontSize="large" color="primary" sx={{ mr: 2 }} />
+              <Typography variant="h5" component="h2">
+                Generate Contract
+              </Typography>
+            </Box>
+
+            <Divider sx={{ mb: 3 }} />
+
+            {loading ? (
+              <Box display="flex" justifyContent="center" my={4}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <Box>
+                <Grid container spacing={3}>
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" gutterBottom fontWeight="medium">
+                      1. Select Contract Template
                     </Typography>
-                    
-                    {apartments.find(apt => apt.id === selectedApartment) && (
-                      <Box sx={{ mt: 1 }}>
-                        <Typography variant="h6">
-                          <ApartmentIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
-                          {apartments.find(apt => apt.id === selectedApartment).address}
-                        </Typography>
-                        
-                        <Box sx={{ mt: 2 }}>
-                          <Typography variant="subtitle2" gutterBottom>
-                            Tenants on Contract:
-                          </Typography>
-                          <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
-                            {tenants.length > 0 ? (
-                              tenants.map((tenant, index) => (
-                                <Chip
-                                  key={index}
-                                  label={tenant.name || (tenant.firstName && tenant.lastName ? `${tenant.firstName} ${tenant.lastName}` : tenant)}
-                                  color="primary"
-                                  variant="outlined"
+                    <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
+                      <InputLabel id="template-select-label">Contract Template</InputLabel>
+                      <Select
+                        labelId="template-select-label"
+                        value={selectedTemplate}
+                        onChange={handleTemplateChange}
+                        label="Contract Template"
+                        disabled={templates.length === 0}
+                      >
+                        {templates.length === 0 ? (
+                          <MenuItem value="">
+                            <em>No templates available</em>
+                          </MenuItem>
+                        ) : (
+                          templates.map((template) => (
+                            <MenuItem key={template.id} value={template.id}>
+                              {template.name}
+                              {template.is_default && (
+                                <Chip 
+                                  label="Default" 
+                                  color="success" 
+                                  size="small" 
+                                  sx={{ ml: 1 }}
                                 />
-                              ))
-                            ) : (
-                              <Typography variant="body2" color="text.secondary">
-                                No tenants associated with this apartment
+                              )}
+                            </MenuItem>
+                          ))
+                        )}
+                      </Select>
+                    </FormControl>
+
+                    {templates.length === 0 && (
+                      <Alert severity="info" sx={{ mb: 3 }}>
+                        No contract templates found. Please add a template first.
+                      </Alert>
+                    )}
+
+                    <Typography variant="subtitle1" gutterBottom fontWeight="medium">
+                      2. Select Property
+                    </Typography>
+                    <Autocomplete
+                      options={filteredApartments}
+                      getOptionLabel={(option) => option.address}
+                      onChange={handleApartmentChange}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Search Apartments"
+                          variant="outlined"
+                          fullWidth
+                          placeholder="Type to search by address"
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          InputProps={{
+                            ...params.InputProps,
+                            startAdornment: (
+                              <>
+                                <SearchIcon color="action" sx={{ mr: 1 }} />
+                                {params.InputProps.startAdornment}
+                              </>
+                            )
+                          }}
+                        />
+                      )}
+                      sx={{ mb: 3 }}
+                    />
+
+                    {selectedApartment && (
+                      <Box sx={{ mb: 3 }}>
+                        <Typography variant="subtitle1" gutterBottom fontWeight="medium">
+                          3. Review Details
+                        </Typography>
+                        <Paper variant="outlined" sx={{ p: 2 }}>
+                          {apartments.find(apt => apt.id === selectedApartment) && (
+                            <>
+                              <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                                <ApartmentIcon sx={{ mr: 1 }} />
+                                {apartments.find(apt => apt.id === selectedApartment).address}
                               </Typography>
-                            )}
-                          </Box>
-                        </Box>
+
+                              <Grid container spacing={2}>
+                                <Grid item xs={12} md={6}>
+                                  <Typography variant="subtitle2" gutterBottom>
+                                    Tenants:
+                                  </Typography>
+                                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                                    {tenants.length > 0 ? (
+                                      tenants.map((tenant, index) => (
+                                        <Chip
+                                          key={index}
+                                          label={tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim() || tenant}
+                                          size="small"
+                                          variant="outlined"
+                                        />
+                                      ))
+                                    ) : (
+                                      <Typography color="error">
+                                        No tenants assigned to this apartment
+                                      </Typography>
+                                    )}
+                                  </Box>
+                                </Grid>
+
+                                <Grid item xs={12} md={6}>
+                                  <Typography variant="subtitle2" gutterBottom>
+                                    Contract Details:
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    Move-in Date: {apartments.find(apt => apt.id === selectedApartment).moveInDate || 'Not specified'}
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    Contract End: {apartments.find(apt => apt.id === selectedApartment).contractEndDate || 'Not specified'}
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    Rent: {apartments.find(apt => apt.id === selectedApartment).rent || 'Not specified'}
+                                  </Typography>
+                                </Grid>
+                              </Grid>
+                            </>
+                          )}
+                        </Paper>
                       </Box>
                     )}
-                  </Paper>
+
+                    <Box display="flex" justifyContent="center" mt={4}>
+                      <Button
+                        variant="contained"
+                        color="primary"
+                        size="large"
+                        startIcon={generating ? <CircularProgress size={24} color="inherit" /> : <DownloadIcon />}
+                        onClick={generateContract}
+                        disabled={
+                          generating || 
+                          !selectedApartment || 
+                          tenants.length === 0 || 
+                          (templates.length > 0 && !selectedTemplate)
+                        }
+                        sx={{ minWidth: 250 }}
+                      >
+                        {generating ? 'Generating...' : 'Generate Contract'}
+                      </Button>
+                    </Box>
+                  </Grid>
                 </Grid>
-              </>
-            )}
-
-            <Grid item xs={12}>
-              <Box display="flex" justifyContent="center" mt={2}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  size="large"
-                  onClick={generateContract}
-                  disabled={!selectedApartment || tenants.length === 0 || generating}
-                  startIcon={generating ? <CircularProgress size={20} color="inherit" /> : <DownloadIcon />}
-                >
-                  {generating ? 'Generating...' : 'Generate Contract'}
-                </Button>
               </Box>
-            </Grid>
-          </Grid>
-        </Box>
-      )}
-
-      {!loading && (!apartments.length || (selectedApartment && !tenants.length)) && (
-        <Alert severity="info" sx={{ mt: 2 }}>
-          {!apartments.length
-            ? 'No apartments available. Please add apartments first.'
-            : 'No tenants associated with this apartment. Please add tenants first.'}
-        </Alert>
-      )}
-    </Paper>
+            )}
+          </>
+        ) : tabValue === 1 ? (
+          <ContractTemplatesManager showNotification={showNotification} />
+        ) : null}
+      </Paper>
+    </>
   );
 }
 

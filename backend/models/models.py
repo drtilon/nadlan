@@ -146,11 +146,13 @@ class User(db.Model):
         }
 
 
+
 class Payment(db.Model):
     __tablename__ = "payments"
     id = db.Column(db.Integer, primary_key=True)
     apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=False)
     month = db.Column(db.String(20), nullable=False)
+    year = db.Column(db.Integer, nullable=False, default=lambda: datetime.utcnow().year)
     status = db.Column(db.String(50), nullable=False, default="not_paid")
     tenants = db.Column(db.Text, nullable=True)  # stored as JSON
     internet = db.Column(db.Float, nullable=True, default=0.0)
@@ -164,7 +166,31 @@ class Payment(db.Model):
     paymentMethod = db.Column(db.String(50), nullable=True, default="bank_transfer")
     extraPayments = db.Column(db.Text, nullable=True)  # stored as JSON
     notes = db.Column(db.Text, nullable=True)
-    year = db.Column(db.Integer, nullable=True)  # Store the year for historical records
+    
+    # Create a unique constraint on apartment_id, month, and year
+    __table_args__ = (
+        db.UniqueConstraint('apartment_id', 'month', 'year', name='_apartment_month_year_uc'),
+    )
+    
+    def to_dict(self):
+        """Convert Payment object to dictionary"""
+        return {
+            "id": self.id,
+            "apartment_id": self.apartment_id,
+            "month": self.month,
+            "year": self.year,
+            "status": self.status,
+            "tenants": json.loads(self.tenants) if self.tenants else [],
+            "internet": float(self.internet) if self.internet is not None else 0.0,
+            "electricity": float(self.electricity) if self.electricity is not None else 0.0,
+            "other": float(self.other) if self.other is not None else 0.0,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "paymentDate": self.paymentDate.isoformat() if self.paymentDate else None,
+            "paymentMethod": self.paymentMethod or "bank_transfer",
+            "extraPayments": json.loads(self.extraPayments) if self.extraPayments else {},
+            "notes": self.notes or ""
+        }
+
 
 
 class Contract(db.Model):

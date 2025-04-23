@@ -47,7 +47,7 @@ services:
     build: ./frontend
     container_name: vite_frontend
     ports:
-      - "3001:3001"
+      - "3001:80"
     volumes:
       - ./frontend:/app
       - /app/node_modules

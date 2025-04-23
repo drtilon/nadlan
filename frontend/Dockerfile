@@ -10,10 +10,10 @@ RUN npm install
 COPY . .
 
 # Expose Vite development server port
-EXPOSE 3001
+EXPOSE 80
 
 # Don't switch to node user - run as root
 # No USER instruction
 
 # Start the Vite development server
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3001"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "80"]

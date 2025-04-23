@@ -48,7 +48,7 @@ def create_app():
             # Allow requests from any origin during development
             # For production, specify your frontend domain
             allowed_origins = os.environ.get(
-                "CORS_ALLOWED_ORIGINS", "http://localhost:3001"
+                "CORS_ALLOWED_ORIGINS", "http://localhost:80"
             ).split(",")
             CORS(
                 app,

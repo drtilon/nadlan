@@ -39,7 +39,7 @@ services:
       - DB_HOST=mysql
       - DB_NAME=mydatabase
       - SECRET_KEY=mysecret
-      - CORS_ALLOWED_ORIGINS=http://localhost,http://localhost:80,http://207.154.221.54:80,http://frontend:80,http://207.154.221.54,http://www.shefaug.com,https://www.shefaug.com
+      - CORS_ALLOWED_ORIGINS=http://localhost,http://localhost:80,http://207.154.221.54:80,http://frontend:80,http://207.154.221.54,http://www.shefaug.com,https://www.shefaug.com,http://localhost:3001,http://207.154.221.54:3001,http://frontend:3001,http://207.154.221.54:3001
     networks:
       - app_network
 
@@ -47,19 +47,34 @@ services:
     build: ./frontend
     container_name: vite_frontend
     ports:
-      - "80:80"
+      - "3001:3001"
     volumes:
       - ./frontend:/app
       - /app/node_modules
     environment:
       - CHOKIDAR_USEPOLLING=true
-    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "80"]
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3001"]
     networks:
       - app_network
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx_proxy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+    networks:
+      - app_network
+
+volumes:
+  mysql_data:
 
 networks:
   app_network:
     driver: bridge
-
-volumes:
-  mysql_data:

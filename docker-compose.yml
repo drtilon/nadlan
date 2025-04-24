@@ -39,7 +39,7 @@ services:
       - DB_HOST=mysql
       - DB_NAME=mydatabase
       - SECRET_KEY=mysecret
-      - CORS_ALLOWED_ORIGINS=http://localhost,http://localhost:80,http://207.154.221.54:80,http://frontend:80,http://207.154.221.54,http://shefaug.com,https://shefaug.com
+      - CORS_ALLOWED_ORIGINS=http://localhost,http://localhost:80,http://207.154.221.54:80,http://frontend:80,http://207.154.221.54,http://www.shefaug.com,https://www.shefaug.com
     networks:
       - app_network
 

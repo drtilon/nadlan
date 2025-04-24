@@ -5,8 +5,11 @@ import sessionManager from './SessionManager';
 // Define base URL with protocol and host detection
 const getBaseUrl = () => {
   // Check if running in production (on the digital ocean server)
-  if (window.location.hostname === '207.154.221.54') {
-    return 'http://207.154.221.54:5001/api';
+  const hostname = window.location.hostname;
+
+  // Production domains
+  if (hostname === '207.154.221.54' || hostname === 'shefaug.com' || hostname === 'www.shefaug.com') {
+    return 'https://www.shefaug.com/api'; // Use HTTPS and your domain
   }
   // Local development
   return 'http://localhost:5001/api';

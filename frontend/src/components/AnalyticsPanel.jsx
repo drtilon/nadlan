@@ -1,4 +1,4 @@
-// components/AnalyticsPanel.jsx
+// components/AnalyticsPanel.jsx - Updated with navigation to UserAnalyticsPanel
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Container,
@@ -40,7 +40,9 @@ import {
   Search as SearchIcon,
   Payments as PaymentsIcon,
   ArrowUpward as ArrowUpwardIcon,
-  ArrowDownward as ArrowDownwardIcon
+  ArrowDownward as ArrowDownwardIcon,
+  Dashboard as DashboardIcon,
+  SwapHoriz as SwapIcon
 } from '@mui/icons-material';
 import {
   BarChart,
@@ -199,6 +201,11 @@ function AnalyticsPanel({ showNotification }) {
     );
   }, [tenantPayments, searchTerm]);
 
+  // Navigate to user analytics view
+  const handleGoToUserAnalytics = () => {
+    navigate('/user-analytics');
+  };
+
   return (
     <Container maxWidth="xl" sx={{ mt: 4, mb: 8 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
@@ -212,8 +219,26 @@ function AnalyticsPanel({ showNotification }) {
             gap: 1
           }}
         >
-          <TrendingUpIcon fontSize="large" /> Financial Dashboard
+          <TrendingUpIcon fontSize="large" /> Admin Analytics Dashboard
         </Typography>
+        
+        {/* Added button to navigate to User Analytics */}
+        <Button
+          variant="contained"
+          color="primary"
+          startIcon={<SwapIcon />}
+          onClick={handleGoToUserAnalytics}
+          sx={{ 
+            fontWeight: 'medium',
+            boxShadow: 2,
+            '&:hover': {
+              boxShadow: 4,
+              bgcolor: 'primary.dark'
+            }
+          }}
+        >
+          View Property Dashboard
+        </Button>
       </Box>
 
       {error && (

@@ -1,3 +1,4 @@
+// Updated MainLayout.jsx with added user analytics navigation
 import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -48,6 +49,7 @@ import NotificationsIcon from '@mui/icons-material/Notifications';
 import SettingsIcon from '@mui/icons-material/Settings';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import NightsStayIcon from '@mui/icons-material/NightsStay';
+import BarChartIcon from '@mui/icons-material/BarChart';
 
 import { getUserData } from '../utils/api';
 
@@ -57,6 +59,7 @@ function MainLayout({ onLogout }) {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [contractsMenuOpen, setContractsMenuOpen] = useState(false);
+  const [analyticsMenuOpen, setAnalyticsMenuOpen] = useState(false);
   const [userMenuAnchorEl, setUserMenuAnchorEl] = useState(null);
 
   const navigate = useNavigate();
@@ -100,7 +103,17 @@ function MainLayout({ onLogout }) {
         { id: 62, title: 'Contract Manager', icon: <FileOpenIcon />, path: 'contracts/manage' },
       ]
     },
-    { id: 7, title: 'Analytics', icon: <InsightsIcon />, path: 'analytics', adminOnly: false },
+    {
+      id: 7,
+      title: 'Analytics',
+      icon: <InsightsIcon />,
+      hasChildren: userIsAdmin,
+      adminOnly: false,
+      children: userIsAdmin ? [
+        { id: 71, title: 'Admin Analytics', icon: <BarChartIcon />, path: 'analytics' },
+        { id: 72, title: 'Property Dashboard', icon: <DashboardIcon />, path: 'user-analytics' }
+      ] : []
+    },
     { id: 8, title: 'Admin Panel', icon: <AdminPanelSettingsIcon />, path: 'admin', adminOnly: true },
     { id: 9, title: 'System Logs', icon: <AssessmentIcon />, path: 'logs', adminOnly: true },
   ];
@@ -116,6 +129,11 @@ function MainLayout({ onLogout }) {
   // Toggle contracts submenu
   const handleContractsToggle = () => {
     setContractsMenuOpen(!contractsMenuOpen);
+  };
+
+  // Toggle analytics submenu
+  const handleAnalyticsToggle = () => {
+    setAnalyticsMenuOpen(!analyticsMenuOpen);
   };
 
   // User menu handlers
@@ -216,11 +234,12 @@ function MainLayout({ onLogout }) {
                 <React.Fragment key={item.id}>
                   <ListItem disablePadding sx={{ mb: 0.5 }}>
                     <ListItemButton
-                      onClick={handleContractsToggle}
+                      onClick={item.title === 'Contracts' ? handleContractsToggle : handleAnalyticsToggle}
                       sx={{
                         borderRadius: 1.5,
                         py: 1,
-                        backgroundColor: location.pathname.includes('contracts')
+                        backgroundColor: (item.title === 'Contracts' && location.pathname.includes('contracts')) || 
+                                         (item.title === 'Analytics' && (location.pathname.includes('analytics') || location.pathname.includes('user-analytics')))
                           ? alpha(theme.palette.primary.main, 0.12)
                           : 'transparent',
                         '&:hover': {
@@ -230,7 +249,8 @@ function MainLayout({ onLogout }) {
                     >
                       <ListItemIcon sx={{
                         minWidth: 40,
-                        color: location.pathname.includes('contracts')
+                        color: (item.title === 'Contracts' && location.pathname.includes('contracts')) || 
+                              (item.title === 'Analytics' && (location.pathname.includes('analytics') || location.pathname.includes('user-analytics')))
                           ? theme.palette.primary.main
                           : theme.palette.text.primary
                       }}>
@@ -239,15 +259,24 @@ function MainLayout({ onLogout }) {
                       <ListItemText
                         primary={item.title}
                         primaryTypographyProps={{
-                          fontWeight: location.pathname.includes('contracts') ? 600 : 400,
+                          fontWeight: (item.title === 'Contracts' && location.pathname.includes('contracts')) || 
+                                      (item.title === 'Analytics' && (location.pathname.includes('analytics') || location.pathname.includes('user-analytics')))
+                            ? 600 : 400,
                           fontSize: '0.95rem'
                         }}
                       />
-                      {contractsMenuOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                      {(item.title === 'Contracts' && contractsMenuOpen) || (item.title === 'Analytics' && analyticsMenuOpen) 
+                        ? <ExpandLessIcon /> 
+                        : <ExpandMoreIcon />
+                      }
                     </ListItemButton>
                   </ListItem>
 
-                  <Collapse in={contractsMenuOpen} timeout="auto" unmountOnExit>
+                  <Collapse 
+                    in={item.title === 'Contracts' ? contractsMenuOpen : analyticsMenuOpen} 
+                    timeout="auto" 
+                    unmountOnExit
+                  >
                     <List component="div" disablePadding sx={{ pl: 2 }}>
                       {item.children.map(child => (
                         <ListItem key={child.id} disablePadding sx={{ mb: 0.5 }}>

@@ -1,4 +1,4 @@
-// src/AppRouter.jsx - Updated with Landlords routes
+// Updated AppRouter.jsx with admin access to UserAnalyticsPanel
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Box, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
@@ -310,20 +310,18 @@ const AppRouterContainer = () => {
             </ProtectedRoute>
           } />
 
+          {/* Analytics Panel Routes */}
           <Route path="analytics" element={
-  (() => {
-    const userData = getUserData(); // Fetch user data
-    return userData && userData.role === 'admin' ? (
-      <ProtectedRoute adminOnly={true}>
-        <AnalyticsPanel showNotification={showNotification} />
-      </ProtectedRoute>
-    ) : (
-      <ProtectedRoute>
-        <UserAnalyticsPanel showNotification={showNotification} />
-      </ProtectedRoute>
-    );
-  })()
-} />
+            <ProtectedRoute>
+              <AnalyticsPanel showNotification={showNotification} />
+            </ProtectedRoute>
+          } />
+
+          <Route path="user-analytics" element={
+            <ProtectedRoute>
+              <UserAnalyticsPanel showNotification={showNotification} />
+            </ProtectedRoute>
+          } />
 
           {/* Contract Generator Route */}
           <Route path="contracts/generate" element={

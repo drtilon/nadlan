@@ -1,4 +1,4 @@
-// src/components/UserAnalyticsPanel.jsx
+// src/components/UserAnalyticsPanel.jsx - Updated with navigation to AdminAnalytics
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -47,10 +47,12 @@ import {
   HolidayVillage as VacantIcon,
   ErrorOutline as OverdueIcon,
   HourglassEmpty as PendingIcon,
-  CalendarToday as CalendarIcon
+  CalendarToday as CalendarIcon,
+  TrendingUp as TrendingUpIcon,
+  SwapHoriz as SwapIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import api from '../utils/api';
+import api, { getUserData } from '../utils/api';
 
 function UserAnalyticsPanel({ showNotification }) {
   const [loading, setLoading] = useState(true);
@@ -69,6 +71,10 @@ function UserAnalyticsPanel({ showNotification }) {
   });
   const [statusFilter, setStatusFilter] = useState('all');
   const navigate = useNavigate();
+  
+  // Check if user is admin
+  const userData = getUserData();
+  const isAdmin = userData && userData.role === 'admin';
 
   // Fetch data on component mount
   useEffect(() => {
@@ -261,6 +267,11 @@ function UserAnalyticsPanel({ showNotification }) {
     // to focus on the specific apartment in the dashboard
   };
 
+  // Navigate to admin analytics
+  const handleGoToAdminAnalytics = () => {
+    navigate('/analytics');
+  };
+
   if (loading) {
     return (
       <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
@@ -276,12 +287,35 @@ function UserAnalyticsPanel({ showNotification }) {
     <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
       <Paper sx={{ p: 3, mb: 4 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h4" component="h1" sx={{ fontWeight: 600 }}>
-            Property Dashboard
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <TrendingUpIcon color="primary" /> Property Dashboard
           </Typography>
-          <IconButton onClick={fetchData} disabled={loading}>
-            <RefreshIcon />
-          </IconButton>
+          
+          {/* Added button for admins to navigate to Admin Analytics */}
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <IconButton onClick={fetchData} disabled={loading}>
+              <RefreshIcon />
+            </IconButton>
+            
+            {isAdmin && (
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<SwapIcon />}
+                onClick={handleGoToAdminAnalytics}
+                sx={{ 
+                  fontWeight: 'medium',
+                  boxShadow: 2,
+                  '&:hover': {
+                    boxShadow: 4,
+                    bgcolor: 'primary.dark'
+                  }
+                }}
+              >
+                View Admin Analytics
+              </Button>
+            )}
+          </Box>
         </Box>
 
         {/* Search and Filter Box */}
@@ -298,8 +332,16 @@ function UserAnalyticsPanel({ showNotification }) {
                   <SearchIcon />
                 </InputAdornment>
               ),
-              sx: { borderRadius: 1 }
+              sx: {
+                borderRadius: 1,
+                height: '48px',
+                backgroundColor: 'background.paper',
+                '& fieldset': {
+                  borderColor: 'divider'
+                }
+              }
             }}
+            sx={{ flexGrow: 1 }}
           />
           
           <FormControl variant="outlined" sx={{ minWidth: 180 }}>
@@ -699,7 +741,7 @@ function UserAnalyticsPanel({ showNotification }) {
                       );
                       
                       return (
-                        <TableRow key={tenant.id} hover>
+                        <TableRow key={tenant.id} hover sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
                           <TableCell>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                               <PersonIcon color="primary" fontSize="small" />

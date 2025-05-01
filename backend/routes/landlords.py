@@ -6,6 +6,7 @@ from typing import Tuple, List, Dict, Any
 from .auth import token_required, role_required
 from pydantic import BaseModel, ValidationError, EmailStr, Field, validator
 from datetime import datetime
+from activity_logger import ActivityLogger
 
 
 # Create a Pydantic model for landlord data validation
@@ -43,6 +44,13 @@ def list_landlords() -> Tuple[Response, int]:
                 landlord.pop("phone", None)
                 landlord.pop("iban", None)
                 landlord.pop("notes", None)
+        
+        # Log this activity
+        ActivityLogger.log_activity(
+            action="list",
+            entity_type="landlord",
+            details={"count": len(landlords_data)}
+        )
 
         return jsonify(landlords_data), 200
 
@@ -67,6 +75,13 @@ def add_landlord() -> Tuple[Response, int]:
         try:
             landlord_data = LandlordData(**data)
         except ValidationError as e:
+            # Log validation failure
+            ActivityLogger.log_landlord_action(
+                action="create",
+                landlord_id=None,
+                details={"error": "Validation error", "validation_errors": str(e.errors())},
+                success=False
+            )
             return jsonify({"message": "Invalid data", "errors": e.errors()}), 400
 
         # Create and add landlord to database
@@ -82,6 +97,17 @@ def add_landlord() -> Tuple[Response, int]:
         db.session.add(landlord)
         db.session.commit()
 
+        # Log landlord creation
+        ActivityLogger.log_landlord_action(
+            action="create",
+            landlord_id=landlord.id,
+            details={
+                "company_name": landlord.company_name,
+                "name": landlord.name,
+                "email": landlord.email
+            }
+        )
+
         return jsonify(
             {"message": "Landlord added successfully", "id": landlord.id}
         ), 201
@@ -89,6 +115,16 @@ def add_landlord() -> Tuple[Response, int]:
     except Exception as e:
         current_app.logger.error(f"Error adding landlord: {e}")
         db.session.rollback()
+        
+        # Log failure
+        ActivityLogger.log_landlord_action(
+            action="create",
+            landlord_id=None,
+            details={"error": str(e)},
+            success=False,
+            error=e
+        )
+        
         return jsonify({"message": "Error adding landlord", "error": str(e)}), 500
 
 
@@ -148,6 +184,17 @@ def update_landlord(landlord_id: int) -> Tuple[Response, int]:
         if not landlord:
             return jsonify({"message": "Landlord not found"}), 404
 
+        # Capture original data for logging
+        original_data = {
+            "company_name": landlord.company_name,
+            "name": landlord.name,
+            "email": landlord.email,
+            "phone": landlord.phone,
+            "iban": landlord.iban,
+            "company_address": landlord.company_address,
+            "notes": landlord.notes
+        }
+
         # Update landlord fields
         if "company_name" in data:
             landlord.company_name = data["company_name"]
@@ -166,11 +213,47 @@ def update_landlord(landlord_id: int) -> Tuple[Response, int]:
 
         landlord.updated_at = datetime.utcnow()
         db.session.commit()
+        
+        # Prepare updated data for logging
+        updated_data = {
+            "company_name": landlord.company_name,
+            "name": landlord.name,
+            "email": landlord.email,
+            "phone": landlord.phone,
+            "iban": landlord.iban,
+            "company_address": landlord.company_address,
+            "notes": landlord.notes
+        }
+        
+        # Find which fields changed
+        changed_fields = [k for k, v in updated_data.items() if original_data.get(k) != v]
+        
+        # Log landlord update
+        ActivityLogger.log_landlord_action(
+            action="update",
+            landlord_id=landlord_id,
+            details={
+                "changed_fields": changed_fields,
+                "original": {k: original_data[k] for k in changed_fields},
+                "updated": {k: updated_data[k] for k in changed_fields}
+            }
+        )
+        
         return jsonify({"message": "Landlord updated successfully"}), 200
 
     except Exception as e:
         current_app.logger.error(f"Error updating landlord: {e}")
         db.session.rollback()
+        
+        # Log failure
+        ActivityLogger.log_landlord_action(
+            action="update",
+            landlord_id=landlord_id,
+            details={"error": str(e)},
+            success=False,
+            error=e
+        )
+        
         return jsonify({"message": "Error updating landlord", "error": str(e)}), 500
 
 
@@ -191,20 +274,56 @@ def delete_landlord(landlord_id: int) -> Tuple[Response, int]:
             landlord_id=landlord_id
         ).count()
         if associated_apartments > 0:
+            # Log attempted deletion with existing apartments
+            ActivityLogger.log_landlord_action(
+                action="delete",
+                landlord_id=landlord_id,
+                details={
+                    "error": "Cannot delete landlord with associated apartments",
+                    "apartment_count": associated_apartments
+                },
+                success=False
+            )
             return jsonify(
                 {
                     "message": "Cannot delete landlord with associated apartments",
                     "apartment_count": associated_apartments,
                 }
             ), 400
-
+            
+        # Capture landlord data for logging
+        landlord_data = {
+            "id": landlord.id,
+            "company_name": landlord.company_name,
+            "name": landlord.name,
+            "email": landlord.email
+        }
+        
         db.session.delete(landlord)
         db.session.commit()
+        
+        # Log successful deletion
+        ActivityLogger.log_landlord_action(
+            action="delete",
+            landlord_id=landlord_id,
+            details=landlord_data
+        )
+        
         return jsonify({"message": "Landlord deleted successfully"}), 200
 
     except Exception as e:
         current_app.logger.error(f"Error deleting landlord: {e}")
         db.session.rollback()
+        
+        # Log failure
+        ActivityLogger.log_landlord_action(
+            action="delete",
+            landlord_id=landlord_id,
+            details={"error": str(e)},
+            success=False,
+            error=e
+        )
+        
         return jsonify({"message": "Error deleting landlord", "error": str(e)}), 500
 
 
@@ -239,6 +358,13 @@ def search_landlords() -> Tuple[Response, int]:
                 landlord_dict.pop("notes", None)
 
             landlords_data.append(landlord_dict)
+        
+        # Log search
+        ActivityLogger.log_activity(
+            action="search",
+            entity_type="landlord",
+            details={"query": query, "results": len(landlords_data)}
+        )
 
         return jsonify(landlords_data), 200
 

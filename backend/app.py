@@ -15,7 +15,7 @@ from initalized.init_apartment import (
 )
 import os
 from dotenv import load_dotenv
-
+from activity_logger import ActivityLogger, configure_activity_logger
 
 def wait_for_mysql(app):
     """Retry MySQL connection until it's available."""
@@ -64,6 +64,8 @@ def create_app():
             jwt.init_app(app)
             bcrypt.init_app(app)
             Swagger(app)
+            configure_activity_logger(app)
+            app.logger.info("Activity logger initialized")
         except Exception as e:
             app.logger.error(f"Error initializing extensions: {e}")
 

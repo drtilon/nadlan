@@ -10,6 +10,7 @@ from schemas import ApartmentData, TenantData
 from flasgger import swag_from
 from pydantic import ValidationError
 from .auth import token_required, role_required
+from activity_logger import ActivityLogger
 
 apartments_bp = Blueprint("apartments_bp", __name__)
 
@@ -34,6 +35,7 @@ def add_apartment_route() -> Tuple[Response, int]:
 
         # Get tenant data
         tenants_data = data.get("new_tenants", [])
+        tenant_ids = []
 
         # Process tenant data, handling both existing and new tenants
         for tenant_data in tenants_data:
@@ -46,6 +48,7 @@ def add_apartment_route() -> Tuple[Response, int]:
                 existing_tenant = Tenant.query.get(tenant_id)
                 if existing_tenant:
                     existing_tenant.apartment_id = apartment.id
+                    tenant_ids.append(tenant_id)
                     # Log the reassignment
                     current_app.logger.info(
                         f"Reassigned existing tenant {tenant_id} to apartment {apartment.id}"
@@ -59,16 +62,40 @@ def add_apartment_route() -> Tuple[Response, int]:
                 # Create and add the new tenant
                 new_tenant = Tenant(**tenant_data, apartment_id=apartment.id)
                 db.session.add(new_tenant)
+                db.session.flush()  # Get the ID of the new tenant
+                tenant_ids.append(new_tenant.id)
                 current_app.logger.info(
                     f"Created new tenant for apartment {apartment.id}"
                 )
 
         db.session.commit()
-        return jsonify({"message": "Apartment added successfully"}), 201
+        
+        # Log the activity
+        ActivityLogger.log_apartment_action(
+            action="create",
+            apartment_id=apartment.id,
+            details={
+                "address": apartment.address,
+                "landlord_id": apartment.landlord_id,
+                "tenants": tenant_ids
+            }
+        )
+        
+        return jsonify({"message": "Apartment added successfully", "id": apartment.id}), 201
 
     except Exception as e:
         current_app.logger.error(f"Error adding apartment: {e}")
         db.session.rollback()
+        
+        # Log failure
+        ActivityLogger.log_apartment_action(
+            action="create",
+            apartment_id=None,
+            details={"error": str(e), "apartment_data": data.get("new_apartment", {})},
+            success=False,
+            error=e
+        )
+        
         return jsonify({"message": "Error adding apartment", "error": str(e)}), 500
 
 
@@ -95,6 +122,14 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
         if not apartment:
             return jsonify({"message": "Apartment not found"}), 404
 
+        # Capture original data for logging
+        original_data = {
+            "address": apartment.address,
+            "landlord_id": apartment.landlord_id,
+            "status": apartment.status,
+            "rent": float(apartment.rent) if apartment.rent else 0
+        }
+
         # Update apartment fields
         for field, value in apartment_data.items():
             # Handle date fields separately
@@ -114,12 +149,16 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
             elif field != "tenants" and hasattr(apartment, field):
                 setattr(apartment, field, value)
 
+        # Track original tenants for logging
+        original_tenants = [tenant.id for tenant in Tenant.query.filter_by(apartment_id=apartment_id).all()]
+        
         # Unassign all existing tenants from this apartment
         existing_tenants = Tenant.query.filter_by(apartment_id=apartment_id).all()
         for tenant in existing_tenants:
             tenant.apartment_id = None  # Set to NULL instead of deleting the tenant
 
         # Then assign the selected tenants to this apartment
+        new_tenant_ids = []
         for tenant_data in tenants_data:
             tenant_id = tenant_data.get("id")
 
@@ -129,6 +168,7 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
                 tenant = Tenant.query.get(tenant_id)
                 if tenant:
                     tenant.apartment_id = apartment_id
+                    new_tenant_ids.append(tenant_id)
             else:
                 # This is a new tenant, create it
                 # Extract only the valid fields for a Tenant
@@ -144,13 +184,47 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
                 # Create new tenant with apartment_id
                 tenant = Tenant(**new_tenant_data)
                 db.session.add(tenant)
+                db.session.flush()  # Get the ID
+                new_tenant_ids.append(tenant.id)
 
         db.session.commit()
+        
+        # Prepare updated data for logging
+        updated_data = {
+            "address": apartment.address,
+            "landlord_id": apartment.landlord_id,
+            "status": apartment.status,
+            "rent": float(apartment.rent) if apartment.rent else 0,
+            "original_tenants": original_tenants,
+            "new_tenants": new_tenant_ids
+        }
+        
+        # Log the update
+        ActivityLogger.log_apartment_action(
+            action="update",
+            apartment_id=apartment_id,
+            details={
+                "original": original_data,
+                "updated": updated_data,
+                "changed_fields": [k for k, v in apartment_data.items() if k in original_data and original_data[k] != v]
+            }
+        )
+        
         return jsonify({"message": "Apartment updated successfully"}), 200
 
     except Exception as e:
         current_app.logger.error(f"Error editing apartment: {e}")
         db.session.rollback()
+        
+        # Log failure
+        ActivityLogger.log_apartment_action(
+            action="update",
+            apartment_id=apartment_id,
+            details={"error": str(e)},
+            success=False,
+            error=e
+        )
+        
         return jsonify({"message": "Error editing apartment", "error": str(e)}), 500
 
 
@@ -207,6 +281,14 @@ def export_excel() -> Tuple[Response, int]:
         df.to_excel(writer, index=False, sheet_name="Apartments")
         writer.close()
         output.seek(0)
+        
+        # Log export
+        ActivityLogger.log_activity(
+            action="export",
+            entity_type="apartment",
+            details={"format": "excel", "count": len(apartments_data)}
+        )
+        
         return send_file(output, download_name="apartments.xlsx", as_attachment=True)
     except Exception as e:
         current_app.logger.error(f"Error exporting apartments: {e}")
@@ -222,11 +304,37 @@ def delete_apartment(apartment_id: int) -> Tuple[Response, int]:
         if not apartment:
             return jsonify({"message": "Apartment not found"}), 404
 
+        # Capture data for logging before deletion
+        apartment_data = {
+            "id": apartment.id,
+            "address": apartment.address,
+            "landlord_id": apartment.landlord_id,
+            "tenants": [tenant.id for tenant in apartment.tenants]
+        }
+        
         db.session.delete(apartment)
         db.session.commit()
+        
+        # Log deletion
+        ActivityLogger.log_apartment_action(
+            action="delete",
+            apartment_id=apartment_id,
+            details=apartment_data
+        )
+        
         return jsonify({"message": "Apartment deleted successfully"}), 200
 
     except Exception as e:
         current_app.logger.error(f"Error deleting apartment: {e}")
         db.session.rollback()
+        
+        # Log failure
+        ActivityLogger.log_apartment_action(
+            action="delete",
+            apartment_id=apartment_id,
+            details={"error": str(e)},
+            success=False,
+            error=e
+        )
+        
         return jsonify({"message": "Error deleting apartment", "error": str(e)}), 500

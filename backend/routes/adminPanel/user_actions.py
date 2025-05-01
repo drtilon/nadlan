@@ -1,7 +1,8 @@
 from ..auth import token_required, role_required
 from extentions import db
 from models.models import User
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, g
+from activity_logger import ActivityLogger
 
 adminPanel_bp = Blueprint("adminPanel_bp", __name__)
 
@@ -14,8 +15,25 @@ def approve_user(user_id):
     if not user:
         return jsonify({"message": "User not found"}), 404
 
+    # Track original status for logging
+    original_status = user.is_approved
+    
+    # Update status
     user.is_approved = True
     db.session.commit()
+    
+    # Log user approval
+    ActivityLogger.log_user_action(
+        action="approve",
+        user_id=user_id,
+        details={
+            "username": user.username,
+            "original_status": original_status,
+            "new_status": True,
+            "approved_by": g.user.get("sub", "unknown")
+        }
+    )
+    
     return jsonify({"message": f"User '{user.username}' approved."}), 200
 
 
@@ -54,14 +72,44 @@ def update_user(user_id):
         if not user:
             return jsonify({"message": "User not found"}), 404
 
+        # Track original role for logging
+        original_role = user.role
+        
+        # Update role
         user.role = data["role"]
         db.session.commit()
+        
+        # Log role change
+        ActivityLogger.log_user_action(
+            action="update_role",
+            user_id=user_id,
+            details={
+                "username": user.username,
+                "original_role": original_role,
+                "new_role": data["role"],
+                "updated_by": g.user.get("sub", "unknown")
+            }
+        )
+        
         return jsonify(
             {"message": "User updated successfully", "user": user.to_dict()}
         ), 200
     except Exception as e:
         current_app.logger.error(f"Error updating user: {e}")
         db.session.rollback()
+        
+        # Log failure
+        ActivityLogger.log_user_action(
+            action="update_role",
+            user_id=user_id,
+            details={
+                "error": str(e),
+                "attempted_role": data.get("role") if data else None
+            },
+            success=False,
+            error=e
+        )
+        
         return jsonify({"message": "Error updating user", "error": str(e)}), 500
 
 
@@ -75,12 +123,40 @@ def delete_user(user_id):
         if not user:
             return jsonify({"message": "User not found"}), 404
 
+        # Capture user data for logging
+        user_data = {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role
+        }
+        
         db.session.delete(user)
         db.session.commit()
+        
+        # Log user deletion
+        ActivityLogger.log_user_action(
+            action="delete",
+            user_id=user_id,
+            details={
+                "deleted_user": user_data,
+                "deleted_by": g.user.get("sub", "unknown")
+            }
+        )
+        
         return jsonify({"message": "User deleted successfully"}), 200
     except Exception as e:
         current_app.logger.error(f"Error deleting user: {e}")
         db.session.rollback()
+        
+        # Log failure
+        ActivityLogger.log_user_action(
+            action="delete",
+            user_id=user_id,
+            details={"error": str(e)},
+            success=False,
+            error=e
+        )
+        
         return jsonify({"message": "Error deleting user", "error": str(e)}), 500
 
 
@@ -102,8 +178,33 @@ def change_user_password(user_id):
         db.session.commit()
 
         current_app.logger.info(f"Password changed for user: {user.username}")
+        
+        # Log password change (don't include the actual password!)
+        ActivityLogger.log_user_action(
+            action="change_password",
+            user_id=user_id,
+            details={
+                "username": user.username,
+                "changed_by": g.user.get("sub", "unknown"),
+                "admin_reset": True
+            }
+        )
+        
         return jsonify({"message": "Password changed successfully"}), 200
     except Exception as e:
         current_app.logger.error(f"Error changing password: {e}")
         db.session.rollback()
+        
+        # Log failure
+        ActivityLogger.log_user_action(
+            action="change_password",
+            user_id=user_id,
+            details={
+                "error": str(e),
+                "admin_reset": True
+            },
+            success=False,
+            error=e
+        )
+        
         return jsonify({"message": "Error changing password", "error": str(e)}), 500

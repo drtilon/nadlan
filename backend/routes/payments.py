@@ -1,3 +1,4 @@
+# routes/payments.py - Updates to include activity logging
 import json
 from flask import Blueprint, request, jsonify, current_app
 from .auth import token_required
@@ -5,6 +6,7 @@ from extentions import db
 from models.models import Apartment, Payment, Tenant
 from datetime import datetime, timedelta
 from sqlalchemy import and_, func
+from activity_logger import ActivityLogger
 
 payments_bp = Blueprint("payments_bp", __name__)
 
@@ -121,6 +123,17 @@ def get_payments(apartment_id):
             "active_months": active_months
         }
         
+        # Log payment data retrieval
+        ActivityLogger.log_activity(
+            action="view",
+            entity_type="payment",
+            entity_id=None,
+            details={
+                "apartment_id": apartment_id,
+                "year": year
+            }
+        )
+        
         return jsonify({
             "payments": response_data,
             "metadata": metadata
@@ -167,6 +180,10 @@ def update_payments(apartment_id):
             
         active_months = get_active_months(apartment.moveInDate, apartment.contractEndDate, selected_year)
         current_app.logger.info(f"Updating payments for apartment {apartment_id}, year {selected_year}, data: {data}")
+        
+        # Track changes for logging
+        updated_payments = []
+        created_payments = []
         
         for month in month_list:
             month_data = data.get("payments", {}).get(month)
@@ -225,6 +242,10 @@ def update_payments(apartment_id):
             ).first()
 
             if payment:
+                # Track original status for logging changes
+                original_status = payment.status
+                original_amount_paid = sum(float(t.get("amountPaid", 0)) for t in json.loads(payment.tenants)) if payment.tenants else 0
+                
                 payment.status = status
                 payment.tenants = tenants_json
                 payment.internet = internet
@@ -240,6 +261,22 @@ def update_payments(apartment_id):
                 payment.notes = notes
                 payment.updated_at = datetime.utcnow()
                 current_app.logger.info(f"Updated payment for {month} {selected_year}: {payment.status}")
+                
+                # Calculate new amount paid
+                new_amount_paid = sum(float(tenant.get("amountPaid", 0)) for tenant in tenants)
+                
+                # Track changes in a structured way for logging
+                updated_payments.append({
+                    "id": payment.id,
+                    "month": month,
+                    "year": selected_year,
+                    "old_status": original_status,
+                    "new_status": status,
+                    "old_amount_paid": original_amount_paid,
+                    "new_amount_paid": new_amount_paid,
+                    "status_changed": original_status != status,
+                    "amount_changed": original_amount_paid != new_amount_paid
+                })
             else:
                 new_payment = Payment(
                     apartment_id=apartment_id,
@@ -263,14 +300,53 @@ def update_payments(apartment_id):
                     updated_at=datetime.utcnow()
                 )
                 db.session.add(new_payment)
+                db.session.flush()  # Get the ID
                 current_app.logger.info(f"Created new payment for {month} {selected_year}: {new_payment.status}")
+                
+                # Track created payments for logging
+                created_payments.append({
+                    "id": new_payment.id,
+                    "month": month,
+                    "year": selected_year,
+                    "status": status,
+                    "amount_paid": sum(float(tenant.get("amountPaid", 0)) for tenant in tenants)
+                })
 
         db.session.commit()
         current_app.logger.info(f"Payments for {selected_year} committed successfully")
+        
+        # Log the batch payment update
+        ActivityLogger.log_payment_action(
+            action="update_batch",
+            payment_id=None,
+            apartment_id=apartment_id,
+            details={
+                "year": selected_year,
+                "updated_payments": updated_payments,
+                "created_payments": created_payments,
+                "total_updated": len(updated_payments),
+                "total_created": len(created_payments)
+            }
+        )
+        
         return jsonify({"message": f"Payments for {selected_year} updated successfully"}), 200
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Error updating payments: {e}")
+        
+        # Log failure
+        ActivityLogger.log_payment_action(
+            action="update_batch",
+            payment_id=None,
+            apartment_id=apartment_id,
+            details={
+                "year": selected_year,
+                "error": str(e)
+            },
+            success=False,
+            error=e
+        )
+        
         return jsonify({"message": "Error updating payments", "error": str(e)}), 500
 
 @payments_bp.route("/apartment/<int:apartment_id>", methods=["GET"])
@@ -352,6 +428,19 @@ def get_payment_receipt(payment_id):
             "notes": payment.notes if hasattr(payment, "notes") else "",
             "issuedAt": datetime.utcnow().isoformat()
         }
+        
+        # Log receipt generation
+        ActivityLogger.log_payment_action(
+            action="generate_receipt",
+            payment_id=payment_id,
+            apartment_id=apartment.id,
+            details={
+                "receipt_number": receipt_number,
+                "month": payment.month,
+                "year": payment.year,
+                "total_paid": total_paid
+            }
+        )
 
         return jsonify(receipt_data), 200
     except Exception as e:
@@ -521,6 +610,8 @@ def initialize_payment_records(apartment_id, year=None):
     tenants_json = json.dumps(tenant_json) if tenant_json else "[]"
     
     created_count = 0
+    created_records = []
+    
     for month in month_list:
         existing_payment = Payment.query.filter_by(
             apartment_id=apartment_id, 
@@ -546,9 +637,28 @@ def initialize_payment_records(apartment_id, year=None):
                 updated_at=datetime.utcnow()
             )
             db.session.add(payment)
+            db.session.flush()  # Get ID for logging
             created_count += 1
+            created_records.append({
+                "id": payment.id,
+                "month": month,
+                "year": year,
+                "status": status
+            })
     
     if created_count > 0:
         db.session.commit()
+        
+        # Log batch creation of payment records
+        ActivityLogger.log_payment_action(
+            action="initialize",
+            payment_id=None,
+            apartment_id=apartment_id,
+            details={
+                "year": year,
+                "count": created_count,
+                "records": created_records
+            }
+        )
         
     return created_count

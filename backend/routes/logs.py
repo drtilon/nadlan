@@ -1,5 +1,4 @@
 # routes/logs.py
-# Add this route to your backend logs.py file
 import os
 import json
 from datetime import datetime, timedelta
@@ -13,7 +12,8 @@ logs_bp = Blueprint("logs_bp", __name__)
 
 # Configure a file handler for our app
 LOG_DIRECTORY = os.environ.get("LOG_DIRECTORY", "logs")
-LOG_FILE = os.path.join(LOG_DIRECTORY, "app.log")
+APP_LOG_FILE = os.path.join(LOG_DIRECTORY, "app.log")
+ACTIVITY_LOG_FILE = os.path.join(LOG_DIRECTORY, "activity.log")
 
 # Create logs directory if it doesn't exist
 if not os.path.exists(LOG_DIRECTORY):
@@ -39,15 +39,30 @@ def add_to_recent_logs(log_entry):
 def get_logs():
     """
     Retrieves application logs from both file and memory.
-    Supports optional filtering by level and time range.
+    Supports optional filtering by level, time range and log type.
     """
     try:
         # Query parameters
         level = request.args.get("level", "").lower()
         hours = request.args.get("hours")
+        log_type = request.args.get("type", "all")  # 'app', 'activity', or 'all'
+        entity_type = request.args.get("entity_type")  # For filtering activity logs
+        user_id = request.args.get("user_id")  # For filtering by user
+        action = request.args.get("action")  # For filtering by action type
 
-        # Collect logs from file and memory
-        logs_data = collect_logs_from_file()
+        # Collect logs from appropriate files based on type
+        logs_data = []
+        if log_type in ['all', 'app']:
+            app_logs = collect_logs_from_file(APP_LOG_FILE)
+            for log in app_logs:
+                log['log_type'] = 'app'
+                logs_data.append(log)
+
+        if log_type in ['all', 'activity']:
+            activity_logs = collect_activity_logs_from_file(ACTIVITY_LOG_FILE)
+            for log in activity_logs:
+                log['log_type'] = 'activity'
+                logs_data.append(log)
 
         # Add in-memory logs that might not be in the file yet
         for memory_log in recent_logs:
@@ -57,9 +72,27 @@ def get_logs():
                 logs_data.append(memory_log)
 
         # Apply filters
-        if level:
+        if level and level != 'all':
             logs_data = [
                 log for log in logs_data if log.get("level", "").lower() == level
+            ]
+
+        if entity_type and entity_type != 'all':
+            logs_data = [
+                log for log in logs_data 
+                if log.get("entity_type", "").lower() == entity_type.lower()
+            ]
+            
+        if user_id and user_id != 'all':
+            logs_data = [
+                log for log in logs_data 
+                if (log.get("user", {}) and str(log["user"].get("id", "")) == str(user_id))
+            ]
+            
+        if action and action != 'all':
+            logs_data = [
+                log for log in logs_data 
+                if log.get("action", "").lower() == action.lower()
             ]
 
         if hours:
@@ -69,7 +102,7 @@ def get_logs():
                     log
                     for log in logs_data
                     if "timestamp" in log
-                    and datetime.fromisoformat(log["timestamp"]) >= hours_ago
+                    and datetime.fromisoformat(log["timestamp"].replace('Z', '+00:00')) >= hours_ago
                 ]
             except (ValueError, TypeError):
                 # If hours parameter is invalid, ignore it
@@ -91,15 +124,22 @@ def get_logs():
 def clear_logs():
     """Clears all application logs."""
     try:
-        # Clear the log file by truncating it
-        with open(LOG_FILE, "w") as f:
-            f.write("")
+        log_type = request.args.get("type", "all")  # 'app', 'activity', or 'all'
+        
+        # Clear the appropriate log files
+        if log_type in ['all', 'app']:
+            with open(APP_LOG_FILE, "w") as f:
+                f.write("")
+                
+        if log_type in ['all', 'activity']:
+            with open(ACTIVITY_LOG_FILE, "w") as f:
+                f.write("")
 
         # Also clear in-memory logs
         global recent_logs
         recent_logs = []
 
-        return jsonify({"message": "Logs cleared successfully"}), 200
+        return jsonify({"message": f"{log_type.capitalize()} logs cleared successfully"}), 200
 
     except Exception as e:
         current_app.logger.error(f"Error clearing logs: {e}")
@@ -115,11 +155,25 @@ def search_logs():
     """
     try:
         query = request.args.get("q", "")
+        log_type = request.args.get("type", "all")
+        
         if not query:
             return jsonify({"message": "No search query provided"}), 400
 
-        # Collect all logs
-        logs_data = collect_logs_from_file()
+        # Collect appropriate logs
+        logs_data = []
+        
+        if log_type in ['all', 'app']:
+            app_logs = collect_logs_from_file(APP_LOG_FILE)
+            for log in app_logs:
+                log['log_type'] = 'app'
+                logs_data.append(log)
+                
+        if log_type in ['all', 'activity']:
+            activity_logs = collect_activity_logs_from_file(ACTIVITY_LOG_FILE)
+            for log in activity_logs:
+                log['log_type'] = 'activity'
+                logs_data.append(log)
 
         # Add in-memory logs
         for memory_log in recent_logs:
@@ -132,11 +186,44 @@ def search_logs():
         results = []
         for log in logs_data:
             # Search in different log fields
-            if (
-                query.lower() in (log.get("message") or "").lower()
-                or query.lower() in (log.get("logger") or "").lower()
-                or query.lower() in (log.get("level") or "").lower()
-            ):
+            should_include = False
+            
+            # Basic text search in message
+            if "message" in log and query.lower() in (log.get("message") or "").lower():
+                should_include = True
+                
+            # Search in logger/entity_type  
+            if "logger" in log and query.lower() in (log.get("logger") or "").lower():
+                should_include = True
+                
+            if "entity_type" in log and query.lower() in (log.get("entity_type") or "").lower():
+                should_include = True
+                
+            # Search in level
+            if "level" in log and query.lower() in (log.get("level") or "").lower():
+                should_include = True
+            
+            # Search in action
+            if "action" in log and query.lower() in (log.get("action") or "").lower():
+                should_include = True
+                
+            # Search in user info
+            if "user" in log and log.get("user"):
+                user = log.get("user", {})
+                if (
+                    query.lower() in str(user.get("id", "")).lower() or
+                    query.lower() in (user.get("username") or "").lower() or
+                    query.lower() in (user.get("role") or "").lower()
+                ):
+                    should_include = True
+                    
+            # Search in details object (if string search is possible)
+            if "details" in log and log.get("details"):
+                details_str = json.dumps(log.get("details", {}))
+                if query.lower() in details_str.lower():
+                    should_include = True
+                    
+            if should_include:
                 results.append(log)
 
         # Sort results by timestamp (newest first)
@@ -149,7 +236,121 @@ def search_logs():
         return jsonify({"message": "Error searching logs", "error": str(e)}), 500
 
 
-def collect_logs_from_file() -> List[Dict[str, Any]]:
+@logs_bp.route("/logs/stats", methods=["GET"])
+@token_required
+@role_required("admin")
+def get_log_stats():
+    """
+    Returns statistics about the logs:
+    - Total count by log type
+    - Distribution by level/action
+    - User activity summary
+    - Entity type distribution
+    """
+    try:
+        # Get all logs
+        app_logs = collect_logs_from_file(APP_LOG_FILE)
+        activity_logs = collect_activity_logs_from_file(ACTIVITY_LOG_FILE)
+        
+        # Count by log type
+        total_app_logs = len(app_logs)
+        total_activity_logs = len(activity_logs)
+        
+        # Initialize stats containers
+        level_distribution = {}
+        action_distribution = {}
+        user_activity = {}
+        entity_distribution = {}
+        
+        # Process app logs
+        for log in app_logs:
+            level = log.get("level", "unknown").lower()
+            level_distribution[level] = level_distribution.get(level, 0) + 1
+        
+        # Process activity logs
+        for log in activity_logs:
+            # Action stats
+            action = log.get("action", "unknown")
+            action_distribution[action] = action_distribution.get(action, 0) + 1
+            
+            # Entity stats
+            entity = log.get("entity_type", "unknown")
+            entity_distribution[entity] = entity_distribution.get(entity, 0) + 1
+            
+            # User stats
+            user = log.get("user", {})
+            user_id = user.get("id") if user else "unknown"
+            username = user.get("username") if user else "unknown"
+            
+            if user_id not in user_activity:
+                user_activity[user_id] = {
+                    "user_id": user_id,
+                    "username": username,
+                    "role": user.get("role") if user else "unknown",
+                    "actions": {},
+                    "total_actions": 0
+                }
+            
+            user_activity[user_id]["actions"][action] = user_activity[user_id]["actions"].get(action, 0) + 1
+            user_activity[user_id]["total_actions"] += 1
+            
+        # Sort user activity by most active
+        sorted_users = sorted(
+            list(user_activity.values()),
+            key=lambda x: x["total_actions"],
+            reverse=True
+        )
+        
+        return jsonify({
+            "total_logs": {
+                "app": total_app_logs,
+                "activity": total_activity_logs,
+                "total": total_app_logs + total_activity_logs
+            },
+            "level_distribution": level_distribution,
+            "action_distribution": action_distribution,
+            "entity_distribution": entity_distribution,
+            "user_activity": sorted_users[:10]  # Top 10 most active users
+        }), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Error generating log statistics: {e}")
+        return jsonify({"message": "Error generating log statistics", "error": str(e)}), 500
+
+
+@logs_bp.route("/logs/entity/<entity_type>/<entity_id>", methods=["GET"])
+@token_required
+@role_required("admin")
+def get_entity_logs(entity_type, entity_id):
+    """
+    Get all activity logs related to a specific entity (apartment, tenant, etc.)
+    """
+    try:
+        # Get activity logs
+        activity_logs = collect_activity_logs_from_file(ACTIVITY_LOG_FILE)
+        
+        # Filter logs for the specific entity
+        entity_logs = [
+            log for log in activity_logs
+            if log.get("entity_type") == entity_type and str(log.get("entity_id")) == str(entity_id)
+        ]
+        
+        # Sort by timestamp (newest first)
+        entity_logs.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        return jsonify({
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "logs": entity_logs,
+            "count": len(entity_logs)
+        }), 200
+        
+    except Exception as e:
+        current_app.logger.error(f"Error retrieving entity logs: {e}")
+        return jsonify({"message": "Error retrieving entity logs", "error": str(e)}), 500
+
+
+def collect_logs_from_file(file_path) -> List[Dict[str, Any]]:
     """
     Parse and collect logs from the log file.
     Returns a list of log entry dictionaries.
@@ -157,10 +358,10 @@ def collect_logs_from_file() -> List[Dict[str, Any]]:
     logs_data = []
 
     try:
-        if not os.path.exists(LOG_FILE):
+        if not os.path.exists(file_path):
             return []
 
-        with open(LOG_FILE, "r") as f:
+        with open(file_path, "r") as f:
             log_lines = f.readlines()
 
         # Parse each line (assuming a specific log format)
@@ -236,62 +437,63 @@ def parse_log_line(line: str) -> Dict[str, Any]:
         }
 
 
-# Configure custom logger for application events
-def configure_app_logger():
-    """Configure the application logger with file and memory handlers"""
-    logger = logging.getLogger("app")
-    logger.setLevel(logging.DEBUG)
+def collect_activity_logs_from_file(file_path) -> List[Dict[str, Any]]:
+    """
+    Parse and collect activity logs from the activity log file.
+    These have a different format than regular application logs.
+    """
+    logs_data = []
 
-    # File handler
-    file_handler = logging.FileHandler(LOG_FILE)
-    file_handler.setLevel(logging.DEBUG)
+    try:
+        if not os.path.exists(file_path):
+            return []
 
-    # Create a formatter
-    formatter = logging.Formatter(
-        "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
-    )
-    file_handler.setFormatter(formatter)
+        with open(file_path, "r") as f:
+            log_lines = f.readlines()
 
-    # Add handlers to logger
-    logger.addHandler(file_handler)
-
-    # Custom handler for in-memory logs
-    class MemoryHandler(logging.Handler):
-        def emit(self, record):
+        # Parse each line
+        for i, line in enumerate(log_lines):
             try:
-                # Format the log entry
-                log_entry = {
-                    "timestamp": datetime.now().isoformat(),
-                    "level": record.levelname,
-                    "logger": record.name,
-                    "message": self.format(record),
-                    "id": f"memory_{id(record)}",
-                }
+                # Handle multiline log entries
+                if line.strip() and re.match(
+                    r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}", line
+                ):
+                    # Check if this is an activity log
+                    if "USER ACTIVITY" in line:
+                        # Extract the JSON part of the activity log
+                        json_start = line.find('USER ACTIVITY:') + 14
+                        if json_start < 14:  # Not found
+                            json_start = line.find('USER ACTIVITY ERROR:') + 20
+                            
+                        if json_start > 0:  # Found the marker
+                            json_str = line[json_start:].strip()
+                            activity_data = json.loads(json_str)
+                            
+                            # Add log identifier
+                            activity_data["id"] = f"activity_{i}"
+                            
+                            # Add standard log fields for compatibility
+                            if "level" not in activity_data:
+                                activity_data["level"] = "ERROR" if "ERROR" in line else "INFO"
+                                
+                            logs_data.append(activity_data)
+                    else:
+                        # Regular log entry, skip or process differently if needed
+                        pass
+                        
+                elif logs_data and line.strip():
+                    # This could be a continuation of a previous log
+                    # For activity logs, we generally don't expect multiline entries
+                    # But we could handle them if needed
+                    pass
+                    
+            except Exception as e:
+                # Skip lines that can't be parsed
+                current_app.logger.error(f"Error parsing activity log line: {e}")
+                continue
 
-                # Add traceback info if available
-                if record.exc_info:
-                    import traceback
+        return logs_data
 
-                    log_entry["stack_trace"] = "".join(
-                        traceback.format_exception(*record.exc_info)
-                    )
-
-                # Add to memory buffer
-                add_to_recent_logs(log_entry)
-            except Exception:
-                # Don't crash if logging fails
-                pass
-
-    memory_handler = MemoryHandler()
-    memory_handler.setFormatter(formatter)
-    logger.addHandler(memory_handler)
-
-    return logger
-
-
-# Initialize the logger
-app_logger = configure_app_logger()
-
-# Log a startup message
-app_logger.info("Logs API initialized successfully")
-
+    except Exception as e:
+        current_app.logger.error(f"Error collecting activity logs from file: {e}")
+        return []

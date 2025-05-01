@@ -1,4 +1,4 @@
-// Updated MainLayout.jsx with added user analytics navigation
+// Fixed MainLayout.jsx with error handling for path checks
 import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -85,7 +85,7 @@ function MainLayout({ onLogout }) {
     setMobileOpen(!mobileOpen);
   };
 
-  // Navigation items
+  // Navigation items with simplified structure for non-admin users
   const navItems = [
     { id: 1, title: 'Dashboard', icon: <DashboardIcon />, path: 'dashboard', adminOnly: false },
     { id: 2, title: 'Properties', icon: <HomeIcon />, path: 'properties', adminOnly: false },
@@ -103,16 +103,24 @@ function MainLayout({ onLogout }) {
         { id: 62, title: 'Contract Manager', icon: <FileOpenIcon />, path: 'contracts/manage' },
       ]
     },
-    {
+    // Different analytics item based on user role
+    userIsAdmin ? {
       id: 7,
       title: 'Analytics',
       icon: <InsightsIcon />,
-      hasChildren: userIsAdmin,
+      hasChildren: true,
       adminOnly: false,
-      children: userIsAdmin ? [
+      children: [
         { id: 71, title: 'Admin Analytics', icon: <BarChartIcon />, path: 'analytics' },
         { id: 72, title: 'Property Dashboard', icon: <DashboardIcon />, path: 'user-analytics' }
-      ] : []
+      ]
+    } : {
+      id: 7,
+      title: 'Analytics',
+      icon: <InsightsIcon />,
+      path: 'user-analytics', 
+      hasChildren: false,
+      adminOnly: false
     },
     { id: 8, title: 'Admin Panel', icon: <AdminPanelSettingsIcon />, path: 'admin', adminOnly: true },
     { id: 9, title: 'System Logs', icon: <AssessmentIcon />, path: 'logs', adminOnly: true },
@@ -150,13 +158,20 @@ function MainLayout({ onLogout }) {
     onLogout();
   };
 
-  // Check if a path is active
+  // Check if a path is active - with safety checks
   const isActivePath = (path) => {
+    if (!path) return false; // Add this check to handle undefined path
+    
     if (path === 'properties') return currentPath === 'dashboard' || currentPath === '';
     if (path.includes('/')) {
       return location.pathname.includes(path);
     }
     return currentPath === path;
+  };
+
+  // Check if analytics paths are active
+  const isAnalyticsActive = () => {
+    return location.pathname.includes('analytics') || location.pathname.includes('user-analytics');
   };
 
   // Drawer content
@@ -239,7 +254,7 @@ function MainLayout({ onLogout }) {
                         borderRadius: 1.5,
                         py: 1,
                         backgroundColor: (item.title === 'Contracts' && location.pathname.includes('contracts')) || 
-                                         (item.title === 'Analytics' && (location.pathname.includes('analytics') || location.pathname.includes('user-analytics')))
+                                         (item.title === 'Analytics' && isAnalyticsActive())
                           ? alpha(theme.palette.primary.main, 0.12)
                           : 'transparent',
                         '&:hover': {
@@ -250,7 +265,7 @@ function MainLayout({ onLogout }) {
                       <ListItemIcon sx={{
                         minWidth: 40,
                         color: (item.title === 'Contracts' && location.pathname.includes('contracts')) || 
-                              (item.title === 'Analytics' && (location.pathname.includes('analytics') || location.pathname.includes('user-analytics')))
+                              (item.title === 'Analytics' && isAnalyticsActive())
                           ? theme.palette.primary.main
                           : theme.palette.text.primary
                       }}>
@@ -260,7 +275,7 @@ function MainLayout({ onLogout }) {
                         primary={item.title}
                         primaryTypographyProps={{
                           fontWeight: (item.title === 'Contracts' && location.pathname.includes('contracts')) || 
-                                      (item.title === 'Analytics' && (location.pathname.includes('analytics') || location.pathname.includes('user-analytics')))
+                                      (item.title === 'Analytics' && isAnalyticsActive())
                             ? 600 : 400,
                           fontSize: '0.95rem'
                         }}
@@ -278,7 +293,7 @@ function MainLayout({ onLogout }) {
                     unmountOnExit
                   >
                     <List component="div" disablePadding sx={{ pl: 2 }}>
-                      {item.children.map(child => (
+                      {item.children && item.children.map(child => (
                         <ListItem key={child.id} disablePadding sx={{ mb: 0.5 }}>
                           <ListItemButton
                             onClick={() => navigateTo(child.path)}

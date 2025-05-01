@@ -1,4 +1,4 @@
-// components/LogsViewer.jsx
+// components/LogsViewer.jsx - Improved with user identification
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -26,7 +26,9 @@ import {
   InputLabel,
   Stack,
   LinearProgress,
-  Divider
+  Divider,
+  Avatar,
+  Tooltip
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -37,7 +39,11 @@ import {
   FilterList as FilterIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
-  DeleteSweep as ClearIcon
+  DeleteSweep as ClearIcon,
+  Person as PersonIcon,
+  CalendarMonth as CalendarIcon,
+  AccessTime as TimeIcon,
+  Source as SourceIcon
 } from '@mui/icons-material';
 import api from '../utils/api';
 import AssessmentIcon from '@mui/icons-material/Assessment';
@@ -48,22 +54,33 @@ function LogsViewer({ showNotification }) {
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [logLevel, setLogLevel] = useState('all');
+  const [userFilter, setUserFilter] = useState('all');
   const [activeTab, setActiveTab] = useState(0);
   const [expandedRows, setExpandedRows] = useState({});
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(null);
+  const [users, setUsers] = useState([]);
 
   // Fetch logs from server
   const fetchLogs = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/logs');
-      const logsData = Array.isArray(response.data) ? response.data : response.data.logs || [];
+      const [logsResponse, usersResponse] = await Promise.all([
+        api.get('/logs'),
+        api.get('/adminPanel/users')
+      ]);
+      
+      const logsData = Array.isArray(logsResponse.data) ? logsResponse.data : logsResponse.data.logs || [];
       
       // Sort logs by timestamp (newest first)
       const sortedLogs = logsData.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       setLogs(sortedLogs);
-      applyFilters(sortedLogs, searchTerm, logLevel, activeTab);
+      
+      // Set users for filtering
+      setUsers(usersResponse.data || []);
+      
+      // Apply filters
+      applyFilters(sortedLogs, searchTerm, logLevel, activeTab, userFilter);
     } catch (error) {
       console.error('Error fetching logs:', error);
       showNotification('Error fetching log data', 'error');
@@ -73,7 +90,7 @@ function LogsViewer({ showNotification }) {
   };
 
   // Apply filters to logs
-  const applyFilters = (logsData, search, level, tab) => {
+  const applyFilters = (logsData, search, level, tab, user) => {
     let filtered = [...logsData];
     
     // Apply search filter
@@ -82,13 +99,20 @@ function LogsViewer({ showNotification }) {
       filtered = filtered.filter(log => 
         log.message?.toLowerCase().includes(searchLower) || 
         log.logger?.toLowerCase().includes(searchLower) ||
-        log.level?.toLowerCase().includes(searchLower)
+        log.level?.toLowerCase().includes(searchLower) ||
+        log.user?.username?.toLowerCase().includes(searchLower) ||
+        log.user?.id?.toString().includes(searchLower)
       );
     }
     
     // Apply level filter
     if (level !== 'all') {
       filtered = filtered.filter(log => log.level?.toLowerCase() === level.toLowerCase());
+    }
+    
+    // Apply user filter
+    if (user !== 'all') {
+      filtered = filtered.filter(log => log.user && log.user.id === parseInt(user));
     }
     
     // Apply tab filter (time periods)
@@ -121,8 +145,8 @@ function LogsViewer({ showNotification }) {
 
   // Effect for search term changes
   useEffect(() => {
-    applyFilters(logs, searchTerm, logLevel, activeTab);
-  }, [searchTerm, logLevel, activeTab, logs]);
+    applyFilters(logs, searchTerm, logLevel, activeTab, userFilter);
+  }, [searchTerm, logLevel, activeTab, userFilter, logs]);
 
   // Effect for auto-refresh
   useEffect(() => {
@@ -176,6 +200,27 @@ function LogsViewer({ showNotification }) {
     }
   };
 
+  // Get user display from user object
+  const getUserDisplay = (user) => {
+    if (!user) return null;
+    
+    return (
+      <Tooltip title={`User ID: ${user.id || 'Unknown'}`}>
+        <Chip
+          avatar={
+            <Avatar sx={{ bgcolor: user.role === 'admin' ? 'primary.main' : 'success.main' }}>
+              {user.username ? user.username.charAt(0).toUpperCase() : <PersonIcon fontSize="small" />}
+            </Avatar>
+          }
+          label={user.username || 'Unknown User'}
+          size="small"
+          variant="outlined"
+          color={user.role === 'admin' ? 'primary' : 'success'}
+        />
+      </Tooltip>
+    );
+  };
+
   // Get log level chip
   const getLogLevelChip = (level) => {
     switch (level?.toLowerCase()) {
@@ -202,12 +247,23 @@ function LogsViewer({ showNotification }) {
     }
   };
 
+  // Format and shortens the message for display
+  const formatMessage = (message, isExpanded) => {
+    if (!message) return 'No message';
+    
+    // If expanded, return full message
+    if (isExpanded) return message;
+    
+    // Otherwise, limit to first 80 characters
+    return message.length > 80 ? `${message.substring(0, 80)}...` : message;
+  };
+
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
       <Paper sx={{ p: 3, mb: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h4" component="h1">
-            Server Logs
+          <Typography variant="h4" component="h1" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <AssessmentIcon sx={{ fontSize: 32 }} /> System Logs
           </Typography>
           
           <Box sx={{ display: 'flex', gap: 2 }}>
@@ -274,6 +330,23 @@ function LogsViewer({ showNotification }) {
               <MenuItem value="error">Error</MenuItem>
             </Select>
           </FormControl>
+          
+          <FormControl variant="outlined" size="small" sx={{ minWidth: 150 }}>
+            <InputLabel>User</InputLabel>
+            <Select
+              value={userFilter}
+              onChange={(e) => setUserFilter(e.target.value)}
+              label="User"
+            >
+              <MenuItem value="all">All Users</MenuItem>
+              {users.map(user => (
+                <MenuItem key={user.id} value={user.id}>
+                  {user.username} ({user.role})
+                </MenuItem>
+              ))}
+              <MenuItem value="unknown">Unknown User</MenuItem>
+            </Select>
+          </FormControl>
         </Box>
         
         {/* Time period tabs */}
@@ -302,11 +375,31 @@ function LogsViewer({ showNotification }) {
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell>Timestamp</TableCell>
-                  <TableCell>Level</TableCell>
-                  <TableCell>Source</TableCell>
-                  <TableCell>Message</TableCell>
-                  <TableCell align="right">Actions</TableCell>
+                  <TableCell width="18%">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <CalendarIcon fontSize="small" />
+                      Timestamp
+                    </Box>
+                  </TableCell>
+                  <TableCell width="12%">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <ErrorIcon fontSize="small" />
+                      Level
+                    </Box>
+                  </TableCell>
+                  <TableCell width="15%">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <PersonIcon fontSize="small" />
+                      User
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                      <SourceIcon fontSize="small" />
+                      Message
+                    </Box>
+                  </TableCell>
+                  <TableCell align="right" width="5%">Details</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -315,19 +408,29 @@ function LogsViewer({ showNotification }) {
                   
                   return (
                     <React.Fragment key={log.id || index}>
-                      <TableRow hover>
-                        <TableCell>{formatTimestamp(log.timestamp)}</TableCell>
+                      <TableRow 
+                        hover 
+                        sx={{ 
+                          cursor: 'pointer',
+                          bgcolor: isExpanded ? 'action.hover' : 'inherit'
+                        }}
+                        onClick={() => toggleRowExpanded(log.id || index)}
+                      >
+                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                          {formatTimestamp(log.timestamp)}
+                        </TableCell>
                         <TableCell>{getLogLevelChip(log.level)}</TableCell>
-                        <TableCell>{log.logger || 'Unknown'}</TableCell>
-                        <TableCell>
-                          {log.message?.length > 100 && !isExpanded
-                            ? `${log.message.substring(0, 100)}...`
-                            : log.message}
+                        <TableCell>{getUserDisplay(log.user) || 'System'}</TableCell>
+                        <TableCell sx={{ wordBreak: 'break-word' }}>
+                          {formatMessage(log.message, isExpanded)}
                         </TableCell>
                         <TableCell align="right">
                           <IconButton
                             size="small"
-                            onClick={() => toggleRowExpanded(log.id || index)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleRowExpanded(log.id || index);
+                            }}
                           >
                             {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
                           </IconButton>
@@ -336,69 +439,116 @@ function LogsViewer({ showNotification }) {
                       
                       {isExpanded && (
                         <TableRow>
-                          <TableCell colSpan={5} sx={{ bgcolor: 'rgba(0, 0, 0, 0.02)' }}>
-                            <Box sx={{ p: 2 }}>
-                              <Typography variant="subtitle2" gutterBottom>
-                                Full Message:
-                              </Typography>
-                              <Typography variant="body2" component="pre" sx={{ 
-                                whiteSpace: 'pre-wrap', 
-                                wordBreak: 'break-word',
-                                p: 1,
-                                borderRadius: 1,
-                                border: '1px solid',
-                                borderColor: 'divider',
-                                bgcolor: 'background.paper',
-                                maxHeight: '300px',
-                                overflow: 'auto'
-                              }}>
-                                {log.message}
-                              </Typography>
-                              
-                              {log.stack_trace && (
-                                <>
-                                  <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>
-                                    Stack Trace:
+                          <TableCell colSpan={5} sx={{ bgcolor: 'rgba(0, 0, 0, 0.02)', p: 0 }}>
+                            <Box sx={{ p: 3 }}>
+                              <Grid container spacing={2}>
+                                <Grid item xs={12} md={6}>
+                                  <Typography variant="subtitle2" gutterBottom>
+                                    Event Details
                                   </Typography>
-                                  <Typography variant="body2" component="pre" sx={{ 
-                                    whiteSpace: 'pre-wrap', 
-                                    wordBreak: 'break-word',
-                                    p: 1,
-                                    borderRadius: 1,
-                                    border: '1px solid',
-                                    borderColor: 'divider',
-                                    bgcolor: 'background.paper',
-                                    color: 'error.main',
-                                    maxHeight: '300px',
-                                    overflow: 'auto'
-                                  }}>
-                                    {log.stack_trace}
+                                  <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                                    <Stack spacing={1.5}>
+                                      <Box>
+                                        <Typography variant="caption" color="text.secondary">Timestamp</Typography>
+                                        <Typography variant="body2">{formatTimestamp(log.timestamp)}</Typography>
+                                      </Box>
+                                      <Box>
+                                        <Typography variant="caption" color="text.secondary">Level</Typography>
+                                        <Box>{getLogLevelChip(log.level)}</Box>
+                                      </Box>
+                                      <Box>
+                                        <Typography variant="caption" color="text.secondary">Source</Typography>
+                                        <Typography variant="body2">{log.logger || 'Unknown source'}</Typography>
+                                      </Box>
+                                      {log.ip && (
+                                        <Box>
+                                          <Typography variant="caption" color="text.secondary">IP Address</Typography>
+                                          <Typography variant="body2">{log.ip}</Typography>
+                                        </Box>
+                                      )}
+                                      {log.user && (
+                                        <Box>
+                                          <Typography variant="caption" color="text.secondary">User</Typography>
+                                          <Box sx={{ mt: 0.5 }}>
+                                            {getUserDisplay(log.user)}
+                                            <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                                              ID: {log.user.id} • Role: {log.user.role || 'unknown'}
+                                            </Typography>
+                                          </Box>
+                                        </Box>
+                                      )}
+                                    </Stack>
+                                  </Paper>
+                                </Grid>
+                                <Grid item xs={12} md={6}>
+                                  <Typography variant="subtitle2" gutterBottom>
+                                    Message
                                   </Typography>
-                                </>
-                              )}
-                              
-                              {log.additional_data && (
-                                <>
-                                  <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>
-                                    Additional Data:
-                                  </Typography>
-                                  <Typography variant="body2" component="pre" sx={{ 
-                                    whiteSpace: 'pre-wrap', 
-                                    wordBreak: 'break-word',
-                                    p: 1,
-                                    borderRadius: 1,
-                                    border: '1px solid',
-                                    borderColor: 'divider',
-                                    bgcolor: 'background.paper',
-                                    maxHeight: '300px',
-                                    overflow: 'auto'
-                                  }}>
-                                    {typeof log.additional_data === 'object' 
-                                      ? JSON.stringify(log.additional_data, null, 2)
-                                      : log.additional_data}
-                                  </Typography>
-                                </>
-                              )}
+                                  <Paper variant="outlined" sx={{ p: 2, mb: 2, height: '100%' }}>
+                                    <Typography 
+                                      variant="body2" 
+                                      component="pre" 
+                                      sx={{ 
+                                        whiteSpace: 'pre-wrap', 
+                                        wordBreak: 'break-word',
+                                        overflowY: 'auto',
+                                        maxHeight: '200px',
+                                        fontFamily: 'monospace'
+                                      }}
+                                    >
+                                      {log.message || 'No message content'}
+                                    </Typography>
+                                  </Paper>
+                                </Grid>
+                                
+                                {log.stack_trace && (
+                                  <Grid item xs={12}>
+                                    <Typography variant="subtitle2" gutterBottom>
+                                      Stack Trace
+                                    </Typography>
+                                    <Paper variant="outlined" sx={{ p: 2, bgcolor: 'error.light', color: 'error.dark' }}>
+                                      <Typography 
+                                        variant="body2" 
+                                        component="pre" 
+                                        sx={{ 
+                                          whiteSpace: 'pre-wrap', 
+                                          wordBreak: 'break-word',
+                                          overflowY: 'auto',
+                                          maxHeight: '300px',
+                                          fontFamily: 'monospace'
+                                        }}
+                                      >
+                                        {log.stack_trace}
+                                      </Typography>
+                                    </Paper>
+                                  </Grid>
+                                )}
+                                
+                                {log.additional_data && (
+                                  <Grid item xs={12}>
+                                    <Typography variant="subtitle2" gutterBottom>
+                                      Additional Data
+                                    </Typography>
+                                    <Paper variant="outlined" sx={{ p: 2 }}>
+                                      <Typography 
+                                        variant="body2" 
+                                        component="pre" 
+                                        sx={{ 
+                                          whiteSpace: 'pre-wrap', 
+                                          wordBreak: 'break-word',
+                                          overflowY: 'auto',
+                                          maxHeight: '300px',
+                                          fontFamily: 'monospace'
+                                        }}
+                                      >
+                                        {typeof log.additional_data === 'object' 
+                                          ? JSON.stringify(log.additional_data, null, 2)
+                                          : log.additional_data}
+                                      </Typography>
+                                    </Paper>
+                                  </Grid>
+                                )}
+                              </Grid>
                             </Box>
                           </TableCell>
                         </TableRow>

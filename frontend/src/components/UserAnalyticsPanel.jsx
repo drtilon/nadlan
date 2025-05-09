@@ -1,4 +1,4 @@
-// src/components/UserAnalyticsPanel.jsx - Updated with navigation to AdminAnalytics
+// src/components/UserAnalyticsPanel.jsx - With enhanced tenants and payments sections
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -30,7 +30,16 @@ import {
   FormControl,
   InputLabel,
   Select,
-  MenuItem
+  MenuItem,
+  CardHeader,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
+  ListItemAvatar,
+  Avatar,
+  CardActions,
+  Stack
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -49,10 +58,48 @@ import {
   HourglassEmpty as PendingIcon,
   CalendarToday as CalendarIcon,
   TrendingUp as TrendingUpIcon,
-  SwapHoriz as SwapIcon
+  SwapHoriz as SwapIcon,
+  Payments as PaymentsIcon,
+  LocalAtm as MoneyIcon,
+  Receipt as ReceiptIcon,
+  AccountBalance as BankIcon,
+  AccountCircle as AccountIcon,
+  Phone as PhoneIcon,
+  Email as EmailIcon,
+  Visibility as VisibilityIcon,
+  Sort as SortIcon,
+  DoneAll as DoneAllIcon,
+  Schedule as ScheduleIcon,
+  ArrowUpward as ArrowUpwardIcon,
+  ArrowDownward as ArrowDownwardIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import api, { getUserData } from '../utils/api';
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  Legend,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell
+} from 'recharts';
+
+const COLORS = {
+  primary: '#3b82f6',
+  secondary: '#ef4444',
+  success: '#22c55e',
+  warning: '#f97316',
+  info: '#8b5cf6',
+  muted: '#6b7280',
+  pie: ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#8b5cf6', '#10b981']
+};
 
 function UserAnalyticsPanel({ showNotification }) {
   const [loading, setLoading] = useState(true);
@@ -62,6 +109,7 @@ function UserAnalyticsPanel({ showNotification }) {
   const [filteredApartments, setFilteredApartments] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [filteredTenants, setFilteredTenants] = useState([]);
+  const [tenantPayments, setTenantPayments] = useState([]);
   const [vacantUnits, setVacantUnits] = useState([]);
   const [expiringContracts, setExpiringContracts] = useState([]);
   const [paymentStatus, setPaymentStatus] = useState({
@@ -70,6 +118,11 @@ function UserAnalyticsPanel({ showNotification }) {
     overdue: []
   });
   const [statusFilter, setStatusFilter] = useState('all');
+  const [paymentMonthFilter, setPaymentMonthFilter] = useState('all');
+  const [tenantSortField, setTenantSortField] = useState('name');
+  const [tenantSortDirection, setTenantSortDirection] = useState('asc');
+  const [paymentFilter, setPaymentFilter] = useState('all');
+  
   const navigate = useNavigate();
   
   // Check if user is admin
@@ -96,6 +149,10 @@ function UserAnalyticsPanel({ showNotification }) {
       const tenantsData = tenantsResponse.data || [];
       setTenants(tenantsData);
       setFilteredTenants(tenantsData);
+      
+      // Get tenant payments data
+      const tenantPaymentsResponse = await api.get('/analytics/tenant-payments');
+      setTenantPayments(tenantPaymentsResponse.data || []);
 
       // Process vacant units
       const vacant = apartmentsData.filter(apt => apt.status === 'vacant');
@@ -180,46 +237,6 @@ function UserAnalyticsPanel({ showNotification }) {
     }
   };
 
-  // Filter data based on search term and status filter
-  useEffect(() => {
-    // Filter apartments based on search and status
-    let filtered = apartments;
-    
-    // Apply search filter
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(apt => 
-        apt.address.toLowerCase().includes(term) ||
-        (apt.notes && apt.notes.toLowerCase().includes(term))
-      );
-    }
-    
-    // Apply status filter
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(apt => apt.status === statusFilter);
-    }
-    
-    setFilteredApartments(filtered);
-    
-    // Filter tenants
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
-      const filteredTnts = tenants.filter(tenant => 
-        tenant.name.toLowerCase().includes(term) ||
-        (tenant.email && tenant.email.toLowerCase().includes(term)) ||
-        (tenant.phone && tenant.phone.toLowerCase().includes(term))
-      );
-      setFilteredTenants(filteredTnts);
-    } else {
-      setFilteredTenants(tenants);
-    }
-  }, [searchTerm, apartments, tenants, statusFilter]);
-
-  // Tab change handler
-  const handleTabChange = (event, newIndex) => {
-    setTabIndex(newIndex);
-  };
-
   // Format date for display
   const formatDate = (dateString) => {
     if (!dateString) return 'Not set';
@@ -230,6 +247,17 @@ function UserAnalyticsPanel({ showNotification }) {
       return dateString;
     }
   };
+
+  // Format currency for display
+  const formatCurrency = (amount) =>
+    amount == null
+      ? '$0'
+      : new Intl.NumberFormat('en-US', { 
+          style: 'currency', 
+          currency: 'USD', 
+          minimumFractionDigits: 0, 
+          maximumFractionDigits: 0 
+        }).format(amount);
 
   // Calculate days until contract expiration
   const getDaysUntilExpiration = (dateString) => {
@@ -245,14 +273,157 @@ function UserAnalyticsPanel({ showNotification }) {
     }
   };
 
+  // Filter data based on search term and status filter
+  useEffect(() => {
+    // Filter apartments based on search and status
+    let filtered = apartments;
+    
+    // Apply search filter
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(apt => 
+        (apt.address?.toLowerCase() || '').includes(term) ||
+        (apt.notes?.toLowerCase() || '').includes(term)
+      );
+    }
+    
+    // Apply status filter
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(apt => apt.status === statusFilter);
+    }
+    
+    setFilteredApartments(filtered);
+    
+    // Filter tenants
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      const filteredTnts = tenants.filter(tenant => 
+        (tenant.name?.toLowerCase() || '').includes(term) ||
+        (tenant.email?.toLowerCase() || '').includes(term) ||
+        (tenant.phone?.toLowerCase() || '').includes(term)
+      );
+      setFilteredTenants(filteredTnts);
+    } else {
+      setFilteredTenants(tenants);
+    }
+  }, [searchTerm, apartments, tenants, statusFilter]);
+
+  // Sort tenants based on selected field and direction
+  const getSortedTenants = () => {
+    return [...filteredTenants].sort((a, b) => {
+      let aValue = a[tenantSortField] || '';
+      let bValue = b[tenantSortField] || '';
+      
+      // Special case for payment_ratio which is numeric
+      if (tenantSortField === 'payment_ratio') {
+        aValue = parseFloat(aValue) || 0;
+        bValue = parseFloat(bValue) || 0;
+        return tenantSortDirection === 'asc' ? aValue - bValue : bValue - aValue;
+      }
+      
+      // String comparison for other fields
+      return tenantSortDirection === 'asc' 
+        ? String(aValue).localeCompare(String(bValue))
+        : String(bValue).localeCompare(String(aValue));
+    });
+  };
+
+  // Handle tenant sort
+  const handleTenantSort = (field) => {
+    if (field === tenantSortField) {
+      setTenantSortDirection(tenantSortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setTenantSortField(field);
+      setTenantSortDirection('asc');
+    }
+  };
+  
+  // Get sort icon for tenants table
+  const getTenantSortIcon = (field) => {
+    if (field !== tenantSortField) return null;
+    return tenantSortDirection === 'asc' 
+      ? <ArrowUpwardIcon fontSize="small" /> 
+      : <ArrowDownwardIcon fontSize="small" />;
+  };
+
+  // Filter payments based on status
+  const getFilteredPayments = () => {
+    // Start with all tenant payments
+    let result = tenantPayments;
+    
+    // Filter by month if needed
+    if (paymentMonthFilter !== 'all') {
+      result = result.filter(tenant => 
+        tenant.payment_history?.some(p => p.month === paymentMonthFilter)
+      );
+    }
+    
+    // Filter by payment status if needed
+    if (paymentFilter !== 'all') {
+      result = result.filter(tenant =>
+        tenant.payment_history?.some(p => p.status === paymentFilter)
+      );
+    }
+    
+    // Apply search term
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      result = result.filter(tenant =>
+        (tenant.name?.toLowerCase() || '').includes(term)
+      );
+    }
+    
+    return result;
+  };
+
+  // Generate monthly payment chart data
+  const getMonthlyPaymentChartData = () => {
+    const monthNames = ["January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"];
+    
+    // Initialize data with zeros
+    const data = monthNames.map(month => ({
+      month,
+      paid: 0,
+      partial: 0,
+      unpaid: 0
+    }));
+    
+    // Populate with actual data
+    tenantPayments.forEach(tenant => {
+      if (tenant.payment_history) {
+        tenant.payment_history.forEach(payment => {
+          const monthIndex = monthNames.indexOf(payment.month);
+          if (monthIndex >= 0) {
+            if (payment.status === 'paid') {
+              data[monthIndex].paid += payment.paid || 0;
+            } else if (payment.status === 'partial') {
+              data[monthIndex].partial += payment.paid || 0;
+              data[monthIndex].unpaid += (payment.due - payment.paid) || 0;
+            } else {
+              data[monthIndex].unpaid += payment.due || 0;
+            }
+          }
+        });
+      }
+    });
+    
+    return data;
+  };
+
   // Get payment status color
-  const getStatusColor = (status) => {
+  const getPaymentStatusColor = (status) => {
     switch (status) {
       case 'paid': return 'success';
       case 'partial': return 'warning';
-      case 'not_paid': return 'error';
+      case 'unpaid': return 'error';
       default: return 'default';
     }
+  };
+
+  // Tab change handler
+  const handleTabChange = (event, newIndex) => {
+    setTabIndex(newIndex);
   };
 
   // Navigate to tenant details
@@ -260,11 +431,9 @@ function UserAnalyticsPanel({ showNotification }) {
     navigate(`/tenants/${tenantId}`);
   };
 
-  // Navigate to apartment details (redirect to dashboard with focus on specific apartment)
+  // Navigate to apartment details 
   const handleViewApartment = (apartmentId) => {
-    navigate(`/dashboard`);
-    // In a real implementation, you'd want to pass a state or query param
-    // to focus on the specific apartment in the dashboard
+    navigate(`/dashboard?apartment=${apartmentId}`);
   };
 
   // Navigate to admin analytics
@@ -291,11 +460,12 @@ function UserAnalyticsPanel({ showNotification }) {
             <TrendingUpIcon color="primary" /> Property Dashboard
           </Typography>
           
-          {/* Added button for admins to navigate to Admin Analytics */}
           <Box sx={{ display: 'flex', gap: 2 }}>
-            <IconButton onClick={fetchData} disabled={loading}>
-              <RefreshIcon />
-            </IconButton>
+            <Tooltip title="Refresh Data">
+              <IconButton onClick={fetchData} disabled={loading}>
+                <RefreshIcon />
+              </IconButton>
+            </Tooltip>
             
             {isAdmin && (
               <Button
@@ -319,7 +489,7 @@ function UserAnalyticsPanel({ showNotification }) {
         </Box>
 
         {/* Search and Filter Box */}
-        <Box sx={{ mb: 4, display: 'flex', gap: 2 }}>
+        <Box sx={{ mb: 4, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
           <TextField
             fullWidth
             placeholder="Search apartments, tenants, addresses..."
@@ -362,53 +532,61 @@ function UserAnalyticsPanel({ showNotification }) {
         {/* Overview Cards */}
         <Grid container spacing={3} sx={{ mb: 4 }}>
           <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ bgcolor: 'primary.main', color: 'white', borderRadius: 2 }}>
+            <Card sx={{ bgcolor: COLORS.primary, color: 'white', borderRadius: 2, height: '100%' }}>
               <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <Box>
                     <Typography variant="h5" fontWeight="bold">{apartments.length}</Typography>
                     <Typography variant="body2">Total Properties</Typography>
                   </Box>
-                  <ApartmentIcon fontSize="large" />
+                  <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)' }}>
+                    <ApartmentIcon />
+                  </Avatar>
                 </Box>
               </CardContent>
             </Card>
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ bgcolor: 'success.main', color: 'white', borderRadius: 2 }}>
+            <Card sx={{ bgcolor: COLORS.success, color: 'white', borderRadius: 2, height: '100%' }}>
               <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <Box>
                     <Typography variant="h5" fontWeight="bold">{apartments.filter(apt => apt.status === 'occupied').length}</Typography>
                     <Typography variant="body2">Occupied Properties</Typography>
                   </Box>
-                  <HomeIcon fontSize="large" />
+                  <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)' }}>
+                    <HomeIcon />
+                  </Avatar>
                 </Box>
               </CardContent>
             </Card>
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ bgcolor: 'warning.main', color: 'white', borderRadius: 2 }}>
+            <Card sx={{ bgcolor: COLORS.warning, color: 'white', borderRadius: 2, height: '100%' }}>
               <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <Box>
                     <Typography variant="h5" fontWeight="bold">{vacantUnits.length}</Typography>
                     <Typography variant="body2">Vacant Units</Typography>
                   </Box>
-                  <VacantIcon fontSize="large" />
+                  <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)' }}>
+                    <VacantIcon />
+                  </Avatar>
                 </Box>
               </CardContent>
             </Card>
           </Grid>
           <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{ bgcolor: 'error.main', color: 'white', borderRadius: 2 }}>
+            <Card sx={{ bgcolor: COLORS.info, color: 'white', borderRadius: 2, height: '100%' }}>
               <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <Box>
-                    <Typography variant="h5" fontWeight="bold">{expiringContracts.length}</Typography>
-                    <Typography variant="body2">Contracts Expiring Soon</Typography>
+                    <Typography variant="h5" fontWeight="bold">{tenants.length}</Typography>
+                    <Typography variant="body2">Active Tenants</Typography>
                   </Box>
-                  <RenewalIcon fontSize="large" />
+                  <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)' }}>
+                    <PersonIcon />
+                  </Avatar>
                 </Box>
               </CardContent>
             </Card>
@@ -430,8 +608,8 @@ function UserAnalyticsPanel({ showNotification }) {
             }}
           >
             <Tab icon={<HomeIcon />} iconPosition="start" label="Property Status" />
-            <Tab icon={<WarningIcon />} iconPosition="start" label="Attention Needed" />
             <Tab icon={<PersonIcon />} iconPosition="start" label="Tenant Overview" />
+            <Tab icon={<WarningIcon />} iconPosition="start" label="Attention Needed" />
             <Tab icon={<CalendarIcon />} iconPosition="start" label="Contract Timeline" />
           </Tabs>
           <Divider />
@@ -519,8 +697,392 @@ function UserAnalyticsPanel({ showNotification }) {
           </Box>
         )}
 
-        {/* Attention Needed Tab */}
+        {/* Enhanced Tenant Overview Tab */}
         {tabIndex === 1 && (
+          <Box>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+              <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <PersonIcon color="primary" fontSize="small" />
+                Tenant Overview
+              </Typography>
+              
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <FormControl variant="outlined" size="small" sx={{ minWidth: 150 }}>
+                  <InputLabel>Sort By</InputLabel>
+                  <Select
+                    value={tenantSortField}
+                    onChange={(e) => handleTenantSort(e.target.value)}
+                    label="Sort By"
+                    startAdornment={<SortIcon fontSize="small" sx={{ mr: 1 }} />}
+                  >
+                    <MenuItem value="name">Name</MenuItem>
+                    <MenuItem value="moveInDate">Move-in Date</MenuItem>
+                    <MenuItem value="payment_ratio">Payment Ratio</MenuItem>
+                  </Select>
+                </FormControl>
+                
+                <Tooltip title={tenantSortDirection === 'asc' ? 'Sort Ascending' : 'Sort Descending'}>
+                  <IconButton 
+                    onClick={() => setTenantSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
+                    color="primary"
+                    size="small"
+                  >
+                    {tenantSortDirection === 'asc' ? <ArrowUpwardIcon /> : <ArrowDownwardIcon />}
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            </Box>
+            
+            {filteredTenants.length === 0 ? (
+              <Alert severity="info">No tenants match your search criteria</Alert>
+            ) : (
+              <Grid container spacing={2}>
+                {getSortedTenants().map(tenant => {
+                  // Find tenant's apartment
+                  const tenantApartment = apartments.find(apt => 
+                    apt.id === tenant.apartment_id ||
+                    (Array.isArray(apt.tenants) && apt.tenants.some(t => 
+                      (typeof t === 'object' && t.id === tenant.id) || 
+                      (typeof t === 'string' && t === tenant.name)
+                    ))
+                  );
+                  
+                  // Find tenant's payment history
+                  const tenantPaymentData = tenantPayments.find(tp => tp.id === tenant.id || tp.name === tenant.name);
+                  const paymentRatio = tenantPaymentData?.payment_ratio || 0;
+                  
+                  return (
+                    <Grid item xs={12} md={6} lg={4} key={tenant.id}>
+                      <Card variant="outlined" sx={{ 
+                        borderRadius: 2, 
+                        transition: 'all 0.2s',
+                        '&:hover': { boxShadow: 3 }
+                      }}>
+                        <CardHeader
+                          avatar={
+                            <Avatar sx={{ bgcolor: COLORS.primary }}>
+                              <PersonIcon />
+                            </Avatar>
+                          }
+                          title={
+                            <Typography variant="subtitle1" fontWeight="medium">
+                              {tenant.name}
+                            </Typography>
+                          }
+                          subheader={
+                            tenantApartment ? tenantApartment.address : 'No apartment assigned'
+                          }
+                        />
+                        <Divider />
+                        <CardContent sx={{ pt: 2, pb: 1 }}>
+                          <List dense disablePadding>
+                            {tenant.email && (
+                              <ListItem disablePadding sx={{ pb: 1 }}>
+                                <ListItemIcon sx={{ minWidth: 36 }}>
+                                  <PhoneIcon fontSize="small" color="action" />
+                                </ListItemIcon>
+                                <ListItemText 
+                                  primary={tenant.phone}
+                                  primaryTypographyProps={{ variant: 'body2' }}
+                                />
+                              </ListItem>
+                            )}
+                            <ListItem disablePadding sx={{ pb: 1 }}>
+                              <ListItemIcon sx={{ minWidth: 36 }}>
+                                <CalendarIcon fontSize="small" color="action" />
+                              </ListItemIcon>
+                              <ListItemText 
+                                primary={`Move In: ${formatDate(tenantApartment?.moveInDate || tenant.moveInDate)}`}
+                                primaryTypographyProps={{ variant: 'body2' }}
+                              />
+                            </ListItem>
+                            {tenantPaymentData && (
+                              <ListItem disablePadding>
+                                <ListItemIcon sx={{ minWidth: 36 }}>
+                                  <MoneyIcon fontSize="small" color="action" />
+                                </ListItemIcon>
+                                <ListItemText 
+                                  primary={`Payment: ${formatCurrency(tenantPaymentData.total_paid || 0)} / ${formatCurrency(tenantPaymentData.total_due || 0)}`}
+                                  primaryTypographyProps={{ variant: 'body2' }}
+                                />
+                              </ListItem>
+                            )}
+                          </List>
+                          
+                          {tenantPaymentData && (
+                            <Box sx={{ mt: 2 }}>
+                              <Typography variant="caption" color="text.secondary">
+                                Payment Ratio
+                              </Typography>
+                              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                <LinearProgress
+                                  variant="determinate"
+                                  value={paymentRatio}
+                                  sx={{
+                                    flexGrow: 1,
+                                    height: 8,
+                                    borderRadius: 4,
+                                    mr: 2,
+                                    bgcolor: 'rgba(0,0,0,0.08)',
+                                    '& .MuiLinearProgress-bar': {
+                                      bgcolor: paymentRatio >= 90 ? COLORS.success : 
+                                              paymentRatio >= 75 ? COLORS.warning :
+                                              COLORS.secondary
+                                    }
+                                  }}
+                                />
+                                <Typography variant="body2" fontWeight="medium">
+                                  {paymentRatio}%
+                                </Typography>
+                              </Box>
+                            </Box>
+                          )}
+                        </CardContent>
+                        <Divider />
+                        <CardActions>
+                          <Button 
+                            size="small" 
+                            startIcon={<VisibilityIcon />}
+                            onClick={() => handleViewTenant(tenant.id)}
+                            sx={{ ml: 'auto' }}
+                          >
+                            View Details
+                          </Button>
+                        </CardActions>
+                      </Card>
+                    </Grid>
+                  );
+                })}
+              </Grid>
+            )}
+          </Box>
+        )}
+
+        {/* Enhanced Payments Tab */}
+        {tabIndex === 2 && (
+          <Box>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+              <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <PaymentsIcon color="primary" fontSize="small" />
+                Payment Tracking
+              </Typography>
+              
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <FormControl variant="outlined" size="small" sx={{ minWidth: 150 }}>
+                  <InputLabel>Month</InputLabel>
+                  <Select
+                    value={paymentMonthFilter}
+                    onChange={(e) => setPaymentMonthFilter(e.target.value)}
+                    label="Month"
+                  >
+                    <MenuItem value="all">All Months</MenuItem>
+                    {["January", "February", "March", "April", "May", "June", 
+                      "July", "August", "September", "October", "November", "December"
+                    ].map(month => (
+                      <MenuItem key={month} value={month}>{month}</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <FormControl variant="outlined" size="small" sx={{ minWidth: 150 }}>
+                  <InputLabel>Payment Status</InputLabel>
+                  <Select
+                    value={paymentFilter}
+                    onChange={(e) => setPaymentFilter(e.target.value)}
+                    label="Payment Status"
+                  >
+                    <MenuItem value="all">All Statuses</MenuItem>
+                    <MenuItem value="paid">Paid</MenuItem>
+                    <MenuItem value="partial">Partial</MenuItem>
+                    <MenuItem value="unpaid">Unpaid</MenuItem>
+                  </Select>
+                </FormControl>
+              </Box>
+            </Box>
+            
+            <Grid container spacing={3}>
+              {/* Payment Summary Cards */}
+              <Grid item xs={12} lg={8}>
+                <Paper sx={{ p: 0, borderRadius: 2, overflow: 'hidden' }}>
+                  <Box sx={{ p: 2, bgcolor: COLORS.primary, color: 'white' }}>
+                    <Typography variant="subtitle1" fontWeight="medium">Payment Overview</Typography>
+                  </Box>
+                  <Divider />
+                  
+                  <Box sx={{ height: 320, p: 2 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={getMonthlyPaymentChartData()}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.1)" />
+                        <XAxis dataKey="month" />
+                        <YAxis tickFormatter={(value) => `${value}`} />
+                        <RechartsTooltip formatter={(value) => [`${value}`, '']} />
+                        <Legend />
+                        <Bar 
+                          dataKey="paid" 
+                          name="Paid" 
+                          stackId="a" 
+                          fill={COLORS.success}
+                          radius={[4, 4, 0, 0]}
+                        />
+                        <Bar 
+                          dataKey="partial" 
+                          name="Partial" 
+                          stackId="a" 
+                          fill={COLORS.warning}
+                          radius={[4, 4, 0, 0]}
+                        />
+                        <Bar 
+                          dataKey="unpaid" 
+                          name="Unpaid" 
+                          stackId="a" 
+                          fill={COLORS.secondary}
+                          radius={[4, 4, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </Box>
+                </Paper>
+              </Grid>
+              
+              {/* Payment Stats Cards */}
+              <Grid item xs={12} lg={4}>
+                <Grid container spacing={2}>
+                  <Grid item xs={12}>
+                    <Card sx={{ bgcolor: COLORS.success, color: 'white', borderRadius: 2 }}>
+                      <CardContent>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="subtitle2">Paid</Typography>
+                          <DoneAllIcon />
+                        </Box>
+                        <Typography variant="h5" sx={{ mt: 1, fontWeight: 'bold' }}>
+                          {paymentStatus.paid.length} properties
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Card sx={{ bgcolor: COLORS.warning, color: 'white', borderRadius: 2 }}>
+                      <CardContent>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="subtitle2">Pending</Typography>
+                          <ScheduleIcon />
+                        </Box>
+                        <Typography variant="h5" sx={{ mt: 1, fontWeight: 'bold' }}>
+                          {paymentStatus.pending.length} properties
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Card sx={{ bgcolor: COLORS.secondary, color: 'white', borderRadius: 2 }}>
+                      <CardContent>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Typography variant="subtitle2">Overdue</Typography>
+                          <WarningIcon />
+                        </Box>
+                        <Typography variant="h5" sx={{ mt: 1, fontWeight: 'bold' }}>
+                          {paymentStatus.overdue.length} properties
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+              </Grid>
+              
+              {/* Payment Table */}
+              <Grid item xs={12}>
+                <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
+                  <Table>
+                    <TableHead>
+                      <TableRow sx={{ bgcolor: 'rgba(0,0,0,0.03)' }}>
+                        <TableCell>Tenant</TableCell>
+                        <TableCell>Property</TableCell>
+                        <TableCell>Month</TableCell>
+                        <TableCell align="right">Amount Due</TableCell>
+                        <TableCell align="right">Amount Paid</TableCell>
+                        <TableCell align="center">Status</TableCell>
+                        <TableCell align="right">Actions</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {getFilteredPayments().length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={7} align="center">
+                            <Alert severity="info">No payment data matches your search criteria</Alert>
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        getFilteredPayments().flatMap(tenant => 
+                          (tenant.payment_history || [])
+                            .filter(payment => 
+                              paymentMonthFilter === 'all' || payment.month === paymentMonthFilter
+                            )
+                            .filter(payment => 
+                              paymentFilter === 'all' || payment.status === paymentFilter
+                            )
+                            .map((payment, idx) => {
+                              // Find tenant's apartment
+                              const tenantApartment = apartments.find(apt => 
+                                apt.id === tenant.apartment_id || 
+                                (Array.isArray(apt.tenants) && apt.tenants.some(t => 
+                                  (typeof t === 'object' && t.id === tenant.id) || 
+                                  (typeof t === 'string' && t === tenant.name)
+                                ))
+                              );
+                              
+                              return (
+                                <TableRow key={`${tenant.id}-${payment.month}-${idx}`} hover>
+                                  <TableCell>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                      <PersonIcon fontSize="small" color="primary" />
+                                      <Typography variant="body2" fontWeight="medium">
+                                        {tenant.name}
+                                      </Typography>
+                                    </Box>
+                                  </TableCell>
+                                  <TableCell>
+                                    {tenantApartment ? tenantApartment.address : 'N/A'}
+                                  </TableCell>
+                                  <TableCell>
+                                    {payment.month}
+                                  </TableCell>
+                                  <TableCell align="right">
+                                    {formatCurrency(payment.due)}
+                                  </TableCell>
+                                  <TableCell align="right">
+                                    {formatCurrency(payment.paid)}
+                                  </TableCell>
+                                  <TableCell align="center">
+                                    <Chip
+                                      label={payment.status}
+                                      size="small"
+                                      color={getPaymentStatusColor(payment.status)}
+                                    />
+                                  </TableCell>
+                                  <TableCell align="right">
+                                    <Button
+                                      variant="outlined"
+                                      size="small"
+                                      endIcon={<ArrowForwardIcon />}
+                                      onClick={() => handleViewTenant(tenant.id)}
+                                    >
+                                      Details
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })
+                        )
+                      )}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </Grid>
+            </Grid>
+          </Box>
+        )}
+
+        {/* Attention Needed Tab */}
+        {tabIndex === 3 && (
           <Box>
             <Grid container spacing={3}>
               {/* Vacant Units */}
@@ -530,7 +1092,7 @@ function UserAnalyticsPanel({ showNotification }) {
                   Vacant Properties
                 </Typography>
                 
-                <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+                <Paper variant="outlined" sx={{ p: 2, mb: 3, borderRadius: 2 }}>
                   {vacantUnits.length === 0 ? (
                     <Alert severity="success">No vacant properties at the moment</Alert>
                   ) : (
@@ -574,7 +1136,7 @@ function UserAnalyticsPanel({ showNotification }) {
                   Contracts Expiring Soon
                 </Typography>
                 
-                <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+                <Paper variant="outlined" sx={{ p: 2, mb: 3, borderRadius: 2 }}>
                   {expiringContracts.length === 0 ? (
                     <Alert severity="success">No contracts expiring in the next 30 days</Alert>
                   ) : (
@@ -625,7 +1187,7 @@ function UserAnalyticsPanel({ showNotification }) {
                   Payment Status
                 </Typography>
                 
-                <Paper variant="outlined" sx={{ p: 2 }}>
+                <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
                   {paymentStatus.overdue.length === 0 && paymentStatus.pending.length === 0 ? (
                     <Alert severity="success">All payments are up to date</Alert>
                   ) : (
@@ -703,114 +1265,6 @@ function UserAnalyticsPanel({ showNotification }) {
           </Box>
         )}
 
-        {/* Tenant Overview Tab */}
-        {tabIndex === 2 && (
-          <Box>
-            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <PersonIcon color="primary" fontSize="small" />
-              Tenant Overview
-            </Typography>
-            
-            <TableContainer component={Paper} variant="outlined">
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Tenant Name</TableCell>
-                    <TableCell>Contact Information</TableCell>
-                    <TableCell>Assigned Property</TableCell>
-                    <TableCell>Move-in Date</TableCell>
-                    <TableCell align="right">Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {filteredTenants.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} align="center">
-                        <Alert severity="info">No tenants match your search criteria</Alert>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredTenants.map(tenant => {
-                      // Find tenant's apartment
-                      const tenantApartment = apartments.find(apt => 
-                        apt.id === tenant.apartment_id ||
-                        (Array.isArray(apt.tenants) && apt.tenants.some(t => 
-                          (typeof t === 'object' && t.id === tenant.id) || 
-                          (typeof t === 'string' && t === tenant.name)
-                        ))
-                      );
-                      
-                      return (
-                        <TableRow key={tenant.id} hover sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
-                          <TableCell>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <PersonIcon color="primary" fontSize="small" />
-                              <Typography variant="body2" fontWeight="medium">
-                                {tenant.name}
-                              </Typography>
-                            </Box>
-                          </TableCell>
-                          <TableCell>
-                            <Box>
-                              {tenant.email && (
-                                <Typography variant="body2">
-                                  {tenant.email}
-                                </Typography>
-                              )}
-                              {tenant.phone && (
-                                <Typography variant="body2">
-                                  {tenant.phone}
-                                </Typography>
-                              )}
-                              {!tenant.email && !tenant.phone && (
-                                <Typography variant="body2" color="text.secondary">
-                                  No contact information
-                                </Typography>
-                              )}
-                            </Box>
-                          </TableCell>
-                          <TableCell>
-                            {tenantApartment ? (
-                              <Chip 
-                                icon={<HomeIcon />}
-                                label={tenantApartment.address}
-                                size="small"
-                                color="primary"
-                                variant="outlined"
-                              />
-                            ) : (
-                              <Chip 
-                                label="Not Assigned"
-                                size="small"
-                                variant="outlined"
-                              />
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {tenantApartment?.moveInDate ? 
-                              formatDate(tenantApartment.moveInDate) : 
-                              'Not specified'}
-                          </TableCell>
-                          <TableCell align="right">
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              endIcon={<ArrowForwardIcon />}
-                              onClick={() => handleViewTenant(tenant.id)}
-                            >
-                              Details
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
-        )}
-
         {/* Contract Timeline Tab */}
         {tabIndex === 3 && (
           <Box>
@@ -822,10 +1276,10 @@ function UserAnalyticsPanel({ showNotification }) {
             {apartments.filter(apt => apt.contractEndDate).length === 0 ? (
               <Alert severity="info">No contract end dates found for any properties</Alert>
             ) : (
-              <TableContainer component={Paper} variant="outlined">
+              <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
                 <Table>
                   <TableHead>
-                    <TableRow>
+                    <TableRow sx={{ bgcolor: 'rgba(0,0,0,0.03)' }}>
                       <TableCell>Property</TableCell>
                       <TableCell>Tenant(s)</TableCell>
                       <TableCell>Move-in Date</TableCell>

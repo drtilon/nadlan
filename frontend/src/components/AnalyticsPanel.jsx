@@ -1,4 +1,3 @@
-// components/AnalyticsPanel.jsx - Updated with navigation to UserAnalyticsPanel
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Container,
@@ -11,13 +10,6 @@ import {
   CircularProgress,
   IconButton,
   Button,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  LinearProgress,
   Alert,
   TextField,
   InputAdornment,
@@ -29,20 +21,25 @@ import {
   Select,
   MenuItem,
   Card,
-  CardContent
+  CardContent,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
   Apartment as ApartmentIcon,
-  Person as PersonIcon,
   AttachMoney as MoneyIcon,
   TrendingUp as TrendingUpIcon,
   Search as SearchIcon,
   Payments as PaymentsIcon,
-  ArrowUpward as ArrowUpwardIcon,
-  ArrowDownward as ArrowDownwardIcon,
-  Dashboard as DashboardIcon,
-  SwapHoriz as SwapIcon
+  SwapHoriz as SwapIcon,
+  DoneAll as DoneAllIcon,
+  Warning as WarningIcon,
+  HourglassEmpty as PendingIcon
 } from '@mui/icons-material';
 import {
   BarChart,
@@ -85,13 +82,19 @@ function AnalyticsPanel({ showNotification }) {
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortField, setSortField] = useState('address');
   const [sortDirection, setSortDirection] = useState('asc');
+  const [paymentMonthFilter, setPaymentMonthFilter] = useState('all');
+  const [paymentFilter, setPaymentFilter] = useState('all');
   const navigate = useNavigate();
+
+  const handleGoToUserAnalytics = useCallback(() => {
+    navigate('/user-analytics');
+  }, [navigate]);
 
   const fetchAnalytics = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [summaryResponse, trendsResponse, apartmentResponse, tenantResponse] = await Promise.all([
+      const [summaryResponse, trendsResponse, apartmentResponse, tenantPaymentsResponse] = await Promise.all([
         api.get('/analytics/summary'),
         api.get('/analytics/payment-trends'),
         api.get('/analytics/apartment-metrics'),
@@ -101,7 +104,7 @@ function AnalyticsPanel({ showNotification }) {
       setSummaryData(summaryResponse.data);
       setPaymentTrends(trendsResponse.data || []);
       setApartmentMetrics(apartmentResponse.data || []);
-      setTenantPayments(tenantResponse.data || []);
+      setTenantPayments(tenantPaymentsResponse.data || []);
     } catch (err) {
       console.error('Error fetching analytics:', err);
       setError('Failed to load analytics data.');
@@ -120,11 +123,6 @@ function AnalyticsPanel({ showNotification }) {
       ? '$0'
       : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amount);
 
-  const formatDate = (dateString) =>
-    !dateString
-      ? 'N/A'
-      : new Date(dateString).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-
   const getPaymentStatusPieData = useMemo(() => {
     if (!summaryData?.payment_status) return [];
     return [
@@ -137,18 +135,6 @@ function AnalyticsPanel({ showNotification }) {
   const calculateTotalNetProfit = useMemo(() => {
     if (!apartmentMetrics?.length) return 0;
     return apartmentMetrics.reduce((sum, apt) => sum + (apt.netProfit || 0), 0);
-  }, [apartmentMetrics]);
-
-  const tenantApartmentMap = useMemo(() => {
-    const map = {};
-    apartmentMetrics.forEach(apt => {
-      if (apt.tenants) {
-        apt.tenants.forEach(tenant => {
-          map[tenant.name] = apt.address;
-        });
-      }
-    });
-    return map;
   }, [apartmentMetrics]);
 
   const getFilteredSortedApartments = useMemo(() => {
@@ -188,22 +174,49 @@ function AnalyticsPanel({ showNotification }) {
     setSortDirection(prev => sortField === field ? (prev === 'asc' ? 'desc' : 'asc') : 'asc');
   }, [sortField]);
 
-  const getSortIcon = (field) => {
-    if (sortField !== field) return null;
-    return sortDirection === 'asc' ? <ArrowUpwardIcon fontSize="small" /> : <ArrowDownwardIcon fontSize="small" />;
+  // Generate monthly payment chart data
+  const getMonthlyPaymentChartData = () => {
+    const monthNames = ["January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"];
+    
+    // Initialize data with zeros
+    const data = monthNames.map(month => ({
+      month,
+      paid: 0,
+      partial: 0,
+      unpaid: 0
+    }));
+    
+    // Populate with actual data
+    tenantPayments.forEach(tenant => {
+      if (tenant.payment_history) {
+        tenant.payment_history.forEach(payment => {
+          const monthIndex = monthNames.indexOf(payment.month);
+          if (monthIndex >= 0) {
+            if (payment.status === 'paid') {
+              data[monthIndex].paid += payment.paid || 0;
+            } else if (payment.status === 'partial') {
+              data[monthIndex].partial += payment.paid || 0;
+              data[monthIndex].unpaid += (payment.due - payment.paid) || 0;
+            } else {
+              data[monthIndex].unpaid += payment.due || 0;
+            }
+          }
+        });
+      }
+    });
+    
+    return data;
   };
 
-  const filteredTenants = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    return tenantPayments.filter(tenant =>
-      (tenant.name || '').toLowerCase().includes(term) ||
-      tenant.payment_history?.some(p => (p.month || '').toLowerCase().includes(term))
-    );
-  }, [tenantPayments, searchTerm]);
-
-  // Navigate to user analytics view
-  const handleGoToUserAnalytics = () => {
-    navigate('/user-analytics');
+  // Get payment status color
+  const getPaymentStatusColor = (status) => {
+    switch (status) {
+      case 'paid': return 'success';
+      case 'partial': return 'warning';
+      case 'unpaid': return 'error';
+      default: return 'default';
+    }
   };
 
   return (
@@ -222,7 +235,6 @@ function AnalyticsPanel({ showNotification }) {
           <TrendingUpIcon fontSize="large" /> Admin Analytics Dashboard
         </Typography>
         
-        {/* Added button to navigate to User Analytics */}
         <Button
           variant="contained"
           color="primary"
@@ -319,12 +331,16 @@ function AnalyticsPanel({ showNotification }) {
                 <CardContent>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Box>
-                      <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>Total Tenants</Typography>
-                      <Typography variant="h4" sx={{ fontWeight: 600 }}>{summaryData?.total_tenants || 0}</Typography>
-                      <Typography variant="body2" sx={{ mt: 1 }}>Active leases</Typography>
+                      <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>Total Revenue</Typography>
+                      <Typography variant="h4" sx={{ fontWeight: 600 }}>
+                        {formatCurrency(
+                          paymentTrends.reduce((sum, month) => sum + (month.collected || 0), 0)
+                        )}
+                      </Typography>
+                      <Typography variant="body2" sx={{ mt: 1 }}>Year to date</Typography>
                     </Box>
                     <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 48, height: 48 }}>
-                      <PersonIcon fontSize="large" />
+                      <MoneyIcon fontSize="large" />
                     </Avatar>
                   </Box>
                 </CardContent>
@@ -336,7 +352,7 @@ function AnalyticsPanel({ showNotification }) {
           <Box sx={{ mb: 4, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
             <TextField
               variant="outlined"
-              placeholder="Search by apartment, tenant, or amount..."
+              placeholder="Search by apartment or amount..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               sx={{
@@ -400,7 +416,6 @@ function AnalyticsPanel({ showNotification }) {
           >
             <Tab label="Overview" icon={<TrendingUpIcon />} iconPosition="start" />
             <Tab label="Apartments" icon={<ApartmentIcon />} iconPosition="start" />
-            <Tab label="Tenants" icon={<PersonIcon />} iconPosition="start" />
             <Tab label="Payments" icon={<PaymentsIcon />} iconPosition="start" />
           </Tabs>
 
@@ -483,7 +498,6 @@ function AnalyticsPanel({ showNotification }) {
                         >
                           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: align === 'right' ? 'flex-end' : 'flex-start' }}>
                             <Typography fontWeight={600}>{label}</Typography>
-                            {getSortIcon(key)}
                           </Box>
                         </TableCell>
                       ))}
@@ -531,138 +545,169 @@ function AnalyticsPanel({ showNotification }) {
             </Paper>
           )}
 
-          {/* Tenants Tab */}
-          {tabIndex === 2 && (
-            <Paper sx={{ p: 3, borderRadius: 3, boxShadow: 2 }}>
-              <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: COLORS.primary }}>
-                Tenant Payment Overview
-              </Typography>
-              <TableContainer>
-                <Table aria-label="tenant payment overview table">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell><Typography fontWeight={600}>Tenant</Typography></TableCell>
-                      <TableCell><Typography fontWeight={600}>Apartment</Typography></TableCell>
-                      <TableCell align="right"><Typography fontWeight={600}>Total Paid</Typography></TableCell>
-                      <TableCell align="right"><Typography fontWeight={600}>Total Due</Typography></TableCell>
-                      <TableCell align="center"><Typography fontWeight={600}>Payment Ratio</Typography></TableCell>
-                      <TableCell align="right"><Typography fontWeight={600}>Actions</Typography></TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {filteredTenants.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} align="center">
-                          <Alert severity="info">No tenants match your search criteria</Alert>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      filteredTenants.map(tenant => (
-                        <TableRow key={tenant.id || tenant.name} hover sx={{ '&:hover': { bgcolor: '#f9fafb' } }}>
-                          <TableCell>{tenant.name || 'Unknown'}</TableCell>
-                          <TableCell>{tenantApartmentMap[tenant.name] || 'N/A'}</TableCell>
-                          <TableCell align="right">{formatCurrency(tenant.total_paid)}</TableCell>
-                          <TableCell align="right">{formatCurrency(tenant.total_due)}</TableCell>
-                          <TableCell align="center">
-                            <LinearProgress
-                              variant="determinate"
-                              value={tenant.payment_ratio || 0}
-                              sx={{
-                                width: '80%',
-                                height: 6,
-                                borderRadius: 3,
-                                bgcolor: '#e5e7eb',
-                                '& .MuiLinearProgress-bar': {
-                                  bgcolor: (tenant.payment_ratio || 0) >= 90 ? COLORS.success :
-                                          (tenant.payment_ratio || 0) >= 50 ? COLORS.warning : COLORS.secondary
-                                }
-                              }}
-                            />
-                            <Typography variant="caption" sx={{ ml: 1 }}>{tenant.payment_ratio || 0}%</Typography>
-                          </TableCell>
-                          <TableCell align="right">
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              sx={{ borderColor: COLORS.primary, color: COLORS.primary }}
-                              onClick={() => tenant.id && navigate(`/tenants/${tenant.id}`)}
-                              disabled={!tenant.id}
-                              aria-label={`View details for ${tenant.name}`}
-                            >
-                              View
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Paper>
-          )}
-
           {/* Payments Tab */}
-          {tabIndex === 3 && (
-            <Paper sx={{ p: 3, borderRadius: 3, boxShadow: 2 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6" sx={{ fontWeight: 600, color: COLORS.primary }}>
-                  Payment History
+          {tabIndex === 2 && (
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, fontWeight: 600, color: COLORS.primary }}>
+                  <PaymentsIcon /> Payment Management
                 </Typography>
-                <Button
-                  variant="contained"
-                  startIcon={<PaymentsIcon />}
-                  sx={{ bgcolor: COLORS.primary, '&:hover': { bgcolor: '#2563eb' } }}
-                  onClick={() => navigate('/payments')}
-                  aria-label="Manage payments"
-                >
-                  Manage Payments
-                </Button>
+                
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <FormControl variant="outlined" size="small" sx={{ minWidth: 150 }}>
+                    <InputLabel>Month</InputLabel>
+                    <Select
+                      value={paymentMonthFilter}
+                      onChange={(e) => setPaymentMonthFilter(e.target.value)}
+                      label="Month"
+                    >
+                      <MenuItem value="all">All Months</MenuItem>
+                      {["January", "February", "March", "April", "May", "June", 
+                        "July", "August", "September", "October", "November", "December"
+                      ].map(month => (
+                        <MenuItem key={month} value={month}>{month}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <FormControl variant="outlined" size="small" sx={{ minWidth: 150 }}>
+                    <InputLabel>Payment Status</InputLabel>
+                    <Select
+                      value={paymentFilter}
+                      onChange={(e) => setPaymentFilter(e.target.value)}
+                      label="Payment Status"
+                    >
+                      <MenuItem value="all">All Statuses</MenuItem>
+                      <MenuItem value="paid">Paid</MenuItem>
+                      <MenuItem value="partial">Partial</MenuItem>
+                      <MenuItem value="unpaid">Unpaid</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
               </Box>
-              <TableContainer>
-                <Table aria-label="payment history table">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell><Typography fontWeight={600}>Tenant</Typography></TableCell>
-                      <TableCell><Typography fontWeight={600}>Month</Typography></TableCell>
-                      <TableCell align="right"><Typography fontWeight={600}>Amount Due</Typography></TableCell>
-                      <TableCell align="right"><Typography fontWeight={600}>Amount Paid</Typography></TableCell>
-                      <TableCell align="center"><Typography fontWeight={600}>Status</Typography></TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {filteredTenants.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={5} align="center">
-                          <Alert severity="info">No payment history matches your search criteria</Alert>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      filteredTenants.flatMap(tenant =>
-                        (tenant.payment_history || []).map((payment, index) => (
-                          <TableRow key={`${tenant.id || tenant.name}-${index}`} hover sx={{ '&:hover': { bgcolor: '#f9fafb' } }}>
-                            <TableCell>{tenant.name || 'Unknown'}</TableCell>
-                            <TableCell>{payment.month || 'N/A'}</TableCell>
-                            <TableCell align="right">{formatCurrency(payment.due)}</TableCell>
-                            <TableCell align="right">{formatCurrency(payment.paid)}</TableCell>
-                            <TableCell align="center">
-                              <Chip
-                                label={payment.status === 'paid' ? 'Paid' :
-                                      payment.status === 'partial' ? 'Partial' :
-                                      payment.status === 'unpaid' ? 'Unpaid' : 'Unknown'}
-                                color={payment.status === 'paid' ? 'success' :
-                                      payment.status === 'partial' ? 'warning' :
-                                      payment.status === 'unpaid' ? 'error' : 'default'}
-                                size="small"
-                              />
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      )
-                    )}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Paper>
+              
+              <Grid container spacing={3}>
+                {/* Payment Overview Chart */}
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 3, borderRadius: 3, boxShadow: 2 }}>
+                    <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: COLORS.primary }}>
+                      Monthly Payment Overview
+                    </Typography>
+                    <Box sx={{ height: 400 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={getMonthlyPaymentChartData()}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.1)" />
+                          <XAxis dataKey="month" />
+                          <YAxis tickFormatter={(value) => formatCurrency(value)} />
+                          <RechartsTooltip formatter={(value) => [formatCurrency(value), '']} />
+                          <Legend />
+                          <Bar 
+                            dataKey="paid" 
+                            name="Paid" 
+                            stackId="a" 
+                            fill={COLORS.success}
+                            radius={[4, 4, 0, 0]}
+                          />
+                          <Bar 
+                            dataKey="partial" 
+                            name="Partial" 
+                            stackId="a" 
+                            fill={COLORS.warning}
+                            radius={[4, 4, 0, 0]}
+                          />
+                          <Bar 
+                            dataKey="unpaid" 
+                            name="Unpaid" 
+                            stackId="a" 
+                            fill={COLORS.secondary}
+                            radius={[4, 4, 0, 0]}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </Box>
+                  </Paper>
+                </Grid>
+                
+                {/* Payment Stats */}
+                <Grid item xs={12}>
+                  <Grid container spacing={3}>
+                    <Grid item xs={12} md={4}>
+                      <Card sx={{ bgcolor: COLORS.success, color: 'white', borderRadius: 2, height: '100%' }}>
+                        <CardContent>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Box>
+                              <Typography variant="subtitle2">Paid Payments</Typography>
+                              <Typography variant="h4" sx={{ mt: 1, fontWeight: 600 }}>
+                                {formatCurrency(
+                                  getMonthlyPaymentChartData().reduce((sum, item) => sum + item.paid, 0)
+                                )}
+                              </Typography>
+                              <Typography variant="body2" sx={{ mt: 1, opacity: 0.8 }}>
+                                {tenantPayments.filter(tenant => 
+                                  tenant.payment_history?.some(p => p.status === 'paid')
+                                ).length} tenants
+                              </Typography>
+                            </Box>
+                            <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 48, height: 48 }}>
+                              <DoneAllIcon fontSize="large" />
+                            </Avatar>
+                          </Box>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                    
+                    <Grid item xs={12} md={4}>
+                      <Card sx={{ bgcolor: COLORS.warning, color: 'white', borderRadius: 2, height: '100%' }}>
+                        <CardContent>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Box>
+                              <Typography variant="subtitle2">Partial Payments</Typography>
+                              <Typography variant="h4" sx={{ mt: 1, fontWeight: 600 }}>
+                                {formatCurrency(
+                                  getMonthlyPaymentChartData().reduce((sum, item) => sum + item.partial, 0)
+                                )}
+                              </Typography>
+                              <Typography variant="body2" sx={{ mt: 1, opacity: 0.8 }}>
+                                {tenantPayments.filter(tenant => 
+                                  tenant.payment_history?.some(p => p.status === 'partial')
+                                ).length} tenants
+                              </Typography>
+                            </Box>
+                            <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 48, height: 48 }}>
+                              <PendingIcon fontSize="large" />
+                            </Avatar>
+                          </Box>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                    
+                    <Grid item xs={12} md={4}>
+                      <Card sx={{ bgcolor: COLORS.secondary, color: 'white', borderRadius: 2, height: '100%' }}>
+                        <CardContent>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Box>
+                              <Typography variant="subtitle2">Unpaid Amount</Typography>
+                              <Typography variant="h4" sx={{ mt: 1, fontWeight: 600 }}>
+                                {formatCurrency(
+                                  getMonthlyPaymentChartData().reduce((sum, item) => sum + item.unpaid, 0)
+                                )}
+                              </Typography>
+                              <Typography variant="body2" sx={{ mt: 1, opacity: 0.8 }}>
+                                {tenantPayments.filter(tenant => 
+                                  tenant.payment_history?.some(p => p.status === 'unpaid')
+                                ).length} tenants
+                              </Typography>
+                            </Box>
+                            <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 48, height: 48 }}>
+                              <WarningIcon fontSize="large" />
+                            </Avatar>
+                          </Box>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  </Grid>
+                </Grid>
+              </Grid>
+            </Box>
           )}
         </>
       )}

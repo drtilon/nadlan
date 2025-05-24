@@ -859,7 +859,7 @@ function UserAnalyticsPanel({ showNotification }) {
           </Box>
         )}
 
-        {/* Enhanced Payments Tab */}
+        {/* Redesigned Payment Tracking Tab */}
         {tabIndex === 2 && (
           <Box>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -869,49 +869,201 @@ function UserAnalyticsPanel({ showNotification }) {
               </Typography>
               
               <Box sx={{ display: 'flex', gap: 2 }}>
-                <FormControl variant="outlined" size="small" sx={{ minWidth: 150 }}>
+                <FormControl variant="outlined" size="small" sx={{ minWidth: 120 }}>
                   <InputLabel>Month</InputLabel>
                   <Select
                     value={paymentMonthFilter}
                     onChange={(e) => setPaymentMonthFilter(e.target.value)}
                     label="Month"
                   >
-                    <MenuItem value="all">All Months</MenuItem>
-                    {["January", "February", "March", "April", "May", "June", 
-                      "July", "August", "September", "October", "November", "December"
-                    ].map(month => (
-                      <MenuItem key={month} value={month}>{month}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <FormControl variant="outlined" size="small" sx={{ minWidth: 150 }}>
-                  <InputLabel>Payment Status</InputLabel>
-                  <Select
-                    value={paymentFilter}
-                    onChange={(e) => setPaymentFilter(e.target.value)}
-                    label="Payment Status"
-                  >
-                    <MenuItem value="all">All Statuses</MenuItem>
-                    <MenuItem value="paid">Paid</MenuItem>
-                    <MenuItem value="partial">Partial</MenuItem>
-                    <MenuItem value="unpaid">Unpaid</MenuItem>
+                    <MenuItem value="current">Current Month</MenuItem>
+                    <MenuItem value="January">January</MenuItem>
+                    <MenuItem value="February">February</MenuItem>
+                    <MenuItem value="March">March</MenuItem>
+                    <MenuItem value="April">April</MenuItem>
+                    <MenuItem value="May">May</MenuItem>
+                    <MenuItem value="June">June</MenuItem>
+                    <MenuItem value="July">July</MenuItem>
+                    <MenuItem value="August">August</MenuItem>
+                    <MenuItem value="September">September</MenuItem>
+                    <MenuItem value="October">October</MenuItem>
+                    <MenuItem value="November">November</MenuItem>
+                    <MenuItem value="December">December</MenuItem>
                   </Select>
                 </FormControl>
               </Box>
             </Box>
-            
+
             <Grid container spacing={3}>
-              {/* Payment Summary Cards */}
-              <Grid item xs={12} lg={8}>
+              {/* Current Month Summary Cards */}
+              <Grid item xs={12}>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={3}>
+                    <Card sx={{ bgcolor: COLORS.success, color: 'white', borderRadius: 2 }}>
+                      <CardContent sx={{ py: 2 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Box>
+                            <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                              {paymentStatus.paid.length}
+                            </Typography>
+                            <Typography variant="body2">Paid This Month</Typography>
+                          </Box>
+                          <DoneAllIcon />
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} sm={3}>
+                    <Card sx={{ bgcolor: COLORS.warning, color: 'white', borderRadius: 2 }}>
+                      <CardContent sx={{ py: 2 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Box>
+                            <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                              {paymentStatus.pending.length}
+                            </Typography>
+                            <Typography variant="body2">Pending</Typography>
+                          </Box>
+                          <ScheduleIcon />
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} sm={3}>
+                    <Card sx={{ bgcolor: COLORS.secondary, color: 'white', borderRadius: 2 }}>
+                      <CardContent sx={{ py: 2 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Box>
+                            <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                              {paymentStatus.overdue.length}
+                            </Typography>
+                            <Typography variant="body2">Overdue</Typography>
+                          </Box>
+                          <WarningIcon />
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                  <Grid item xs={12} sm={3}>
+                    <Card sx={{ bgcolor: COLORS.info, color: 'white', borderRadius: 2 }}>
+                      <CardContent sx={{ py: 2 }}>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Box>
+                            <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+                              {formatCurrency(
+                                apartments
+                                  .filter(apt => apt.status === 'occupied')
+                                  .reduce((total, apt) => total + (parseFloat(apt.rent) || 0), 0)
+                              )}
+                            </Typography>
+                            <Typography variant="body2">Expected</Typography>
+                          </Box>
+                          <MoneyIcon />
+                        </Box>
+                      </CardContent>
+                    </Card>
+                  </Grid>
+                </Grid>
+              </Grid>
+
+              {/* Property Payment Status - Compact View */}
+              <Grid item xs={12}>
+                <Paper sx={{ borderRadius: 2, overflow: 'hidden' }}>
+                  <Box sx={{ p: 2, bgcolor: 'grey.50', borderBottom: '1px solid', borderColor: 'divider' }}>
+                    <Typography variant="subtitle1" fontWeight="medium">
+                      Property Payment Status - {paymentMonthFilter === 'current' ? 
+                        new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 
+                        paymentMonthFilter}
+                    </Typography>
+                  </Box>
+                  
+                  <Box sx={{ p: 2 }}>
+                    {apartments.filter(apt => apt.status === 'occupied').length === 0 ? (
+                      <Alert severity="info">No occupied properties found</Alert>
+                    ) : (
+                      <Grid container spacing={2}>
+                        {apartments
+                          .filter(apt => apt.status === 'occupied')
+                          .map(apartment => {
+                            // Determine payment status for this apartment
+                            let status = 'pending';
+                            let statusColor = 'warning';
+                            
+                            if (paymentStatus.paid.some(apt => apt.id === apartment.id)) {
+                              status = 'paid';
+                              statusColor = 'success';
+                            } else if (paymentStatus.overdue.some(apt => apt.id === apartment.id)) {
+                              status = 'overdue';
+                              statusColor = 'error';
+                            }
+
+                            return (
+                              <Grid item xs={12} sm={6} md={4} lg={3} key={apartment.id}>
+                                <Card 
+                                  variant="outlined" 
+                                  sx={{ 
+                                    borderRadius: 2,
+                                    cursor: 'pointer',
+                                    transition: 'all 0.2s',
+                                    '&:hover': { 
+                                      boxShadow: 3,
+                                      transform: 'translateY(-2px)'
+                                    }
+                                  }}
+                                  onClick={() => handleViewApartment(apartment.id)}
+                                >
+                                  <CardContent sx={{ p: 2 }}>
+                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                                      <Typography variant="subtitle2" sx={{ fontWeight: 'medium' }}>
+                                        {apartment.address}
+                                      </Typography>
+                                      <Chip 
+                                        label={status}
+                                        size="small"
+                                        color={statusColor}
+                                        sx={{ fontSize: '0.75rem' }}
+                                      />
+                                    </Box>
+                                    
+                                    <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                                      {Array.isArray(apartment.tenants) ? 
+                                        apartment.tenants.map(tenant => 
+                                          typeof tenant === 'object' ? 
+                                            (tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim()) : 
+                                            tenant
+                                        ).join(', ') : 
+                                        apartment.tenants || 'No tenants'}
+                                    </Typography>
+                                    
+                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <Typography variant="body2" fontWeight="medium">
+                                        {formatCurrency(apartment.rent)}
+                                      </Typography>
+                                      <ArrowForwardIcon fontSize="small" color="action" />
+                                    </Box>
+                                  </CardContent>
+                                </Card>
+                              </Grid>
+                            );
+                          })}
+                      </Grid>
+                    )}
+                  </Box>
+                </Paper>
+              </Grid>
+
+              {/* Monthly Trends Chart */}
+              <Grid item xs={12}>
                 <Paper sx={{ p: 0, borderRadius: 2, overflow: 'hidden' }}>
                   <Box sx={{ p: 2, bgcolor: COLORS.primary, color: 'white' }}>
-                    <Typography variant="subtitle1" fontWeight="medium">Payment Overview</Typography>
+                    <Typography variant="subtitle1" fontWeight="medium">
+                      Payment Trends - Last 6 Months
+                    </Typography>
                   </Box>
                   <Divider />
                   
-                  <Box sx={{ height: 320, p: 2 }}>
+                  <Box sx={{ height: 300, p: 2 }}>
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={getMonthlyPaymentChartData()}>
+                      <BarChart data={getMonthlyPaymentChartData().slice(-6)}>
                         <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.1)" />
                         <XAxis dataKey="month" />
                         <YAxis tickFormatter={(value) => `${value}`} />
@@ -942,141 +1094,6 @@ function UserAnalyticsPanel({ showNotification }) {
                     </ResponsiveContainer>
                   </Box>
                 </Paper>
-              </Grid>
-              
-              {/* Payment Stats Cards */}
-              <Grid item xs={12} lg={4}>
-                <Grid container spacing={2}>
-                  <Grid item xs={12}>
-                    <Card sx={{ bgcolor: COLORS.success, color: 'white', borderRadius: 2 }}>
-                      <CardContent>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Typography variant="subtitle2">Paid</Typography>
-                          <DoneAllIcon />
-                        </Box>
-                        <Typography variant="h5" sx={{ mt: 1, fontWeight: 'bold' }}>
-                          {paymentStatus.paid.length} properties
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Card sx={{ bgcolor: COLORS.warning, color: 'white', borderRadius: 2 }}>
-                      <CardContent>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Typography variant="subtitle2">Pending</Typography>
-                          <ScheduleIcon />
-                        </Box>
-                        <Typography variant="h5" sx={{ mt: 1, fontWeight: 'bold' }}>
-                          {paymentStatus.pending.length} properties
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Card sx={{ bgcolor: COLORS.secondary, color: 'white', borderRadius: 2 }}>
-                      <CardContent>
-                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Typography variant="subtitle2">Overdue</Typography>
-                          <WarningIcon />
-                        </Box>
-                        <Typography variant="h5" sx={{ mt: 1, fontWeight: 'bold' }}>
-                          {paymentStatus.overdue.length} properties
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
-              </Grid>
-              
-              {/* Payment Table */}
-              <Grid item xs={12}>
-                <TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
-                  <Table>
-                    <TableHead>
-                      <TableRow sx={{ bgcolor: 'rgba(0,0,0,0.03)' }}>
-                        <TableCell>Tenant</TableCell>
-                        <TableCell>Property</TableCell>
-                        <TableCell>Month</TableCell>
-                        <TableCell align="right">Amount Due</TableCell>
-                        <TableCell align="right">Amount Paid</TableCell>
-                        <TableCell align="center">Status</TableCell>
-                        <TableCell align="right">Actions</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {getFilteredPayments().length === 0 ? (
-                        <TableRow>
-                          <TableCell colSpan={7} align="center">
-                            <Alert severity="info">No payment data matches your search criteria</Alert>
-                          </TableCell>
-                        </TableRow>
-                      ) : (
-                        getFilteredPayments().flatMap(tenant => 
-                          (tenant.payment_history || [])
-                            .filter(payment => 
-                              paymentMonthFilter === 'all' || payment.month === paymentMonthFilter
-                            )
-                            .filter(payment => 
-                              paymentFilter === 'all' || payment.status === paymentFilter
-                            )
-                            .map((payment, idx) => {
-                              // Find tenant's apartment
-                              const tenantApartment = apartments.find(apt => 
-                                apt.id === tenant.apartment_id || 
-                                (Array.isArray(apt.tenants) && apt.tenants.some(t => 
-                                  (typeof t === 'object' && t.id === tenant.id) || 
-                                  (typeof t === 'string' && t === tenant.name)
-                                ))
-                              );
-                              
-                              return (
-                                <TableRow key={`${tenant.id}-${payment.month}-${idx}`} hover>
-                                  <TableCell>
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                      <PersonIcon fontSize="small" color="primary" />
-                                      <Typography variant="body2" fontWeight="medium">
-                                        {tenant.name}
-                                      </Typography>
-                                    </Box>
-                                  </TableCell>
-                                  <TableCell>
-                                    {tenantApartment ? tenantApartment.address : 'N/A'}
-                                  </TableCell>
-                                  <TableCell>
-                                    {payment.month}
-                                  </TableCell>
-                                  <TableCell align="right">
-                                    {formatCurrency(payment.due)}
-                                  </TableCell>
-                                  <TableCell align="right">
-                                    {formatCurrency(payment.paid)}
-                                  </TableCell>
-                                  <TableCell align="center">
-                                    <Chip
-                                      label={payment.status}
-                                      size="small"
-                                      color={getPaymentStatusColor(payment.status)}
-                                    />
-                                  </TableCell>
-                                  <TableCell align="right">
-                                    <Button
-                                      variant="outlined"
-                                      size="small"
-                                      endIcon={<ArrowForwardIcon />}
-                                      onClick={() => handleViewTenant(tenant.id)}
-                                    >
-                                      Details
-                                    </Button>
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })
-                        )
-                      )}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
               </Grid>
             </Grid>
           </Box>

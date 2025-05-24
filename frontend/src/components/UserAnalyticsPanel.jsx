@@ -1,4 +1,4 @@
-// src/components/UserAnalyticsPanel.jsx - With enhanced tenants and payments sections
+// src/components/UserAnalyticsPanel.jsx - Fixed tab indexing and removed payment status from contract timeline
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -609,6 +609,7 @@ function UserAnalyticsPanel({ showNotification }) {
           >
             <Tab icon={<HomeIcon />} iconPosition="start" label="Property Status" />
             <Tab icon={<PersonIcon />} iconPosition="start" label="Tenant Overview" />
+            <Tab icon={<PaymentsIcon />} iconPosition="start" label="Payment Tracking" />
             <Tab icon={<WarningIcon />} iconPosition="start" label="Attention Needed" />
             <Tab icon={<CalendarIcon />} iconPosition="start" label="Contract Timeline" />
           </Tabs>
@@ -1180,7 +1181,7 @@ function UserAnalyticsPanel({ showNotification }) {
                 </Paper>
               </Grid>
 
-              {/* Payment Status */}
+              {/* Payment Status - Moved to Attention Needed */}
               <Grid item xs={12}>
                 <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <OverdueIcon color="error" fontSize="small" />
@@ -1265,8 +1266,8 @@ function UserAnalyticsPanel({ showNotification }) {
           </Box>
         )}
 
-        {/* Contract Timeline Tab */}
-        {tabIndex === 3 && (
+        {/* Contract Timeline Tab - Cleaned up without Payment Status */}
+        {tabIndex === 4 && (
           <Box>
             <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <CalendarIcon color="primary" fontSize="small" />

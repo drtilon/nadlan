@@ -1,5 +1,5 @@
-// components/LogsViewer.jsx - Improved with comprehensive activity tracking
-import React, { useState, useEffect } from 'react';
+// components/LogsViewer.jsx - Optimized with pagination and performance improvements
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Container,
   Paper,
@@ -36,11 +36,14 @@ import {
   Menu,
   ListItemIcon,
   ListItemText,
-  ListItem,
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogActions
+  DialogActions,
+  TablePagination,
+  Skeleton,
+  Switch,
+  FormControlLabel
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
@@ -69,43 +72,132 @@ import {
   Download as DownloadIcon,
   FilterAlt as AdvancedFilterIcon,
   MoreVert as MoreVertIcon,
-  ContentCopy as CopyIcon
+  ContentCopy as CopyIcon,
+  FirstPage as FirstPageIcon,
+  LastPage as LastPageIcon,
+  KeyboardArrowLeft,
+  KeyboardArrowRight
 } from '@mui/icons-material';
 import api from '../utils/api';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 
+// Custom pagination actions component
+function TablePaginationActions(props) {
+  const { count, page, rowsPerPage, onPageChange } = props;
+
+  const handleFirstPageButtonClick = (event) => {
+    onPageChange(event, 0);
+  };
+
+  const handleBackButtonClick = (event) => {
+    onPageChange(event, page - 1);
+  };
+
+  const handleNextButtonClick = (event) => {
+    onPageChange(event, page + 1);
+  };
+
+  const handleLastPageButtonClick = (event) => {
+    onPageChange(event, Math.max(0, Math.ceil(count / rowsPerPage) - 1));
+  };
+
+  return (
+    <Box sx={{ flexShrink: 0, ml: 2.5 }}>
+      <IconButton
+        onClick={handleFirstPageButtonClick}
+        disabled={page === 0}
+        aria-label="first page"
+      >
+        <FirstPageIcon />
+      </IconButton>
+      <IconButton
+        onClick={handleBackButtonClick}
+        disabled={page === 0}
+        aria-label="previous page"
+      >
+        <KeyboardArrowLeft />
+      </IconButton>
+      <IconButton
+        onClick={handleNextButtonClick}
+        disabled={page >= Math.ceil(count / rowsPerPage) - 1}
+        aria-label="next page"
+      >
+        <KeyboardArrowRight />
+      </IconButton>
+      <IconButton
+        onClick={handleLastPageButtonClick}
+        disabled={page >= Math.ceil(count / rowsPerPage) - 1}
+        aria-label="last page"
+      >
+        <LastPageIcon />
+      </IconButton>
+    </Box>
+  );
+}
+
 function LogsViewer({ showNotification }) {
+  // Pagination state
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+  const [totalCount, setTotalCount] = useState(0);
+  
+  // Data state
   const [logs, setLogs] = useState([]);
-  const [filteredLogs, setFilteredLogs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  
+  // Filter state
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [logLevel, setLogLevel] = useState('all');
   const [userFilter, setUserFilter] = useState('all');
+  const [viewMode, setViewMode] = useState('all');
+  const [entityFilter, setEntityFilter] = useState('all');
+  const [actionFilter, setActionFilter] = useState('all');
   const [activeTab, setActiveTab] = useState(0);
+  
+  // UI state
   const [expandedRows, setExpandedRows] = useState({});
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(null);
-  const [users, setUsers] = useState([]);
-  const [viewMode, setViewMode] = useState('all'); // 'all', 'app', 'activity'
-  const [entityFilter, setEntityFilter] = useState('all');
-  const [actionFilter, setActionFilter] = useState('all');
-  const [logStats, setLogStats] = useState(null);
   const [showStats, setShowStats] = useState(false);
   const [logDetailsOpen, setLogDetailsOpen] = useState(false);
   const [selectedLog, setSelectedLog] = useState(null);
-  const [entityTypes, setEntityTypes] = useState([]);
-  const [actionTypes, setActionTypes] = useState([]);
   const [anchorEl, setAnchorEl] = useState(null);
   const [isDownloading, setIsDownloading] = useState(false);
+  
+  // Metadata state
+  const [users, setUsers] = useState([]);
+  const [entityTypes, setEntityTypes] = useState([]);
+  const [actionTypes, setActionTypes] = useState([]);
+  const [logStats, setLogStats] = useState(null);
 
-  // Fetch logs from server
-  const fetchLogs = async () => {
+  // Debounce search term to avoid too many API calls
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchTerm(searchTerm);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Reset page when filters change
+  useEffect(() => {
+    setPage(0);
+  }, [debouncedSearchTerm, logLevel, userFilter, viewMode, entityFilter, actionFilter, activeTab]);
+
+  // Fetch logs with pagination
+  const fetchLogs = useCallback(async (pageNum = page) => {
     setLoading(true);
     try {
-      // Prepare query parameters
       const params = new URLSearchParams();
       
+      // Pagination parameters
+      params.append('page', pageNum.toString());
+      params.append('limit', rowsPerPage.toString());
+      
+      // Filter parameters
       if (viewMode !== 'all') {
         params.append('type', viewMode);
       }
@@ -126,7 +218,11 @@ function LogsViewer({ showNotification }) {
         params.append('action', actionFilter);
       }
       
-      // Tab filters (time periods)
+      if (debouncedSearchTerm) {
+        params.append('search', debouncedSearchTerm);
+      }
+      
+      // Time period filters
       if (activeTab === 1) {
         params.append('hours', '1');
       } else if (activeTab === 2) {
@@ -134,48 +230,46 @@ function LogsViewer({ showNotification }) {
       } else if (activeTab === 3) {
         params.append('hours', '168'); // 7 days
       }
-      
+
       const [logsResponse, usersResponse] = await Promise.all([
         api.get(`/logs?${params.toString()}`),
-        api.get('/adminPanel/users')
+        users.length === 0 ? api.get('/adminPanel/users') : Promise.resolve({ data: users })
       ]);
       
-      const logsData = Array.isArray(logsResponse.data) ? logsResponse.data : logsResponse.data.logs || [];
-      
-      // Extract available entity types and action types for filters
-      if (logsData.length > 0) {
-        const entities = [...new Set(logsData
-          .filter(log => log.entity_type)
-          .map(log => log.entity_type))];
-        
-        const actions = [...new Set(logsData
-          .filter(log => log.action)
-          .map(log => log.action))];
-          
-        setEntityTypes(entities);
-        setActionTypes(actions);
-      }
+      const responseData = logsResponse.data;
+      const logsData = Array.isArray(responseData) ? responseData : responseData.logs || [];
+      const total = responseData.total || logsData.length;
+      const metadata = responseData.metadata || {};
       
       setLogs(logsData);
-      setFilteredLogs(logsData);
+      setTotalCount(total);
+      
+      // Update filter options if metadata is available
+      if (metadata.entityTypes) {
+        setEntityTypes(metadata.entityTypes);
+      }
+      if (metadata.actionTypes) {
+        setActionTypes(metadata.actionTypes);
+      }
       
       // Set users for filtering
-      setUsers(usersResponse.data || []);
-      
-      // Apply search filter if exists
-      if (searchTerm) {
-        applySearchFilter(logsData, searchTerm);
+      if (users.length === 0) {
+        setUsers(usersResponse.data || []);
       }
+      
     } catch (error) {
       console.error('Error fetching logs:', error);
       showNotification('Error fetching log data', 'error');
     } finally {
       setLoading(false);
+      if (initialLoading) {
+        setInitialLoading(false);
+      }
     }
-  };
+  }, [page, rowsPerPage, viewMode, logLevel, userFilter, entityFilter, actionFilter, activeTab, debouncedSearchTerm, users.length, initialLoading]);
 
   // Fetch log statistics
-  const fetchLogStats = async () => {
+  const fetchLogStats = useCallback(async () => {
     try {
       const response = await api.get('/logs/stats');
       setLogStats(response.data);
@@ -183,130 +277,14 @@ function LogsViewer({ showNotification }) {
       console.error('Error fetching log statistics:', error);
       showNotification('Error fetching log statistics', 'error');
     }
-  };
+  }, [showNotification]);
 
-  // Apply search filter
-  const applySearchFilter = (logsData, search) => {
-    if (!search) {
-      setFilteredLogs(logsData);
-      return;
-    }
-    
-    const searchLower = search.toLowerCase();
-    const filtered = logsData.filter(log => {
-      // Check various fields based on log type
-      const isAppLog = log.log_type === 'app';
-      
-      if (isAppLog) {
-        // App log fields
-        return (
-          (log.message && log.message.toLowerCase().includes(searchLower)) ||
-          (log.logger && log.logger.toLowerCase().includes(searchLower)) ||
-          (log.level && log.level.toLowerCase().includes(searchLower))
-        );
-      } else {
-        // Activity log fields
-        return (
-          (log.action && log.action.toLowerCase().includes(searchLower)) ||
-          (log.entity_type && log.entity_type.toLowerCase().includes(searchLower)) ||
-          (log.entity_id && log.entity_id.toString().includes(searchLower)) ||
-          (log.status && log.status.toLowerCase().includes(searchLower)) ||
-          (log.message && log.message.toLowerCase().includes(searchLower)) ||
-          (log.user && log.user.username && log.user.username.toLowerCase().includes(searchLower)) ||
-          (log.details && JSON.stringify(log.details).toLowerCase().includes(searchLower))
-        );
-      }
-    });
-    
-    setFilteredLogs(filtered);
-  };
-
-  // Download logs
-  const downloadLogs = async (format = 'json') => {
-    try {
-      setIsDownloading(true);
-      
-      // Create file content
-      let content;
-      let filename;
-      let mimeType;
-      
-      if (format === 'json') {
-        content = JSON.stringify(filteredLogs, null, 2);
-        filename = `activity_logs_${new Date().toISOString().split('T')[0]}.json`;
-        mimeType = 'application/json';
-      } else if (format === 'csv') {
-        // Convert logs to CSV format
-        const headers = ['timestamp', 'action', 'entity_type', 'entity_id', 'status', 'user', 'details'];
-        const csvRows = [headers.join(',')];
-        
-        for (const log of filteredLogs) {
-          const row = [
-            log.timestamp || '',
-            log.action || '',
-            log.entity_type || '',
-            log.entity_id || '',
-            log.status || '',
-            log.user ? log.user.username : '',
-            log.details ? JSON.stringify(log.details).replace(/,/g, ';') : ''
-          ];
-          csvRows.push(row.join(','));
-        }
-        
-        content = csvRows.join('\n');
-        filename = `activity_logs_${new Date().toISOString().split('T')[0]}.csv`;
-        mimeType = 'text/csv';
-      } else {
-        throw new Error('Invalid format');
-      }
-      
-      // Create a blob and download link
-      const blob = new Blob([content], { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      
-      showNotification('Logs downloaded successfully', 'success');
-    } catch (error) {
-      console.error('Error downloading logs:', error);
-      showNotification('Error downloading logs', 'error');
-    } finally {
-      setIsDownloading(false);
-      handleMenuClose();
-    }
-  };
-
-  // Initialize component
+  // Initial load
   useEffect(() => {
     fetchLogs();
-    fetchLogStats();
-    
-    // Clean up any existing interval on unmount
-    return () => {
-      if (refreshInterval) {
-        clearInterval(refreshInterval);
-      }
-    };
-  }, []);
+  }, [fetchLogs]);
 
-  // Effect for search term changes
-  useEffect(() => {
-    if (logs.length > 0) {
-      applySearchFilter(logs, searchTerm);
-    }
-  }, [searchTerm]);
-
-  // Effect for filter criteria changes (except search)
-  useEffect(() => {
-    fetchLogs();
-  }, [viewMode, logLevel, userFilter, entityFilter, actionFilter, activeTab]);
-
-  // Effect for auto-refresh
+  // Auto-refresh effect
   useEffect(() => {
     if (autoRefresh) {
       const interval = setInterval(() => {
@@ -328,7 +306,18 @@ function LogsViewer({ showNotification }) {
         clearInterval(refreshInterval);
       }
     };
-  }, [autoRefresh, showStats]);
+  }, [autoRefresh, showStats, fetchLogs, fetchLogStats, refreshInterval]);
+
+  // Handle page change
+  const handleChangePage = (event, newPage) => {
+    setPage(newPage);
+  };
+
+  // Handle rows per page change
+  const handleChangeRowsPerPage = (event) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
 
   // Handle tab change
   const handleTabChange = (event, newValue) => {
@@ -354,12 +343,85 @@ function LogsViewer({ showNotification }) {
       await api.delete(`/logs?type=${viewMode}`);
       showNotification(`${viewMode === 'all' ? 'All' : viewMode.charAt(0).toUpperCase() + viewMode.slice(1)} logs cleared successfully`, 'success');
       fetchLogs();
-      fetchLogStats();
+      if (showStats) {
+        fetchLogStats();
+      }
     } catch (error) {
       console.error('Error clearing logs:', error);
       showNotification('Error clearing logs', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Download logs
+  const downloadLogs = async (format = 'json') => {
+    try {
+      setIsDownloading(true);
+      
+      // Get all logs for download (without pagination)
+      const params = new URLSearchParams();
+      params.append('limit', '10000'); // Large limit for export
+      
+      if (viewMode !== 'all') params.append('type', viewMode);
+      if (logLevel !== 'all') params.append('level', logLevel);
+      if (entityFilter !== 'all') params.append('entity_type', entityFilter);
+      if (userFilter !== 'all') params.append('user_id', userFilter);
+      if (actionFilter !== 'all') params.append('action', actionFilter);
+      if (debouncedSearchTerm) params.append('search', debouncedSearchTerm);
+      
+      const response = await api.get(`/logs?${params.toString()}`);
+      const allLogs = Array.isArray(response.data) ? response.data : response.data.logs || [];
+      
+      // Create file content
+      let content;
+      let filename;
+      let mimeType;
+      
+      if (format === 'json') {
+        content = JSON.stringify(allLogs, null, 2);
+        filename = `activity_logs_${new Date().toISOString().split('T')[0]}.json`;
+        mimeType = 'application/json';
+      } else if (format === 'csv') {
+        const headers = ['timestamp', 'action', 'entity_type', 'entity_id', 'status', 'user', 'details'];
+        const csvRows = [headers.join(',')];
+        
+        for (const log of allLogs) {
+          const row = [
+            log.timestamp || '',
+            log.action || '',
+            log.entity_type || '',
+            log.entity_id || '',
+            log.status || '',
+            log.user ? log.user.username : '',
+            log.details ? JSON.stringify(log.details).replace(/,/g, ';') : ''
+          ];
+          csvRows.push(row.join(','));
+        }
+        
+        content = csvRows.join('\n');
+        filename = `activity_logs_${new Date().toISOString().split('T')[0]}.csv`;
+        mimeType = 'text/csv';
+      }
+      
+      // Create and download file
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      
+      showNotification('Logs downloaded successfully', 'success');
+    } catch (error) {
+      console.error('Error downloading logs:', error);
+      showNotification('Error downloading logs', 'error');
+    } finally {
+      setIsDownloading(false);
+      handleMenuClose();
     }
   };
 
@@ -383,7 +445,28 @@ function LogsViewer({ showNotification }) {
     setSelectedLog(null);
   };
 
-  // Get user display from user object
+  // Copy log to clipboard
+  const copyLogToClipboard = (log) => {
+    try {
+      const logContent = JSON.stringify(log, null, 2);
+      navigator.clipboard.writeText(logContent);
+      showNotification('Log copied to clipboard', 'success');
+    } catch (error) {
+      console.error('Error copying log:', error);
+      showNotification('Error copying log to clipboard', 'error');
+    }
+  };
+
+  // Toggle statistics view
+  const toggleStatsView = () => {
+    const newShowStats = !showStats;
+    setShowStats(newShowStats);
+    if (newShowStats) {
+      fetchLogStats();
+    }
+  };
+
+  // Helper functions for rendering (same as original)
   const getUserDisplay = (user) => {
     if (!user) return null;
     
@@ -404,7 +487,6 @@ function LogsViewer({ showNotification }) {
     );
   };
 
-  // Get log level chip
   const getLogLevelChip = (level) => {
     switch (level?.toLowerCase()) {
       case 'error':
@@ -418,7 +500,6 @@ function LogsViewer({ showNotification }) {
     }
   };
 
-  // Get entity icon
   const getEntityIcon = (entityType) => {
     switch (entityType?.toLowerCase()) {
       case 'apartment':
@@ -440,9 +521,7 @@ function LogsViewer({ showNotification }) {
     }
   };
 
-  // Get action chip
   const getActionChip = (action, status) => {
-    // Icons for different actions
     let icon = <InfoIcon fontSize="small" />;
     let color = "primary";
     
@@ -471,7 +550,6 @@ function LogsViewer({ showNotification }) {
         break;
     }
     
-    // Adjust color based on status
     if (status === 'failed') {
       color = "error";
     }
@@ -487,7 +565,6 @@ function LogsViewer({ showNotification }) {
     );
   };
 
-  // Format timestamp
   const formatTimestamp = (timestamp) => {
     if (!timestamp) return 'Unknown';
     
@@ -499,9 +576,7 @@ function LogsViewer({ showNotification }) {
     }
   };
 
-  // Format message for display
   const formatMessage = (log, isExpanded) => {
-    // For app logs
     if (log.log_type === 'app' && log.message) {
       if (!isExpanded && log.message.length > 80) {
         return `${log.message.substring(0, 80)}...`;
@@ -509,7 +584,6 @@ function LogsViewer({ showNotification }) {
       return log.message;
     }
     
-    // For activity logs
     if (log.log_type === 'activity') {
       const entity = log.entity_type ? log.entity_type : 'unknown';
       const entityId = log.entity_id ? log.entity_id : '';
@@ -522,7 +596,6 @@ function LogsViewer({ showNotification }) {
     return log.message || 'No message';
   };
 
-  // Get the primary column to display
   const getPrimaryColumn = (log) => {
     if (log.log_type === 'app') {
       return (
@@ -531,7 +604,6 @@ function LogsViewer({ showNotification }) {
         </TableCell>
       );
     } else {
-      // Activity log
       return (
         <TableCell>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -557,27 +629,38 @@ function LogsViewer({ showNotification }) {
     }
   };
 
-  // Toggle statistics view
-  const toggleStatsView = () => {
-    const newShowStats = !showStats;
-    setShowStats(newShowStats);
-    if (newShowStats) {
-      fetchLogStats();
-    }
-  };
+  // Memoized pagination info
+  const paginationInfo = useMemo(() => {
+    const start = page * rowsPerPage + 1;
+    const end = Math.min((page + 1) * rowsPerPage, totalCount);
+    return `${start}-${end} of ${totalCount}`;
+  }, [page, rowsPerPage, totalCount]);
 
-  // Copy log to clipboard
-  const copyLogToClipboard = (log) => {
-    try {
-      const logContent = JSON.stringify(log, null, 2);
-      navigator.clipboard.writeText(logContent);
-      showNotification('Log copied to clipboard', 'success');
-    } catch (error) {
-      console.error('Error copying log:', error);
-      showNotification('Error copying log to clipboard', 'error');
-    }
-    handleMenuClose();
-  };
+  if (initialLoading) {
+    return (
+      <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+        <Paper sx={{ p: 3 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
+            <AssessmentIcon sx={{ fontSize: 32 }} />
+            <Typography variant="h4">System Activity Logs</Typography>
+          </Box>
+          
+          <Stack spacing={2}>
+            <Skeleton variant="rectangular" height={60} />
+            <Skeleton variant="rectangular" height={40} />
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <Skeleton variant="rectangular" width={200} height={40} />
+              <Skeleton variant="rectangular" width={150} height={40} />
+              <Skeleton variant="rectangular" width={150} height={40} />
+            </Box>
+            {[...Array(10)].map((_, index) => (
+              <Skeleton key={index} variant="rectangular" height={60} />
+            ))}
+          </Stack>
+        </Paper>
+      </Container>
+    );
+  }
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
@@ -587,7 +670,18 @@ function LogsViewer({ showNotification }) {
             <AssessmentIcon sx={{ fontSize: 32 }} /> System Activity Logs
           </Typography>
           
-          <Box sx={{ display: 'flex', gap: 2 }}>
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={autoRefresh}
+                  onChange={(e) => setAutoRefresh(e.target.checked)}
+                  size="small"
+                />
+              }
+              label="Auto-refresh"
+            />
+            
             <Button
               variant="outlined"
               startIcon={<AnalyticsIcon />}
@@ -599,26 +693,11 @@ function LogsViewer({ showNotification }) {
             <Button
               variant="outlined"
               startIcon={<RefreshIcon />}
-              onClick={() => {
-                fetchLogs();
-                if (showStats) fetchLogStats();
-              }}
+              onClick={() => fetchLogs()}
               disabled={loading}
             >
               Refresh
             </Button>
-            
-            <FormControl variant="outlined" size="small">
-              <InputLabel>Auto-refresh</InputLabel>
-              <Select
-                value={autoRefresh}
-                onChange={(e) => setAutoRefresh(e.target.value)}
-                label="Auto-refresh"
-              >
-                <MenuItem value={false}>Off</MenuItem>
-                <MenuItem value={true}>On (10s)</MenuItem>
-              </Select>
-            </FormControl>
             
             <Button
               variant="outlined"
@@ -634,20 +713,20 @@ function LogsViewer({ showNotification }) {
               open={Boolean(anchorEl)}
               onClose={handleMenuClose}
             >
-              <MenuItem onClick={() => downloadLogs('json')} disabled={isDownloading || filteredLogs.length === 0}>
+              <MenuItem onClick={() => downloadLogs('json')} disabled={isDownloading}>
                 <ListItemIcon>
                   <DownloadIcon fontSize="small" />
                 </ListItemIcon>
                 <ListItemText>Download as JSON</ListItemText>
               </MenuItem>
-              <MenuItem onClick={() => downloadLogs('csv')} disabled={isDownloading || filteredLogs.length === 0}>
+              <MenuItem onClick={() => downloadLogs('csv')} disabled={isDownloading}>
                 <ListItemIcon>
                   <DownloadIcon fontSize="small" />
                 </ListItemIcon>
                 <ListItemText>Download as CSV</ListItemText>
               </MenuItem>
               <Divider />
-              <MenuItem onClick={handleClearLogs} disabled={loading || filteredLogs.length === 0}>
+              <MenuItem onClick={handleClearLogs} disabled={loading}>
                 <ListItemIcon>
                   <ClearIcon fontSize="small" color="error" />
                 </ListItemIcon>
@@ -663,9 +742,8 @@ function LogsViewer({ showNotification }) {
             <Typography variant="h6" gutterBottom>Log Statistics</Typography>
             
             <Grid container spacing={3}>
-              {/* Total counts */}
               <Grid item xs={12} md={4}>
-                <Card variant="outlined" sx={{ height: '100%' }}>
+                <Card variant="outlined">
                   <CardHeader title="Log Counts" />
                   <CardContent>
                     <Stack spacing={2}>
@@ -687,9 +765,8 @@ function LogsViewer({ showNotification }) {
                 </Card>
               </Grid>
               
-              {/* User activity */}
               <Grid item xs={12} md={4}>
-                <Card variant="outlined" sx={{ height: '100%' }}>
+                <Card variant="outlined">
                   <CardHeader title="Most Active Users" />
                   <CardContent>
                     <Stack spacing={1}>
@@ -713,9 +790,8 @@ function LogsViewer({ showNotification }) {
                 </Card>
               </Grid>
               
-              {/* Entity distribution */}
               <Grid item xs={12} md={4}>
-                <Card variant="outlined" sx={{ height: '100%' }}>
+                <Card variant="outlined">
                   <CardHeader title="Actions by Entity Type" />
                   <CardContent>
                     <Stack spacing={1}>
@@ -776,23 +852,6 @@ function LogsViewer({ showNotification }) {
             
             <Grid item xs={6} md={2}>
               <FormControl fullWidth size="small">
-                <InputLabel>Level</InputLabel>
-                <Select
-                  value={logLevel}
-                  onChange={(e) => setLogLevel(e.target.value)}
-                  label="Level"
-                  disabled={viewMode === 'activity'}
-                >
-                  <MenuItem value="all">All Levels</MenuItem>
-                  <MenuItem value="info">Info</MenuItem>
-                  <MenuItem value="warning">Warning</MenuItem>
-                  <MenuItem value="error">Error</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            
-            <Grid item xs={6} md={2}>
-              <FormControl fullWidth size="small">
                 <InputLabel>User</InputLabel>
                 <Select
                   value={userFilter}
@@ -819,7 +878,6 @@ function LogsViewer({ showNotification }) {
                     label="Entity Type"
                   >
                     <MenuItem value="all">All Types</MenuItem>
-                    {/* Dynamic entity types from actual data */}
                     {entityTypes.map(type => (
                       <MenuItem key={type} value={type}>
                         {type.charAt(0).toUpperCase() + type.slice(1)}
@@ -840,7 +898,6 @@ function LogsViewer({ showNotification }) {
                     label="Action"
                   >
                     <MenuItem value="all">All Actions</MenuItem>
-                    {/* Dynamic action types from actual data */}
                     {actionTypes.map(action => (
                       <MenuItem key={action} value={action}>
                         {action.charAt(0).toUpperCase() + action.slice(1)}
@@ -870,335 +927,342 @@ function LogsViewer({ showNotification }) {
         
         {loading && <LinearProgress sx={{ mb: 2 }} />}
         
-        {filteredLogs.length === 0 ? (
+        {/* Pagination Info */}
+        <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Typography variant="body2" color="text.secondary">
+            Showing {paginationInfo}
+          </Typography>
+          
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              Rows per page:
+            </Typography>
+            <FormControl size="small">
+              <Select
+                value={rowsPerPage}
+                onChange={handleChangeRowsPerPage}
+                variant="outlined"
+              >
+                <MenuItem value={10}>10</MenuItem>
+                <MenuItem value={25}>25</MenuItem>
+                <MenuItem value={50}>50</MenuItem>
+                <MenuItem value={100}>100</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+        </Box>
+        
+        {totalCount === 0 ? (
           <Alert severity="info" sx={{ mt: 2 }}>
             No logs found matching your criteria.
           </Alert>
         ) : (
-          <TableContainer>
-            <Table>
-              <TableHead>
-                <TableRow>
-                  <TableCell width="18%">
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      <CalendarIcon fontSize="small" />
-                      Timestamp
-                    </Box>
-                  </TableCell>
-                  
-                  {viewMode !== 'activity' && (
-                    <TableCell width="12%">
+          <>
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell width="18%">
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <ErrorIcon fontSize="small" />
-                        Level
+                        <CalendarIcon fontSize="small" />
+                        Timestamp
                       </Box>
                     </TableCell>
-                  )}
-                  
-                  <TableCell width="15%">
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                      <PersonIcon fontSize="small" />
-                      User
-                    </Box>
-                  </TableCell>
-                  
-                  <TableCell>
-                    {viewMode === 'activity' ? (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <InfoIcon fontSize="small" />
-                        Action / Entity
-                      </Box>
-                    ) : (
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <SourceIcon fontSize="small" />
-                        Message
-                      </Box>
+                    
+                    {viewMode !== 'activity' && (
+                      <TableCell width="12%">
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <ErrorIcon fontSize="small" />
+                          Level
+                        </Box>
+                      </TableCell>
                     )}
-                  </TableCell>
-                  
-                  <TableCell align="right" width="5%">Actions</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {filteredLogs.map((log, index) => {
-                  const isExpanded = expandedRows[log.id || index] || false;
-                  
-                  return (
-                    <React.Fragment key={log.id || index}>
-                      <TableRow 
-                        hover 
-                        sx={{ 
-                          cursor: 'pointer',
-                          bgcolor: isExpanded ? 'action.hover' : 'inherit'
-                        }}
-                        onClick={() => toggleRowExpanded(log.id || index)}
-                      >
-                        <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                          {formatTimestamp(log.timestamp)}
-                        </TableCell>
-                        
-                        {viewMode !== 'activity' && (
-                          <TableCell>{getLogLevelChip(log.level)}</TableCell>
-                        )}
-                        
-                        <TableCell>{getUserDisplay(log.user) || 'System'}</TableCell>
-                        
-                        {getPrimaryColumn(log)}
-                        
-                        <TableCell align="right">
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleRowExpanded(log.id || index);
-                            }}
-                          >
-                            {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                          </IconButton>
+                    
+                    <TableCell width="15%">
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <PersonIcon fontSize="small" />
+                        User
+                      </Box>
+                    </TableCell>
+                    
+                    <TableCell>
+                      {viewMode === 'activity' ? (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <InfoIcon fontSize="small" />
+                          Action / Entity
+                        </Box>
+                      ) : (
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <SourceIcon fontSize="small" />
+                          Message
+                        </Box>
+                      )}
+                    </TableCell>
+                    
+                    <TableCell align="right" width="5%">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {logs.map((log, index) => {
+                    const logId = log.id || `${page}-${index}`;
+                    const isExpanded = expandedRows[logId] || false;
+                    
+                    return (
+                      <React.Fragment key={logId}>
+                        <TableRow 
+                          hover 
+                          sx={{ 
+                            cursor: 'pointer',
+                            bgcolor: isExpanded ? 'action.hover' : 'inherit'
+                          }}
+                          onClick={() => toggleRowExpanded(logId)}
+                        >
+                          <TableCell sx={{ whiteSpace: 'nowrap' }}>
+                            {formatTimestamp(log.timestamp)}
+                          </TableCell>
                           
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              copyLogToClipboard(log);
-                            }}
-                            title="Copy log details"
-                          >
-                            <CopyIcon fontSize="small" />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                      
-                      {isExpanded && (
-                        <TableRow>
-                          <TableCell colSpan={viewMode === 'activity' ? 4 : 5} sx={{ bgcolor: 'rgba(0, 0, 0, 0.02)', p: 0 }}>
-                            <Box sx={{ p: 3 }}>
-                              <Grid container spacing={2}>
-                                <Grid item xs={12} md={6}>
-                                  <Typography variant="subtitle2" gutterBottom>
-                                    Event Details
-                                  </Typography>
-                                  <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-                                    <Stack spacing={1.5}>
-                                      <Box>
-                                        <Typography variant="caption" color="text.secondary">Timestamp</Typography>
-                                        <Typography variant="body2">{formatTimestamp(log.timestamp)}</Typography>
-                                      </Box>
-                                      
-                                      {log.level && (
+                          {viewMode !== 'activity' && (
+                            <TableCell>{getLogLevelChip(log.level)}</TableCell>
+                          )}
+                          
+                          <TableCell>{getUserDisplay(log.user) || 'System'}</TableCell>
+                          
+                          {getPrimaryColumn(log)}
+                          
+                          <TableCell align="right">
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleRowExpanded(logId);
+                              }}
+                            >
+                              {isExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                            </IconButton>
+                            
+                            <IconButton
+                              size="small"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                copyLogToClipboard(log);
+                              }}
+                              title="Copy log details"
+                            >
+                              <CopyIcon fontSize="small" />
+                            </IconButton>
+                          </TableCell>
+                        </TableRow>
+                        
+                        {isExpanded && (
+                          <TableRow>
+                            <TableCell colSpan={viewMode === 'activity' ? 4 : 5} sx={{ bgcolor: 'rgba(0, 0, 0, 0.02)', p: 0 }}>
+                              <Box sx={{ p: 3 }}>
+                                <Grid container spacing={2}>
+                                  <Grid item xs={12} md={6}>
+                                    <Typography variant="subtitle2" gutterBottom>
+                                      Event Details
+                                    </Typography>
+                                    <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
+                                      <Stack spacing={1.5}>
                                         <Box>
-                                          <Typography variant="caption" color="text.secondary">Level</Typography>
-                                          <Box>{getLogLevelChip(log.level)}</Box>
+                                          <Typography variant="caption" color="text.secondary">Timestamp</Typography>
+                                          <Typography variant="body2">{formatTimestamp(log.timestamp)}</Typography>
                                         </Box>
-                                      )}
-                                      
-                                      {log.logger && (
-                                        <Box>
-                                          <Typography variant="caption" color="text.secondary">Source</Typography>
-                                          <Typography variant="body2">{log.logger}</Typography>
-                                        </Box>
-                                      )}
-                                      
-                                      {log.action && (
-                                        <Box>
-                                          <Typography variant="caption" color="text.secondary">Action</Typography>
-                                          <Box>{getActionChip(log.action, log.status)}</Box>
-                                        </Box>
-                                      )}
-                                      
-                                      {log.entity_type && (
-                                        <Box>
-                                          <Typography variant="caption" color="text.secondary">Entity Type</Typography>
-                                          <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                            {getEntityIcon(log.entity_type)}
-                                            {log.entity_type}
-                                          </Typography>
-                                        </Box>
-                                      )}
-                                      
-                                      {log.entity_id && (
-                                        <Box>
-                                          <Typography variant="caption" color="text.secondary">Entity ID</Typography>
-                                          <Typography variant="body2">{log.entity_id}</Typography>
-                                        </Box>
-                                      )}
-                                      
-                                      {log.ip_address && (
-                                        <Box>
-                                          <Typography variant="caption" color="text.secondary">IP Address</Typography>
-                                          <Typography variant="body2">{log.ip_address}</Typography>
-                                        </Box>
-                                      )}
-                                      
-                                      {log.user && (
-                                        <Box>
-                                          <Typography variant="caption" color="text.secondary">User</Typography>
-                                          <Box sx={{ mt: 0.5 }}>
-                                            {getUserDisplay(log.user)}
-                                            <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-                                              ID: {log.user.id} • Role: {log.user.role || 'unknown'}
+                                        
+                                        {log.level && (
+                                          <Box>
+                                            <Typography variant="caption" color="text.secondary">Level</Typography>
+                                            <Box>{getLogLevelChip(log.level)}</Box>
+                                          </Box>
+                                        )}
+                                        
+                                        {log.logger && (
+                                          <Box>
+                                            <Typography variant="caption" color="text.secondary">Source</Typography>
+                                            <Typography variant="body2">{log.logger}</Typography>
+                                          </Box>
+                                        )}
+                                        
+                                        {log.action && (
+                                          <Box>
+                                            <Typography variant="caption" color="text.secondary">Action</Typography>
+                                            <Box>{getActionChip(log.action, log.status)}</Box>
+                                          </Box>
+                                        )}
+                                        
+                                        {log.entity_type && (
+                                          <Box>
+                                            <Typography variant="caption" color="text.secondary">Entity Type</Typography>
+                                            <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                                              {getEntityIcon(log.entity_type)}
+                                              {log.entity_type}
                                             </Typography>
                                           </Box>
-                                        </Box>
-                                      )}
-                                      
-                                      {log.status && (
+                                        )}
+                                        
+                                        {log.entity_id && (
+                                          <Box>
+                                            <Typography variant="caption" color="text.secondary">Entity ID</Typography>
+                                            <Typography variant="body2">{log.entity_id}</Typography>
+                                          </Box>
+                                        )}
+                                        
+                                        {log.ip_address && (
+                                          <Box>
+                                            <Typography variant="caption" color="text.secondary">IP Address</Typography>
+                                            <Typography variant="body2">{log.ip_address}</Typography>
+                                          </Box>
+                                        )}
+                                        
+                                        {log.user && (
+                                          <Box>
+                                            <Typography variant="caption" color="text.secondary">User</Typography>
+                                            <Box sx={{ mt: 0.5 }}>
+                                              {getUserDisplay(log.user)}
+                                              <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                                                ID: {log.user.id} • Role: {log.user.role || 'unknown'}
+                                              </Typography>
+                                            </Box>
+                                          </Box>
+                                        )}
+                                        
+                                        {log.status && (
+                                          <Box>
+                                            <Typography variant="caption" color="text.secondary">Status</Typography>
+                                            <Typography variant="body2">
+                                              <Chip 
+                                                label={log.status} 
+                                                size="small" 
+                                                color={log.status === 'success' ? 'success' : 'error'} 
+                                              />
+                                            </Typography>
+                                          </Box>
+                                        )}
+                                      </Stack>
+                                    </Paper>
+                                  </Grid>
+                                  <Grid item xs={12} md={6}>
+                                    <Typography variant="subtitle2" gutterBottom>
+                                      {log.log_type === 'activity' ? 'Details' : 'Message'}
+                                    </Typography>
+                                    <Paper variant="outlined" sx={{ p: 2, mb: 2, height: '100%' }}>
+                                      {log.log_type === 'activity' && log.details ? (
                                         <Box>
-                                          <Typography variant="caption" color="text.secondary">Status</Typography>
-                                          <Typography variant="body2">
-                                            <Chip 
-                                              label={log.status} 
-                                              size="small" 
-                                              color={log.status === 'success' ? 'success' : 'error'} 
-                                            />
+                                          <Typography variant="subtitle2" gutterBottom>
+                                            Additional Information
+                                          </Typography>
+                                          <Typography
+                                            variant="body2"
+                                            component="pre"
+                                            sx={{
+                                              whiteSpace: 'pre-wrap',
+                                              wordBreak: 'break-word',
+                                              overflowY: 'auto',
+                                              maxHeight: '200px',
+                                              fontFamily: 'monospace'
+                                            }}
+                                          >
+                                            {JSON.stringify(log.details, null, 2)}
                                           </Typography>
                                         </Box>
-                                      )}
-                                    </Stack>
-                                  </Paper>
-                                </Grid>
-                                <Grid item xs={12} md={6}>
-                                  <Typography variant="subtitle2" gutterBottom>
-                                    {log.log_type === 'activity' ? 'Details' : 'Message'}
-                                  </Typography>
-                                  <Paper variant="outlined" sx={{ p: 2, mb: 2, height: '100%' }}>
-                                    {log.log_type === 'activity' && log.details ? (
-                                      <Box>
-                                        <Typography variant="subtitle2" gutterBottom>
-                                          Additional Information
-                                        </Typography>
-                                        <Typography
-                                          variant="body2"
-                                          component="pre"
-                                          sx={{
-                                            whiteSpace: 'pre-wrap',
+                                      ) : (
+                                        <Typography 
+                                          variant="body2" 
+                                          component="pre" 
+                                          sx={{ 
+                                            whiteSpace: 'pre-wrap', 
                                             wordBreak: 'break-word',
                                             overflowY: 'auto',
                                             maxHeight: '200px',
                                             fontFamily: 'monospace'
                                           }}
                                         >
-                                          {JSON.stringify(log.details, null, 2)}
-                                        </Typography>
-                                      </Box>
-                                    ) : (
-                                      <Typography 
-                                        variant="body2" 
-                                        component="pre" 
-                                        sx={{ 
-                                          whiteSpace: 'pre-wrap', 
-                                          wordBreak: 'break-word',
-                                          overflowY: 'auto',
-                                          maxHeight: '200px',
-                                          fontFamily: 'monospace'
-                                        }}
-                                      >
-                                        {log.message || 'No message content'}
-                                      </Typography>
-                                    )}
-                                  </Paper>
-                                </Grid>
-                                
-                                {(log.stack_trace || log.error) && (
-                                  <Grid item xs={12}>
-                                    <Typography variant="subtitle2" gutterBottom>
-                                      {log.error ? 'Error' : 'Stack Trace'}
-                                    </Typography>
-                                    <Paper variant="outlined" sx={{ p: 2, bgcolor: 'error.light', color: 'error.dark' }}>
-                                      {log.error && (
-                                        <Typography 
-                                          variant="body2" 
-                                          sx={{ mb: 2, fontWeight: 'bold' }}
-                                        >
-                                          {log.error}
+                                          {log.message || 'No message content'}
                                         </Typography>
                                       )}
-                                      <Typography 
-                                        variant="body2" 
-                                        component="pre" 
-                                        sx={{ 
-                                          whiteSpace: 'pre-wrap', 
-                                          wordBreak: 'break-word',
-                                          overflowY: 'auto',
-                                          maxHeight: '300px',
-                                          fontFamily: 'monospace'
-                                        }}
-                                      >
-                                        {log.stack_trace || 'No stack trace available'}
-                                      </Typography>
                                     </Paper>
                                   </Grid>
-                                )}
-                                
-                                {log.additional_data && (
-                                  <Grid item xs={12}>
-                                    <Typography variant="subtitle2" gutterBottom>
-                                      Additional Data
-                                    </Typography>
-                                    <Paper variant="outlined" sx={{ p: 2 }}>
-                                      <Typography 
-                                        variant="body2" 
-                                        component="pre" 
-                                        sx={{ 
-                                          whiteSpace: 'pre-wrap', 
-                                          wordBreak: 'break-word',
-                                          overflowY: 'auto',
-                                          maxHeight: '300px',
-                                          fontFamily: 'monospace'
-                                        }}
-                                      >
-                                        {typeof log.additional_data === 'object' 
-                                          ? JSON.stringify(log.additional_data, null, 2)
-                                          : log.additional_data}
+                                  
+                                  {(log.stack_trace || log.error) && (
+                                    <Grid item xs={12}>
+                                      <Typography variant="subtitle2" gutterBottom>
+                                        {log.error ? 'Error' : 'Stack Trace'}
                                       </Typography>
-                                    </Paper>
-                                  </Grid>
-                                )}
-                              </Grid>
-                            </Box>
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
-        
-        <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="body2" color="text.secondary">
-            Total logs: {filteredLogs.length} {logs.length !== filteredLogs.length && `(filtered from ${logs.length})`}
-          </Typography>
-          
-          <Stack direction="row" spacing={2}>
-            {viewMode === 'activity' && filteredLogs.length > 0 && (
-              <Button
-                variant="outlined"
-                startIcon={<DownloadIcon />}
-                onClick={() => downloadLogs('json')}
-                disabled={isDownloading}
-                size="small"
-              >
-                Export
-              </Button>
-            )}
+                                      <Paper variant="outlined" sx={{ p: 2, bgcolor: 'error.light', color: 'error.dark' }}>
+                                        {log.error && (
+                                          <Typography 
+                                            variant="body2" 
+                                            sx={{ mb: 2, fontWeight: 'bold' }}
+                                          >
+                                            {log.error}
+                                          </Typography>
+                                        )}
+                                        <Typography 
+                                          variant="body2" 
+                                          component="pre" 
+                                          sx={{ 
+                                            whiteSpace: 'pre-wrap', 
+                                            wordBreak: 'break-word',
+                                            overflowY: 'auto',
+                                            maxHeight: '300px',
+                                            fontFamily: 'monospace'
+                                          }}
+                                        >
+                                          {log.stack_trace || 'No stack trace available'}
+                                        </Typography>
+                                      </Paper>
+                                    </Grid>
+                                  )}
+                                  
+                                  {log.additional_data && (
+                                    <Grid item xs={12}>
+                                      <Typography variant="subtitle2" gutterBottom>
+                                        Additional Data
+                                      </Typography>
+                                      <Paper variant="outlined" sx={{ p: 2 }}>
+                                        <Typography 
+                                          variant="body2" 
+                                          component="pre" 
+                                          sx={{ 
+                                            whiteSpace: 'pre-wrap', 
+                                            wordBreak: 'break-word',
+                                            overflowY: 'auto',
+                                            maxHeight: '300px',
+                                            fontFamily: 'monospace'
+                                          }}
+                                        >
+                                          {typeof log.additional_data === 'object' 
+                                            ? JSON.stringify(log.additional_data, null, 2)
+                                            : log.additional_data}
+                                        </Typography>
+                                      </Paper>
+                                    </Grid>
+                                  )}
+                                </Grid>
+                              </Box>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </TableContainer>
             
-            <Button
-              variant="outlined"
-              startIcon={<RefreshIcon />}
-              onClick={() => {
-                fetchLogs();
-                if (showStats) fetchLogStats();
-              }}
-              disabled={loading}
-              size="small"
-            >
-              Refresh
-            </Button>
-          </Stack>
-        </Box>
+            {/* Pagination */}
+            <TablePagination
+              component="div"
+              count={totalCount}
+              page={page}
+              onPageChange={handleChangePage}
+              rowsPerPage={rowsPerPage}
+              onRowsPerPageChange={handleChangeRowsPerPage}
+              ActionsComponent={TablePaginationActions}
+              sx={{ mt: 2 }}
+            />
+          </>
+        )}
       </Paper>
       
       {/* Dialog for displaying log details */}

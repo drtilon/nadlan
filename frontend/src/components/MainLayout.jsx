@@ -98,7 +98,7 @@ function MainLayout({ onLogout }) {
 
   // Navigation items
   const navItems = [
-    { id: 1, title: 'Dashboard', icon: <DashboardIcon />, path: 'dashboard', adminOnly: false },
+    { id: 1, title: 'Properties', icon: <HomeIcon />, path: 'dashboard', adminOnly: false },
     { id: 3, title: 'Tenants', icon: <PersonIcon />, path: 'tenants', adminOnly: false },
     { id: 4, title: 'Landlords', icon: <BusinessIcon />, path: 'landlords', adminOnly: false },
     { id: 5, title: 'Payments', icon: <AttachMoneyIcon />, path: 'payments', adminOnly: false },
@@ -137,8 +137,7 @@ function MainLayout({ onLogout }) {
 
   // Navigate to a path
   const navigateTo = (path) => {
-    const targetPath = path === 'properties' ? 'dashboard' : path;
-    navigate(`/${targetPath}`);
+    navigate(`/${path}`);
     setMobileOpen(false);
   };
 
@@ -176,7 +175,6 @@ function MainLayout({ onLogout }) {
   // Check if a path is active
   const isActivePath = (path) => {
     if (!path) return false;
-    if (path === 'properties') return currentPath === 'dashboard' || currentPath === '';
     if (path.includes('/')) {
       return location.pathname.includes(path);
     }
@@ -215,7 +213,7 @@ function MainLayout({ onLogout }) {
             letterSpacing: '0.5px',
             cursor: 'pointer'
           }}
-          onClick={() => navigateTo('dashboard')}
+          onClick={() => navigateTo('properties')}
         >
           Shefa UG
         </Typography>
@@ -462,75 +460,10 @@ function MainLayout({ onLogout }) {
             Shefa UG
           </Typography>
 
-          {/* Professional Search Bar */}
-          <Paper
-            component="form"
-            sx={{
-              p: '4px 16px',
-              display: { xs: 'none', md: 'flex' },
-              alignItems: 'center',
-              width: 300,
-              ml: 2,
-              backgroundColor: '#f9fafb',
-              border: '1px solid #e5e7eb',
-              boxShadow: 'none',
-              '&:hover': {
-                borderColor: '#d1d5db'
-              },
-              '&:focus-within': {
-                borderColor: '#2563eb',
-                backgroundColor: '#ffffff'
-              }
-            }}
-            elevation={0}
-          >
-            <SearchIcon sx={{ color: '#9ca3af', mr: 1 }} />
-            <InputBase
-              sx={{ ml: 1, flex: 1, fontSize: '0.875rem' }}
-              placeholder="Search properties, tenants..."
-              inputProps={{ 'aria-label': 'search' }}
-            />
-          </Paper>
-
           <Box sx={{ flexGrow: 1 }} />
 
           {/* Professional Action Buttons */}
           <Stack direction="row" spacing={1} alignItems="center">
-            <Tooltip title="Help">
-              <IconButton 
-                sx={{ 
-                  color: '#6b7280',
-                  '&:hover': { backgroundColor: '#f3f4f6' }
-                }}
-              >
-                <HelpOutlineIcon />
-              </IconButton>
-            </Tooltip>
-
-            <Tooltip title="Notifications">
-              <IconButton 
-                onClick={handleNotificationMenuOpen}
-                sx={{ 
-                  color: '#6b7280',
-                  '&:hover': { backgroundColor: '#f3f4f6' }
-                }}
-              >
-                <Badge 
-                  badgeContent={notifications.length} 
-                  color="error"
-                  sx={{
-                    '& .MuiBadge-badge': {
-                      fontSize: '0.7rem',
-                      height: 16,
-                      minWidth: 16
-                    }
-                  }}
-                >
-                  <NotificationsIcon />
-                </Badge>
-              </IconButton>
-            </Tooltip>
-
             <Button
               onClick={handleUserMenuOpen}
               sx={{

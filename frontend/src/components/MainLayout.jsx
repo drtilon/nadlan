@@ -99,7 +99,6 @@ function MainLayout({ onLogout }) {
   // Navigation items
   const navItems = [
     { id: 1, title: 'Dashboard', icon: <DashboardIcon />, path: 'dashboard', adminOnly: false },
-    { id: 2, title: 'Properties', icon: <HomeIcon />, path: 'properties', adminOnly: false },
     { id: 3, title: 'Tenants', icon: <PersonIcon />, path: 'tenants', adminOnly: false },
     { id: 4, title: 'Landlords', icon: <BusinessIcon />, path: 'landlords', adminOnly: false },
     { id: 5, title: 'Payments', icon: <AttachMoneyIcon />, path: 'payments', adminOnly: false },

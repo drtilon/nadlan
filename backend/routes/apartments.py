@@ -69,7 +69,7 @@ def add_apartment_route() -> Tuple[Response, int]:
                 )
 
         db.session.commit()
-        
+
         # Log the activity
         ActivityLogger.log_apartment_action(
             action="create",
@@ -80,13 +80,13 @@ def add_apartment_route() -> Tuple[Response, int]:
                 "tenants": tenant_ids
             }
         )
-        
+
         return jsonify({"message": "Apartment added successfully", "id": apartment.id}), 201
 
     except Exception as e:
         current_app.logger.error(f"Error adding apartment: {e}")
         db.session.rollback()
-        
+
         # Log failure
         ActivityLogger.log_apartment_action(
             action="create",
@@ -95,7 +95,7 @@ def add_apartment_route() -> Tuple[Response, int]:
             success=False,
             error=e
         )
-        
+
         return jsonify({"message": "Error adding apartment", "error": str(e)}), 500
 
 
@@ -151,7 +151,7 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
 
         # Track original tenants for logging
         original_tenants = [tenant.id for tenant in Tenant.query.filter_by(apartment_id=apartment_id).all()]
-        
+
         # Unassign all existing tenants from this apartment
         existing_tenants = Tenant.query.filter_by(apartment_id=apartment_id).all()
         for tenant in existing_tenants:
@@ -188,7 +188,7 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
                 new_tenant_ids.append(tenant.id)
 
         db.session.commit()
-        
+
         # Prepare updated data for logging
         updated_data = {
             "address": apartment.address,
@@ -198,7 +198,7 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
             "original_tenants": original_tenants,
             "new_tenants": new_tenant_ids
         }
-        
+
         # Log the update
         ActivityLogger.log_apartment_action(
             action="update",
@@ -209,13 +209,13 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
                 "changed_fields": [k for k, v in apartment_data.items() if k in original_data and original_data[k] != v]
             }
         )
-        
+
         return jsonify({"message": "Apartment updated successfully"}), 200
 
     except Exception as e:
         current_app.logger.error(f"Error editing apartment: {e}")
         db.session.rollback()
-        
+
         # Log failure
         ActivityLogger.log_apartment_action(
             action="update",
@@ -224,7 +224,7 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
             success=False,
             error=e
         )
-        
+
         return jsonify({"message": "Error editing apartment", "error": str(e)}), 500
 
 
@@ -281,14 +281,14 @@ def export_excel() -> Tuple[Response, int]:
         df.to_excel(writer, index=False, sheet_name="Apartments")
         writer.close()
         output.seek(0)
-        
+
         # Log export
         ActivityLogger.log_activity(
             action="export",
             entity_type="apartment",
             details={"format": "excel", "count": len(apartments_data)}
         )
-        
+
         return send_file(output, download_name="apartments.xlsx", as_attachment=True)
     except Exception as e:
         current_app.logger.error(f"Error exporting apartments: {e}")
@@ -311,23 +311,23 @@ def delete_apartment(apartment_id: int) -> Tuple[Response, int]:
             "landlord_id": apartment.landlord_id,
             "tenants": [tenant.id for tenant in apartment.tenants]
         }
-        
+
         db.session.delete(apartment)
         db.session.commit()
-        
+
         # Log deletion
         ActivityLogger.log_apartment_action(
             action="delete",
             apartment_id=apartment_id,
             details=apartment_data
         )
-        
+
         return jsonify({"message": "Apartment deleted successfully"}), 200
 
     except Exception as e:
         current_app.logger.error(f"Error deleting apartment: {e}")
         db.session.rollback()
-        
+
         # Log failure
         ActivityLogger.log_apartment_action(
             action="delete",
@@ -336,5 +336,153 @@ def delete_apartment(apartment_id: int) -> Tuple[Response, int]:
             success=False,
             error=e
         )
-        
+
         return jsonify({"message": "Error deleting apartment", "error": str(e)}), 500
+# Add this to routes/apartments.py after the existing routes
+
+@apartments_bp.route("/apartment/<int:apartment_id>/contracts", methods=["GET"])
+@token_required
+def get_apartment_contracts(apartment_id: int) -> Tuple[Response, int]:
+    """
+    Returns all payment periods (contracts) for a specific apartment.
+    Creates a fallback contract from apartment details if no explicit contracts exist.
+    """
+    try:
+        # Check if apartment exists
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
+
+        # For now, create a fallback contract structure based on apartment details
+        # In the future, you could create a separate PaymentPeriod/Contract model
+        contracts = []
+
+        # Create current/main contract from apartment details
+        if apartment.moveInDate or apartment.contractEndDate or apartment.rent:
+            contract = {
+                "id": "current",
+                "startDate": apartment.moveInDate.isoformat() if apartment.moveInDate else None,
+                "endDate": apartment.contractEndDate.isoformat() if apartment.contractEndDate else None,
+                "rent": float(apartment.rent) if apartment.rent else 0
+            }
+            contracts.append(contract)
+
+        # If no contracts found, create a minimal fallback
+        if not contracts:
+            contracts.append({
+                "id": "current",
+                "startDate": None,
+                "endDate": None,
+                "rent": 0
+            })
+
+        # Log the activity
+        ActivityLogger.log_activity(
+            action="view_contracts",
+            entity_type="apartment",
+            entity_id=apartment_id,
+            details={"contract_count": len(contracts)}
+        )
+
+        return jsonify(contracts), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error getting apartment contracts: {e}")
+        return jsonify({"message": "Error getting apartment contracts", "error": str(e)}), 500
+
+
+@apartments_bp.route("/apartment/<int:apartment_id>/new-payment-period", methods=["POST"])
+@token_required
+@role_required("admin")
+def create_new_payment_period(apartment_id: int) -> Tuple[Response, int]:
+    """
+    Creates a new payment period for an apartment.
+    Updates the apartment's contract dates and rent information.
+    """
+    try:
+        # Check if apartment exists
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"message": "No data provided"}), 400
+
+        # Extract required fields
+        start_date = data.get("start_date")
+        end_date = data.get("end_date")  # Can be null for open-ended
+        rent = data.get("rent")
+        tenants = data.get("tenants", [])
+
+        if not start_date or not rent:
+            return jsonify({"message": "start_date and rent are required"}), 400
+
+        # Capture original data for logging
+        original_data = {
+            "moveInDate": apartment.moveInDate.isoformat() if apartment.moveInDate else None,
+            "contractEndDate": apartment.contractEndDate.isoformat() if apartment.contractEndDate else None,
+            "rent": float(apartment.rent) if apartment.rent else 0
+        }
+
+        # Parse dates
+        try:
+            start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else None
+        except ValueError as e:
+            return jsonify({"message": f"Invalid date format: {str(e)}"}), 400
+
+        # Update apartment with new contract/period information
+        apartment.moveInDate = start_date_obj
+        apartment.contractEndDate = end_date_obj
+        apartment.rent = float(rent)
+
+        # Update tenants if provided (reassign existing tenants to this apartment)
+        if tenants:
+            # First, unassign current tenants
+            current_tenants = Tenant.query.filter_by(apartment_id=apartment_id).all()
+            for tenant in current_tenants:
+                tenant.apartment_id = None
+
+            # Then assign the specified tenants
+            for tenant_name in tenants:
+                # Find tenant by name (you might want to use ID instead)
+                tenant = Tenant.query.filter_by(name=tenant_name).first()
+                if tenant:
+                    tenant.apartment_id = apartment_id
+
+        db.session.commit()
+
+        # Log the new payment period creation
+        ActivityLogger.log_activity(
+            action="create_payment_period",
+            entity_type="apartment",
+            entity_id=apartment_id,
+            details={
+                "original": original_data,
+                "new": {
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "rent": rent,
+                    "tenants": tenants
+                }
+            }
+        )
+
+        return jsonify({"message": "New payment period created successfully"}), 201
+
+    except Exception as e:
+        current_app.logger.error(f"Error creating new payment period: {e}")
+        db.session.rollback()
+
+        # Log failure
+        ActivityLogger.log_activity(
+            action="create_payment_period",
+            entity_type="apartment",
+            entity_id=apartment_id,
+            details={"error": str(e)},
+            status="failed",
+            error=e
+        )
+
+        return jsonify({"message": "Error creating new payment period", "error": str(e)}), 500

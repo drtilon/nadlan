@@ -37,7 +37,7 @@ import {
 } from '@mui/icons-material';
 import api from '../utils/api';
 
-function ContractTemplatesManager({ showNotification }) {
+function ContractTemplatesManager({ showNotification, onTemplatesUpdated }) {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -67,6 +67,13 @@ function ContractTemplatesManager({ showNotification }) {
       showNotification('Failed to load contract templates', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Notify parent component when templates are updated
+  const notifyTemplatesUpdated = () => {
+    if (onTemplatesUpdated) {
+      onTemplatesUpdated();
     }
   };
 
@@ -128,9 +135,11 @@ function ContractTemplatesManager({ showNotification }) {
         await api.post('/documents/templates', formData);
         showNotification('Template added successfully', 'success');
       }
-      
+
       // Refresh the template list
       fetchTemplates();
+      // Notify parent component
+      notifyTemplatesUpdated();
       handleCloseDialog();
     } catch (error) {
       console.error('Error saving template:', error);
@@ -165,9 +174,11 @@ function ContractTemplatesManager({ showNotification }) {
           'Content-Type': 'multipart/form-data'
         }
       });
-      
+
       showNotification('Template uploaded successfully', 'success');
       fetchTemplates();
+      // Notify parent component
+      notifyTemplatesUpdated();
       handleCloseDialog();
     } catch (error) {
       console.error('Error uploading template:', error);
@@ -186,6 +197,8 @@ function ContractTemplatesManager({ showNotification }) {
       await api.delete(`/documents/templates/${id}`);
       showNotification('Template deleted successfully', 'success');
       fetchTemplates();
+      // Notify parent component
+      notifyTemplatesUpdated();
     } catch (error) {
       console.error('Error deleting template:', error);
       showNotification('Error deleting template', 'error');
@@ -197,6 +210,8 @@ function ContractTemplatesManager({ showNotification }) {
       await api.put(`/documents/templates/${id}/default`, { isDefault: true });
       showNotification('Default template updated', 'success');
       fetchTemplates();
+      // Notify parent component
+      notifyTemplatesUpdated();
     } catch (error) {
       console.error('Error setting default template:', error);
       showNotification('Error updating default template', 'error');
@@ -222,7 +237,7 @@ function ContractTemplatesManager({ showNotification }) {
         >
           Add Template
         </Button>
-        
+
         <Button
           variant="outlined"
           startIcon={<UploadIcon />}
@@ -269,7 +284,7 @@ function ContractTemplatesManager({ showNotification }) {
                   </TableCell>
                   <TableCell>{template.description}</TableCell>
                   <TableCell>
-                    {template.isDefault ? (
+                    {template.is_default ? (
                       <Chip label="Default" color="success" size="small" icon={<CheckIcon />} />
                     ) : (
                       <Chip label="Optional" variant="outlined" size="small" />
@@ -277,7 +292,7 @@ function ContractTemplatesManager({ showNotification }) {
                   </TableCell>
                   <TableCell align="right">
                     <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-                      {!template.isDefault && (
+                      {!template.is_default && (
                         <Tooltip title="Set as Default">
                           <IconButton
                             size="small"
@@ -371,7 +386,7 @@ function ContractTemplatesManager({ showNotification }) {
         <DialogTitle>Upload Contract Template</DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 3, mt: 2 }}>
-            Upload a DOCX file with placeholders. Supported placeholders like {'{TENANT_NAME}'}, 
+            Upload a DOCX file with placeholders. Supported placeholders like {'{TENANT_NAME}'},
             {'{ADDRESS}'}, etc. will be automatically replaced.
           </Alert>
           <Box component="form" noValidate sx={{ mt: 2 }}>

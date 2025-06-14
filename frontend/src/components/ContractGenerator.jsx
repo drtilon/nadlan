@@ -30,7 +30,8 @@ import {
   FileDownloadOutlined as DownloadIcon,
   Settings as SettingsIcon,
   Add as AddIcon,
-  ListAlt as ListIcon
+  ListAlt as ListIcon,
+  Refresh as RefreshIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
@@ -48,6 +49,7 @@ function ContractGenerator({ showNotification }) {
   const [selectedTemplate, setSelectedTemplate] = useState('');
   const [defaultTemplate, setDefaultTemplate] = useState(null);
   const [tabValue, setTabValue] = useState(0);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
   const navigate = useNavigate();
 
   // Fetch apartments and templates when component mounts
@@ -55,6 +57,13 @@ function ContractGenerator({ showNotification }) {
     fetchApartments();
     fetchTemplates();
   }, []);
+
+  // Refresh templates when switching back to the Generate Contract tab
+  useEffect(() => {
+    if (tabValue === 0) {
+      fetchTemplates();
+    }
+  }, [tabValue]);
 
   // Filter apartments based on search query
   useEffect(() => {
@@ -64,7 +73,7 @@ function ContractGenerator({ showNotification }) {
     }
 
     const query = searchQuery.toLowerCase();
-    const filtered = apartments.filter(apt => 
+    const filtered = apartments.filter(apt =>
       apt.address.toLowerCase().includes(query)
     );
     setFilteredApartments(filtered);
@@ -85,10 +94,11 @@ function ContractGenerator({ showNotification }) {
   };
 
   const fetchTemplates = async () => {
+    setTemplatesLoading(true);
     try {
       const response = await api.get('/documents/templates');
       setTemplates(response.data || []);
-      
+
       // Find default template
       const defaultTemplate = response.data.find(t => t.is_default);
       if (defaultTemplate) {
@@ -97,10 +107,15 @@ function ContractGenerator({ showNotification }) {
       } else if (response.data.length > 0) {
         // If no default, set the first template as selected
         setSelectedTemplate(response.data[0].id);
+      } else {
+        // No templates available
+        setSelectedTemplate('');
       }
     } catch (error) {
       console.error('Error fetching templates:', error);
       showNotification('Failed to load contract templates', 'error');
+    } finally {
+      setTemplatesLoading(false);
     }
   };
 
@@ -139,6 +154,17 @@ function ContractGenerator({ showNotification }) {
 
   const handleTabChange = (event, newValue) => {
     setTabValue(newValue);
+  };
+
+  // Function to handle template refresh
+  const handleRefreshTemplates = () => {
+    fetchTemplates();
+    showNotification('Templates refreshed', 'success');
+  };
+
+  // Callback function for when templates are updated in ContractTemplatesManager
+  const handleTemplatesUpdated = () => {
+    fetchTemplates();
   };
 
   const generateContract = async () => {
@@ -200,21 +226,21 @@ function ContractGenerator({ showNotification }) {
       <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
           <Tabs value={tabValue} onChange={handleTabChange} aria-label="contract management tabs">
-            <Tab 
-              icon={<DescriptionIcon />} 
-              iconPosition="start" 
-              label="Generate Contract" 
-              id="tab-0" 
+            <Tab
+              icon={<DescriptionIcon />}
+              iconPosition="start"
+              label="Generate Contract"
+              id="tab-0"
             />
-            <Tab 
-              icon={<SettingsIcon />} 
-              iconPosition="start" 
-              label="Manage Templates" 
-              id="tab-1" 
+            <Tab
+              icon={<SettingsIcon />}
+              iconPosition="start"
+              label="Manage Templates"
+              id="tab-1"
             />
-            <Tab 
-              icon={<ListIcon />} 
-              iconPosition="start" 
+            <Tab
+              icon={<ListIcon />}
+              iconPosition="start"
               label="Contract Manager"
               id="tab-2"
               onClick={() => navigate('/contracts/manage')}
@@ -241,9 +267,21 @@ function ContractGenerator({ showNotification }) {
               <Box>
                 <Grid container spacing={3}>
                   <Grid item xs={12}>
-                    <Typography variant="subtitle1" gutterBottom fontWeight="medium">
-                      1. Select Contract Template
-                    </Typography>
+                    <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                      <Typography variant="subtitle1" fontWeight="medium">
+                        1. Select Contract Template
+                      </Typography>
+                      <Tooltip title="Refresh Templates">
+                        <IconButton
+                          size="small"
+                          onClick={handleRefreshTemplates}
+                          disabled={templatesLoading}
+                        >
+                          <RefreshIcon />
+                        </IconButton>
+                      </Tooltip>
+                    </Box>
+
                     <FormControl fullWidth variant="outlined" sx={{ mb: 3 }}>
                       <InputLabel id="template-select-label">Contract Template</InputLabel>
                       <Select
@@ -251,9 +289,13 @@ function ContractGenerator({ showNotification }) {
                         value={selectedTemplate}
                         onChange={handleTemplateChange}
                         label="Contract Template"
-                        disabled={templates.length === 0}
+                        disabled={templates.length === 0 || templatesLoading}
                       >
-                        {templates.length === 0 ? (
+                        {templatesLoading ? (
+                          <MenuItem value="">
+                            <em>Loading templates...</em>
+                          </MenuItem>
+                        ) : templates.length === 0 ? (
                           <MenuItem value="">
                             <em>No templates available</em>
                           </MenuItem>
@@ -262,10 +304,10 @@ function ContractGenerator({ showNotification }) {
                             <MenuItem key={template.id} value={template.id}>
                               {template.name}
                               {template.is_default && (
-                                <Chip 
-                                  label="Default" 
-                                  color="success" 
-                                  size="small" 
+                                <Chip
+                                  label="Default"
+                                  color="success"
+                                  size="small"
                                   sx={{ ml: 1 }}
                                 />
                               )}
@@ -275,9 +317,9 @@ function ContractGenerator({ showNotification }) {
                       </Select>
                     </FormControl>
 
-                    {templates.length === 0 && (
+                    {templates.length === 0 && !templatesLoading && (
                       <Alert severity="info" sx={{ mb: 3 }}>
-                        No contract templates found. Please add a template first.
+                        No contract templates found. Please add a template first using the "Manage Templates" tab.
                       </Alert>
                     )}
 
@@ -375,10 +417,11 @@ function ContractGenerator({ showNotification }) {
                         startIcon={generating ? <CircularProgress size={24} color="inherit" /> : <DownloadIcon />}
                         onClick={generateContract}
                         disabled={
-                          generating || 
-                          !selectedApartment || 
-                          tenants.length === 0 || 
-                          (templates.length > 0 && !selectedTemplate)
+                          generating ||
+                          !selectedApartment ||
+                          tenants.length === 0 ||
+                          (templates.length > 0 && !selectedTemplate) ||
+                          templatesLoading
                         }
                         sx={{ minWidth: 250 }}
                       >
@@ -391,7 +434,10 @@ function ContractGenerator({ showNotification }) {
             )}
           </>
         ) : tabValue === 1 ? (
-          <ContractTemplatesManager showNotification={showNotification} />
+          <ContractTemplatesManager
+            showNotification={showNotification}
+            onTemplatesUpdated={handleTemplatesUpdated}
+          />
         ) : null}
       </Paper>
     </>

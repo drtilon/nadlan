@@ -51,6 +51,9 @@ import ErrorIcon from '@mui/icons-material/Error';
 import CheckIcon from '@mui/icons-material/Check';
 import api, { getUserData } from '../utils/api';
 
+// Import the new ContractExtensionDialog component
+import ContractExtensionDialog from './ContractExtensionDialog';
+
 // Function to fetch landlord data
 const fetchLandlordData = async (landlordId) => {
   try {
@@ -73,6 +76,11 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   const [sortBy, setSortBy] = useState('expiry'); // 'expiry' or 'alphabetical'
   const [filterMenuAnchor, setFilterMenuAnchor] = useState(null);
 
+  // Contract extension state
+  const [extendContractOpen, setExtendContractOpen] = useState(false);
+  const [selectedApartmentForExtension, setSelectedApartmentForExtension] = useState(null);
+  const [isExtendingContract, setIsExtendingContract] = useState(false);
+
   // Get user data to check if admin
   const userData = getUserData();
   const isAdmin = userData && userData.role === 'admin';
@@ -80,12 +88,12 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   // Helper function to check if contract is expired or expiring soon
   const getExpiryStatus = (contractEndDate) => {
     if (!contractEndDate) return { status: 'no_date', daysUntilExpiry: null };
-    
+
     const endDate = new Date(contractEndDate);
     const today = new Date();
     const timeDiff = endDate.getTime() - today.getTime();
     const daysUntilExpiry = Math.ceil(timeDiff / (1000 * 3600 * 24));
-    
+
     if (daysUntilExpiry < 0) {
       return { status: 'expired', daysUntilExpiry };
     } else if (daysUntilExpiry <= 30) {
@@ -98,11 +106,11 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   // Enhanced status chip with expiry colors
   const getStatusChip = (status, contractEndDate) => {
     const expiryStatus = getExpiryStatus(contractEndDate);
-    
+
     let color = 'default';
     let displayStatus = status;
     let icon = null;
-    
+
     // First handle the basic status
     switch (status) {
       case 'occupied':
@@ -165,6 +173,47 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         }}
       />
     );
+  };
+
+  // Handle contract extension
+  const handleExtendContract = async (apartmentId, newEndDate) => {
+    setIsExtendingContract(true);
+    try {
+      // Format the date for the API
+      const formattedDate = newEndDate.toISOString().split('T')[0];
+
+      await api.put(`/apartments/${apartmentId}/extend-contract`, {
+        contractEndDate: formattedDate
+      });
+
+      showNotification('Contract extended successfully', 'success');
+
+      // Refresh the apartment list to show updated data
+      await fetchApartments();
+
+      // Close the extension dialog
+      setExtendContractOpen(false);
+      setSelectedApartmentForExtension(null);
+
+      // Also close the details dialog if it's open
+      setDetailsOpen(false);
+
+    } catch (error) {
+      console.error('Error extending contract:', error);
+      showNotification('Failed to extend contract', 'error');
+    } finally {
+      setIsExtendingContract(false);
+    }
+  };
+
+  // Open the extension dialog
+  const openExtendContractDialog = (apartment, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setSelectedApartmentForExtension(apartment);
+    setExtendContractOpen(true);
   };
 
   const fetchApartments = async () => {
@@ -235,7 +284,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
 
     // Apply sorting
     if (sortBy === 'alphabetical') {
-      filtered = [...filtered].sort((a, b) => 
+      filtered = [...filtered].sort((a, b) =>
         a.address.localeCompare(b.address)
       );
     } else if (sortBy === 'expiry') {
@@ -247,14 +296,14 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
           'valid': 3,
           'no_date': 4
         };
-        
+
         const aPriority = statusPriority[a.expiryStatus.status] || 5;
         const bPriority = statusPriority[b.expiryStatus.status] || 5;
-        
+
         if (aPriority !== bPriority) {
           return aPriority - bPriority;
         }
-        
+
         // If same status, sort by days until expiry (ascending for expired/expiring, descending for valid)
         if (a.expiryStatus.daysUntilExpiry !== null && b.expiryStatus.daysUntilExpiry !== null) {
           if (a.expiryStatus.status === 'expired' || a.expiryStatus.status === 'expiring_soon') {
@@ -263,7 +312,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             return b.expiryStatus.daysUntilExpiry - a.expiryStatus.daysUntilExpiry;
           }
         }
-        
+
         // Finally, sort alphabetically
         return a.address.localeCompare(b.address);
       });
@@ -626,7 +675,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             }
           }}
         >
-          <MenuItem 
+          <MenuItem
             onClick={() => handleSortChange('expiry')}
             selected={sortBy === 'expiry'}
           >
@@ -638,7 +687,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
               {sortBy === 'expiry' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}
             </ListItemText>
           </MenuItem>
-          <MenuItem 
+          <MenuItem
             onClick={() => handleSortChange('alphabetical')}
             selected={sortBy === 'alphabetical'}
           >
@@ -658,7 +707,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         <Box sx={{ mb: 3 }}>
           <Alert severity="info" sx={{ borderRadius: 1 }}>
             <Typography variant="body2">
-              Properties are sorted by contract expiry: <strong style={{ color: '#d32f2f' }}>Expired</strong> contracts first, 
+              Properties are sorted by contract expiry: <strong style={{ color: '#d32f2f' }}>Expired</strong> contracts first,
               then <strong style={{ color: '#ed6c02' }}>expiring within 30 days</strong>, followed by valid contracts.
             </Typography>
           </Alert>
@@ -713,18 +762,18 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   overflow: 'hidden',
                   transition: 'all 0.2s ease',
                   border: '1px solid',
-                  borderColor: apartment.expiryStatus.status === 'expired' 
-                    ? 'error.main' 
-                    : apartment.expiryStatus.status === 'expiring_soon' 
-                      ? 'warning.main' 
+                  borderColor: apartment.expiryStatus.status === 'expired'
+                    ? 'error.main'
+                    : apartment.expiryStatus.status === 'expiring_soon'
+                      ? 'warning.main'
                       : 'divider',
                   '&:hover': {
                     boxShadow: 3,
                     transform: 'translateY(-4px)',
-                    borderColor: apartment.expiryStatus.status === 'expired' 
-                      ? 'error.main' 
-                      : apartment.expiryStatus.status === 'expiring_soon' 
-                        ? 'warning.main' 
+                    borderColor: apartment.expiryStatus.status === 'expired'
+                      ? 'error.main'
+                      : apartment.expiryStatus.status === 'expiring_soon'
+                        ? 'warning.main'
                         : 'primary.main'
                   },
                   cursor: 'pointer'
@@ -733,10 +782,10 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                 <Box
                   sx={{
                     p: 2,
-                    background: apartment.expiryStatus.status === 'expired' 
-                      ? 'linear-gradient(to right, rgba(211, 47, 47, 0.05), rgba(211, 47, 47, 0))' 
-                      : apartment.expiryStatus.status === 'expiring_soon' 
-                        ? 'linear-gradient(to right, rgba(237, 108, 2, 0.05), rgba(237, 108, 2, 0))' 
+                    background: apartment.expiryStatus.status === 'expired'
+                      ? 'linear-gradient(to right, rgba(211, 47, 47, 0.05), rgba(211, 47, 47, 0))'
+                      : apartment.expiryStatus.status === 'expiring_soon'
+                        ? 'linear-gradient(to right, rgba(237, 108, 2, 0.05), rgba(237, 108, 2, 0))'
                         : 'linear-gradient(to right, rgba(0,0,0,0.02), rgba(0,0,0,0))',
                     borderBottom: '1px solid',
                     borderColor: 'divider',
@@ -748,10 +797,10 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, maxWidth: '80%' }}>
                     <Avatar
                       sx={{
-                        backgroundColor: apartment.expiryStatus.status === 'expired' 
-                          ? 'error.main' 
-                          : apartment.expiryStatus.status === 'expiring_soon' 
-                            ? 'warning.main' 
+                        backgroundColor: apartment.expiryStatus.status === 'expired'
+                          ? 'error.main'
+                          : apartment.expiryStatus.status === 'expiring_soon'
+                            ? 'warning.main'
                             : 'primary.main',
                         width: 36,
                         height: 36
@@ -802,24 +851,24 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                     )}
                     {apartment.contractEndDate && (
                       <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5, gap: 1 }}>
-                        <AccessTimeIcon 
-                          fontSize="small" 
-                          sx={{ 
-                            color: apartment.expiryStatus.status === 'expired' 
-                              ? 'error.main' 
-                              : apartment.expiryStatus.status === 'expiring_soon' 
-                                ? 'warning.main' 
-                                : 'text.secondary', 
-                            fontSize: '1rem' 
-                          }} 
-                        />
-                        <Typography 
-                          variant="body2" 
+                        <AccessTimeIcon
+                          fontSize="small"
                           sx={{
-                            color: apartment.expiryStatus.status === 'expired' 
-                              ? 'error.main' 
-                              : apartment.expiryStatus.status === 'expiring_soon' 
-                                ? 'warning.main' 
+                            color: apartment.expiryStatus.status === 'expired'
+                              ? 'error.main'
+                              : apartment.expiryStatus.status === 'expiring_soon'
+                                ? 'warning.main'
+                                : 'text.secondary',
+                            fontSize: '1rem'
+                          }}
+                        />
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            color: apartment.expiryStatus.status === 'expired'
+                              ? 'error.main'
+                              : apartment.expiryStatus.status === 'expiring_soon'
+                                ? 'warning.main'
                                 : 'text.secondary'
                           }}
                         >
@@ -1118,32 +1167,32 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                         </Box>
                       </Grid>
                       <Grid item xs={12} sm={6}>
-                        <Box sx={{ 
-                          p: 2, 
-                          border: '1px solid', 
-                          borderColor: selectedApartment.expiryStatus.status === 'expired' 
-                            ? 'error.main' 
-                            : selectedApartment.expiryStatus.status === 'expiring_soon' 
-                              ? 'warning.main' 
-                              : 'divider', 
+                        <Box sx={{
+                          p: 2,
+                          border: '1px solid',
+                          borderColor: selectedApartment.expiryStatus.status === 'expired'
+                            ? 'error.main'
+                            : selectedApartment.expiryStatus.status === 'expiring_soon'
+                              ? 'warning.main'
+                              : 'divider',
                           borderRadius: 1,
-                          bgcolor: selectedApartment.expiryStatus.status === 'expired' 
-                            ? 'error.50' 
-                            : selectedApartment.expiryStatus.status === 'expiring_soon' 
-                              ? 'warning.50' 
+                          bgcolor: selectedApartment.expiryStatus.status === 'expired'
+                            ? 'error.50'
+                            : selectedApartment.expiryStatus.status === 'expiring_soon'
+                              ? 'warning.50'
                               : 'inherit'
                         }}>
                           <Typography variant="caption" color="text.secondary" gutterBottom display="block">
                             Contract End Date
                           </Typography>
-                          <Typography 
-                            variant="body2" 
+                          <Typography
+                            variant="body2"
                             fontWeight={500}
                             sx={{
-                              color: selectedApartment.expiryStatus.status === 'expired' 
-                                ? 'error.main' 
-                                : selectedApartment.expiryStatus.status === 'expiring_soon' 
-                                  ? 'warning.main' 
+                              color: selectedApartment.expiryStatus.status === 'expired'
+                                ? 'error.main'
+                                : selectedApartment.expiryStatus.status === 'expiring_soon'
+                                  ? 'warning.main'
                                   : 'inherit'
                             }}
                           >
@@ -1211,6 +1260,20 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
               >
                 Close
               </Button>
+
+              {/* Add the Extend Contract button */}
+              {selectedApartment?.contractEndDate && (
+                <Button
+                  onClick={() => openExtendContractDialog(selectedApartment)}
+                  variant="outlined"
+                  color="secondary"
+                  startIcon={<AccessTimeIcon />}
+                  sx={{ borderRadius: 1, textTransform: 'none' }}
+                >
+                  Extend Contract
+                </Button>
+              )}
+
               {isAdmin && (
                 <Button
                   onClick={() => handleGenerateContract(selectedApartment.id)}
@@ -1225,6 +1288,18 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
           </>
         )}
       </Dialog>
+
+      {/* Contract Extension Dialog */}
+      <ContractExtensionDialog
+        open={extendContractOpen}
+        onClose={() => {
+          setExtendContractOpen(false);
+          setSelectedApartmentForExtension(null);
+        }}
+        apartment={selectedApartmentForExtension}
+        onExtend={handleExtendContract}
+        isSubmitting={isExtendingContract}
+      />
     </Container>
   );
 }

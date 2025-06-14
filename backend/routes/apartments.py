@@ -338,8 +338,77 @@ def delete_apartment(apartment_id: int) -> Tuple[Response, int]:
         )
 
         return jsonify({"message": "Error deleting apartment", "error": str(e)}), 500
-# Add this to routes/apartments.py after the existing routes
 
+
+# NEW ENDPOINT: Contract Extension
+@apartments_bp.route("/apartments/<int:apartment_id>/extend-contract", methods=["PUT"])
+@token_required
+def extend_contract(apartment_id: int) -> Tuple[Response, int]:
+    """
+    Extend the contract end date for a specific apartment.
+    """
+    try:
+        data = request.get_json()
+        if not data or "contractEndDate" not in data:
+            return jsonify({"message": "Contract end date is required"}), 400
+
+        # Check if apartment exists
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
+
+        # Capture original data for logging
+        original_end_date = apartment.contractEndDate.isoformat() if apartment.contractEndDate else None
+
+        # Parse and validate the new contract end date
+        new_end_date_str = data["contractEndDate"]
+        try:
+            new_end_date = datetime.strptime(new_end_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+        # Validate that the new end date is in the future
+        if apartment.contractEndDate and new_end_date <= apartment.contractEndDate:
+            return jsonify({"message": "New end date must be later than current end date"}), 400
+
+        # Update the contract end date
+        apartment.contractEndDate = new_end_date
+        db.session.commit()
+
+        # Log the contract extension
+        ActivityLogger.log_apartment_action(
+            action="extend_contract",
+            apartment_id=apartment_id,
+            details={
+                "address": apartment.address,
+                "original_end_date": original_end_date,
+                "new_end_date": new_end_date_str,
+                "extension_days": (new_end_date - apartment.contractEndDate).days if apartment.contractEndDate else None
+            }
+        )
+
+        return jsonify({
+            "message": "Contract extended successfully",
+            "contractEndDate": new_end_date_str
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error extending contract: {e}")
+        db.session.rollback()
+
+        # Log failure
+        ActivityLogger.log_apartment_action(
+            action="extend_contract",
+            apartment_id=apartment_id,
+            details={"error": str(e), "requested_date": data.get("contractEndDate") if data else None},
+            success=False,
+            error=e
+        )
+
+        return jsonify({"message": "Error extending contract", "error": str(e)}), 500
+
+
+# Add this to routes/apartments.py after the existing routes
 @apartments_bp.route("/apartment/<int:apartment_id>/contracts", methods=["GET"])
 @token_required
 def get_apartment_contracts(apartment_id: int) -> Tuple[Response, int]:

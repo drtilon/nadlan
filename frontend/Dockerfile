@@ -1,19 +1,19 @@
-FROM node:18-alpine
-
+# Stage 1: Build the frontend
+FROM node:18-alpine AS builder
 WORKDIR /app
 
-# Copy package files and install dependencies
-COPY package.json package-lock.json* ./
+COPY package*.json ./
 RUN npm install
 
-# Copy the application source code
 COPY . .
+RUN npm run build
 
-# Expose Vite development server port
+# Stage 2: Serve build with Nginx
+FROM nginx:stable-alpine
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+# Replace default config with our custom one
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
 EXPOSE 3001
-
-# Don't switch to node user - run as root
-# No USER instruction
-
-# Start the Vite development server
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3001"]
+CMD ["nginx", "-g", "daemon off;"]

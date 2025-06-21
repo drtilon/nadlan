@@ -1,19 +1,26 @@
-# Stage 1: Build the frontend
-FROM node:18-alpine AS builder
+FROM node:18-alpine
+
 WORKDIR /app
 
-COPY package*.json ./
+# Create a non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nextjs -u 1001
+
+# Copy package files and install dependencies
+COPY package.json package-lock.json* ./
 RUN npm install
 
+# Copy the application source code
 COPY . .
-RUN npm run build
 
-# Stage 2: Serve build with Nginx
-FROM nginx:stable-alpine
-COPY --from=builder /app/dist /usr/share/nginx/html
+# Change ownership to the nodejs user
+RUN chown -R nextjs:nodejs /app
 
-# Replace default config with our custom one
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Switch to non-root user
+USER nextjs
 
+# Expose Vite development server port
 EXPOSE 3001
-CMD ["nginx", "-g", "daemon off;"]
+
+# Start the Vite development server with proper configuration
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3001"]

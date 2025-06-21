@@ -53,22 +53,10 @@ services:
       - /app/node_modules
     environment:
       - CHOKIDAR_USEPOLLING=true
-    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3001"]
-    networks:
-      - app_network
-
-  nginx:
-    image: nginx:latest
-    container_name: nginx_proxy
-    restart: always
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - frontend
+      - CHOKIDAR_INTERVAL=1000
+      - VITE_HOST=0.0.0.0
+      - VITE_PORT=3001
+    # Remove the command override to use the Dockerfile CMD
     networks:
       - app_network
 

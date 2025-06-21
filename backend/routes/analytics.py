@@ -392,7 +392,6 @@ def get_tenant_payment_analytics():
 
 
 
-
 @analytics_bp.route("/analytics/expenses", methods=["GET"])
 @token_required
 def get_expense_analytics():

@@ -6,15 +6,17 @@ WORKDIR /app
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nextjs -u 1001
 
-# Copy package files and install dependencies
+# Copy package files and install dependencies as root first
 COPY package.json package-lock.json* ./
 RUN npm install
 
 # Copy the application source code
 COPY . .
 
-# Change ownership to the nodejs user
-RUN chown -R nextjs:nodejs /app
+# Create necessary directories and set permissions
+RUN mkdir -p /app/node_modules/.vite-temp && \
+    chown -R nextjs:nodejs /app && \
+    chmod -R 755 /app
 
 # Switch to non-root user
 USER nextjs

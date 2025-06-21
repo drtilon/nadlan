@@ -147,6 +147,8 @@ class User(db.Model):
 
 
 
+
+
 class Payment(db.Model):
     __tablename__ = "payments"
     id = db.Column(db.Integer, primary_key=True)
@@ -154,26 +156,25 @@ class Payment(db.Model):
     month = db.Column(db.String(20), nullable=False)
     year = db.Column(db.Integer, nullable=False, default=lambda: datetime.utcnow().year)
     status = db.Column(db.String(50), nullable=False, default="not_paid")
-    tenants = db.Column(db.Text, nullable=True)  # stored as JSON
+    tenants = db.Column(db.Text, nullable=True)
     internet = db.Column(db.Float, nullable=True, default=0.0)
     electricity = db.Column(db.Float, nullable=True, default=0.0)
     other = db.Column(db.Float, nullable=True, default=0.0)
-    updated_at = db.Column(
-        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
-    # Fields for payment history
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     paymentDate = db.Column(db.DateTime, nullable=True)
     paymentMethod = db.Column(db.String(50), nullable=True, default="bank_transfer")
-    extraPayments = db.Column(db.Text, nullable=True)  # stored as JSON
+    extraPayments = db.Column(db.Text, nullable=True)
     notes = db.Column(db.Text, nullable=True)
     
-    # Create a unique constraint on apartment_id, month, and year
-    __table_args__ = (
-        db.UniqueConstraint('apartment_id', 'month', 'year', name='_apartment_month_year_uc'),
-    )
+    # ADD THESE NEW FIELDS:
+    amount = db.Column(db.Float, nullable=True)
+    tenant_name = db.Column(db.String(255), nullable=True)
+    payment_type = db.Column(db.String(50), nullable=True, default="rent")
+    
+    # REMOVE OR COMMENT OUT THIS LINE:
+    # __table_args__ = (db.UniqueConstraint('apartment_id', 'month', 'year', name='_apartment_month_year_uc'),)
     
     def to_dict(self):
-        """Convert Payment object to dictionary"""
         return {
             "id": self.id,
             "apartment_id": self.apartment_id,
@@ -188,8 +189,14 @@ class Payment(db.Model):
             "paymentDate": self.paymentDate.isoformat() if self.paymentDate else None,
             "paymentMethod": self.paymentMethod or "bank_transfer",
             "extraPayments": json.loads(self.extraPayments) if self.extraPayments else {},
-            "notes": self.notes or ""
+            "notes": self.notes or "",
+            # New fields
+            "amount": float(self.amount) if self.amount is not None else None,
+            "tenant_name": self.tenant_name,
+            "payment_type": self.payment_type or "rent"
         }
+
+
 
 
 

@@ -30,7 +30,10 @@ import {
   Checkbox,
   ListItemText,
   OutlinedInput,
-  Alert
+  Alert,
+  Tabs,
+  Tab,
+  Divider
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -38,7 +41,8 @@ import {
   Delete as DeleteIcon,
   Receipt as ReceiptIcon,
   Payment as PaymentIcon,
-  Description as DescriptionIcon
+  Description as DescriptionIcon,
+  Person as PersonIcon
 } from '@mui/icons-material';
 import api from '../utils/api';
 
@@ -75,6 +79,7 @@ function PaymentScreen({ showNotification }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [periodDialogOpen, setPeriodDialogOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState(null);
+  const [paymentMode, setPaymentMode] = useState(0); // 0: batch, 1: individual
 
   // Form state for payment dialog
   const [paymentForm, setPaymentForm] = useState({
@@ -84,6 +89,18 @@ function PaymentScreen({ showNotification }) {
     paymentMethod: 'bank_transfer',
     paymentDate: new Date().toISOString().split('T')[0],
     paymentType: 'rent',
+    month: MONTHS[new Date().getMonth()],
+    year: currentYear,
+    notes: ''
+  });
+
+  // Form state for individual payment
+  const [individualPaymentForm, setIndividualPaymentForm] = useState({
+    amount: '',
+    tenant_name: '',
+    payment_method: 'bank_transfer',
+    payment_date: new Date().toISOString().split('T')[0],
+    payment_type: 'rent',
     month: MONTHS[new Date().getMonth()],
     year: currentYear,
     notes: ''
@@ -159,22 +176,20 @@ function PaymentScreen({ showNotification }) {
         }
       });
 
-      // Also try to get payment history from the dedicated endpoint
+      // Fetch individual payments from new endpoint
       try {
         const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
         const historyPayments = historyResponse.data || [];
 
-        console.log('Payment history data:', historyPayments);
-
-        // Merge with current year payments, avoiding duplicates
+        // Add individual payments
         historyPayments.forEach(payment => {
           const existingIndex = paymentsList.findIndex(p =>
             p.month === payment.month &&
-            p.year === payment.year
+            p.year === payment.year &&
+            p.id === payment.id
           );
 
           if (existingIndex === -1) {
-            // Add payment if it doesn't exist
             paymentsList.push({
               id: payment.id,
               month: payment.month,
@@ -182,19 +197,18 @@ function PaymentScreen({ showNotification }) {
               amountPaid: payment.amountPaid,
               paymentDate: payment.paymentDate,
               paymentMethod: payment.paymentMethod || 'bank_transfer',
-              paymentType: 'rent',
-              paidBy: '', // History might not have this detail
-              paidFor: [],
+              paymentType: payment.paymentType || 'rent',
+              paidBy: payment.tenant_name || '',
+              paidFor: payment.tenant_name ? [payment.tenant_name] : [],
               notes: payment.notes || '',
-              status: payment.status
+              status: payment.status,
+              isIndividual: true
             });
           }
         });
       } catch (historyError) {
         console.log('Payment history endpoint not available:', historyError.message);
       }
-
-      console.log('Final payments list:', paymentsList);
 
       // Sort payments by date (newest first)
       paymentsList.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
@@ -206,7 +220,6 @@ function PaymentScreen({ showNotification }) {
         setContracts(contractsResponse.data || []);
       } catch (contractError) {
         console.log('Contracts endpoint not available, using fallback');
-        // Create fallback contract from apartment details
         if (apartmentResponse.data?.moveInDate) {
           const fallbackContract = {
             id: 'current',
@@ -338,97 +351,160 @@ function PaymentScreen({ showNotification }) {
     });
   };
 
+  const resetIndividualPaymentForm = () => {
+    const tenants = getCurrentTenants();
+    setIndividualPaymentForm({
+      amount: '',
+      tenant_name: tenants[0] || '',
+      payment_method: 'bank_transfer',
+      payment_date: new Date().toISOString().split('T')[0],
+      payment_type: 'rent',
+      month: MONTHS[new Date().getMonth()],
+      year: currentYear,
+      notes: ''
+    });
+  };
+
   const handleAddPayment = () => {
     resetPaymentForm();
+    resetIndividualPaymentForm();
     setEditingPayment(null);
+    setPaymentMode(0); // Default to batch mode
     setDialogOpen(true);
   };
 
   const handleEditPayment = (payment) => {
-    setPaymentForm({
-      amount: payment.amountPaid?.toString() || '',
-      paidBy: payment.paidBy || '',
-      paidFor: payment.paidFor || [],
-      paymentMethod: payment.paymentMethod || 'bank_transfer',
-      paymentDate: payment.paymentDate?.split('T')[0] || '',
-      paymentType: payment.paymentType || 'rent',
-      month: payment.month || MONTHS[new Date().getMonth()],
-      year: payment.year || currentYear,
-      notes: payment.notes || ''
-    });
+    if (payment.isIndividual) {
+      // Edit individual payment
+      setIndividualPaymentForm({
+        amount: payment.amountPaid?.toString() || '',
+        tenant_name: payment.paidBy || '',
+        payment_method: payment.paymentMethod || 'bank_transfer',
+        payment_date: payment.paymentDate?.split('T')[0] || '',
+        payment_type: payment.paymentType || 'rent',
+        month: payment.month || MONTHS[new Date().getMonth()],
+        year: payment.year || currentYear,
+        notes: payment.notes || ''
+      });
+      setPaymentMode(1);
+    } else {
+      // Edit batch payment
+      setPaymentForm({
+        amount: payment.amountPaid?.toString() || '',
+        paidBy: payment.paidBy || '',
+        paidFor: payment.paidFor || [],
+        paymentMethod: payment.paymentMethod || 'bank_transfer',
+        paymentDate: payment.paymentDate?.split('T')[0] || '',
+        paymentType: payment.paymentType || 'rent',
+        month: payment.month || MONTHS[new Date().getMonth()],
+        year: payment.year || currentYear,
+        notes: payment.notes || ''
+      });
+      setPaymentMode(0);
+    }
     setEditingPayment(payment);
     setDialogOpen(true);
   };
 
   const handleSubmitPayment = async () => {
-    if (!paymentForm.amount || !paymentForm.paidBy || paymentForm.paidFor.length === 0) {
-      showNotification?.('Please fill in all required fields', 'error');
-      return;
-    }
+    if (paymentMode === 1) {
+      // Individual payment submission
+      if (!individualPaymentForm.amount || !individualPaymentForm.tenant_name || !individualPaymentForm.month) {
+        showNotification?.('Please fill in all required fields', 'error');
+        return;
+      }
 
-    try {
-      setLoading(true);
+      try {
+        setLoading(true);
+        const paymentData = {
+          apartment_id: parseInt(selectedApartment),
+          amount: parseFloat(individualPaymentForm.amount),
+          tenant_name: individualPaymentForm.tenant_name,
+          payment_method: individualPaymentForm.payment_method,
+          payment_date: individualPaymentForm.payment_date,
+          payment_type: individualPaymentForm.payment_type,
+          month: individualPaymentForm.month,
+          year: individualPaymentForm.year,
+          notes: individualPaymentForm.notes
+        };
 
-      // First, get the current payment data for this apartment and year
-      const currentPaymentsResponse = await api.get(`/payments/${selectedApartment}?year=${paymentForm.year}`);
-      const currentPayments = currentPaymentsResponse.data?.payments || {};
-
-      // Calculate amount per tenant
-      const totalAmount = parseFloat(paymentForm.amount);
-      const amountPerTenant = totalAmount / paymentForm.paidFor.length;
-
-      // Prepare the tenant data
-      const tenantData = paymentForm.paidFor.map(tenantName => ({
-        name: tenantName,
-        amountDue: amountPerTenant,
-        amountPaid: amountPerTenant,
-        paid: true
-      }));
-
-      // Update the specific month's payment data
-      const updatedPayments = {
-        ...currentPayments,
-        [paymentForm.month]: {
-          ...currentPayments[paymentForm.month],
-          status: 'paid',
-          tenants: tenantData,
-          extraPayments: {
-            internet: 0,
-            electricity: 0,
-            other: 0
-          },
-          paymentDate: paymentForm.paymentDate,
-          paymentMethod: paymentForm.paymentMethod,
-          notes: paymentForm.notes || ''
+        if (editingPayment && editingPayment.isIndividual) {
+          await api.put(`/payment/${editingPayment.id}`, paymentData);
+          showNotification?.('Individual payment updated successfully', 'success');
+        } else {
+          await api.post('/payment/individual', paymentData);
+          showNotification?.('Individual payment added successfully', 'success');
         }
-      };
 
-      // Send the complete payment data back to the server
-      const updateData = {
-        payments: updatedPayments,
-        year: parseInt(paymentForm.year)
-      };
+        setDialogOpen(false);
+        setEditingPayment(null);
+        await loadApartmentData();
+      } catch (error) {
+        console.error('Error saving individual payment:', error);
+        const errorMessage = error.response?.data?.message || 'Error saving individual payment';
+        showNotification?.(errorMessage, 'error');
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // Batch payment submission (existing logic)
+      if (!paymentForm.amount || !paymentForm.paidBy || paymentForm.paidFor.length === 0) {
+        showNotification?.('Please fill in all required fields', 'error');
+        return;
+      }
 
-      console.log('Sending payment update:', updateData);
+      try {
+        setLoading(true);
 
-      // Use the batch update endpoint
-      await api.post(`/payments/${selectedApartment}`, updateData);
+        const currentPaymentsResponse = await api.get(`/payments/${selectedApartment}?year=${paymentForm.year}`);
+        const currentPayments = currentPaymentsResponse.data?.payments || {};
 
-      showNotification?.('Payment saved successfully', 'success');
-      setDialogOpen(false);
-      setEditingPayment(null);
+        const totalAmount = parseFloat(paymentForm.amount);
+        const amountPerTenant = totalAmount / paymentForm.paidFor.length;
 
-      // Reload the data to show the updated payment
-      await loadApartmentData();
+        const tenantData = paymentForm.paidFor.map(tenantName => ({
+          name: tenantName,
+          amountDue: amountPerTenant,
+          amountPaid: amountPerTenant,
+          paid: true
+        }));
 
-    } catch (error) {
-      console.error('Error saving payment:', error);
-      console.error('Error details:', error.response?.data);
+        const updatedPayments = {
+          ...currentPayments,
+          [paymentForm.month]: {
+            ...currentPayments[paymentForm.month],
+            status: 'paid',
+            tenants: tenantData,
+            extraPayments: {
+              internet: 0,
+              electricity: 0,
+              other: 0
+            },
+            paymentDate: paymentForm.paymentDate,
+            paymentMethod: paymentForm.paymentMethod,
+            notes: paymentForm.notes || ''
+          }
+        };
 
-      const errorMessage = error.response?.data?.message || error.message || 'Error saving payment';
-      showNotification?.(errorMessage, 'error');
-    } finally {
-      setLoading(false);
+        const updateData = {
+          payments: updatedPayments,
+          year: parseInt(paymentForm.year)
+        };
+
+        await api.post(`/payments/${selectedApartment}`, updateData);
+
+        showNotification?.('Payment saved successfully', 'success');
+        setDialogOpen(false);
+        setEditingPayment(null);
+        await loadApartmentData();
+
+      } catch (error) {
+        console.error('Error saving payment:', error);
+        const errorMessage = error.response?.data?.message || error.message || 'Error saving payment';
+        showNotification?.(errorMessage, 'error');
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -712,6 +788,7 @@ function PaymentScreen({ showNotification }) {
                         <TableCell>Type</TableCell>
                         <TableCell align="right">Amount</TableCell>
                         <TableCell>Method</TableCell>
+                        <TableCell>Mode</TableCell>
                         <TableCell align="center">Actions</TableCell>
                       </TableRow>
                     </TableHead>
@@ -745,6 +822,14 @@ function PaymentScreen({ showNotification }) {
                             {formatCurrency(payment.amountPaid)}
                           </TableCell>
                           <TableCell>{payment.paymentMethod || 'bank_transfer'}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={payment.isIndividual ? 'Individual' : 'Batch'}
+                              size="small"
+                              color={payment.isIndividual ? 'primary' : 'default'}
+                              icon={payment.isIndividual ? <PersonIcon /> : <PaymentIcon />}
+                            />
+                          </TableCell>
                           <TableCell align="center">
                             <IconButton
                               size="small"
@@ -782,140 +867,261 @@ function PaymentScreen({ showNotification }) {
           {editingPayment ? 'Edit Payment' : 'Add Payment'}
         </DialogTitle>
         <DialogContent>
-          <Grid container spacing={3} sx={{ mt: 1 }}>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Amount"
-                type="number"
-                value={paymentForm.amount}
-                onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
-                required
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>Paid By</InputLabel>
-                <Select
-                  value={paymentForm.paidBy}
-                  label="Paid By"
-                  onChange={(e) => setPaymentForm({ ...paymentForm, paidBy: e.target.value })}
-                >
-                  {tenants.map((tenant) => (
-                    <MenuItem key={tenant} value={tenant}>
-                      {tenant}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>Paid For</InputLabel>
-                <Select
-                  multiple
-                  value={paymentForm.paidFor}
-                  onChange={(e) => setPaymentForm({ ...paymentForm, paidFor: e.target.value })}
-                  input={<OutlinedInput label="Paid For" />}
-                  renderValue={(selected) => (
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                      {selected.map((value) => (
-                        <Chip key={value} label={value} size="small" />
-                      ))}
-                    </Box>
-                  )}
-                >
-                  {tenants.map((tenant) => (
-                    <MenuItem key={tenant} value={tenant}>
-                      <Checkbox checked={paymentForm.paidFor.indexOf(tenant) > -1} />
-                      <ListItemText primary={tenant} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>Payment Type</InputLabel>
-                <Select
-                  value={paymentForm.paymentType}
-                  label="Payment Type"
-                  onChange={(e) => setPaymentForm({ ...paymentForm, paymentType: e.target.value })}
-                >
-                  {PAYMENT_TYPES.map((type) => (
-                    <MenuItem key={type.value} value={type.value}>
-                      {type.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>Payment Method</InputLabel>
-                <Select
-                  value={paymentForm.paymentMethod}
-                  label="Payment Method"
-                  onChange={(e) => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })}
-                >
-                  {PAYMENT_METHODS.map((method) => (
-                    <MenuItem key={method.value} value={method.value}>
-                      {method.label}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Payment Date"
-                type="date"
-                value={paymentForm.paymentDate}
-                onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Grid container spacing={1}>
-                <Grid item xs={8}>
-                  <FormControl fullWidth>
-                    <InputLabel>Month</InputLabel>
-                    <Select
-                      value={paymentForm.month}
-                      label="Month"
-                      onChange={(e) => setPaymentForm({ ...paymentForm, month: e.target.value })}
-                    >
-                      {MONTHS.map((month) => (
-                        <MenuItem key={month} value={month}>
-                          {month}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-                <Grid item xs={4}>
-                  <TextField
-                    fullWidth
-                    label="Year"
-                    type="number"
-                    value={paymentForm.year}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, year: parseInt(e.target.value) })}
-                  />
+          <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+            <Tabs value={paymentMode} onChange={(e, newValue) => setPaymentMode(newValue)}>
+              <Tab label="Batch Payment" icon={<PaymentIcon />} />
+              <Tab label="Individual Payment" icon={<PersonIcon />} />
+            </Tabs>
+          </Box>
+
+          {paymentMode === 0 ? (
+            // Batch Payment Form
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Amount"
+                  type="number"
+                  value={paymentForm.amount}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                  required
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Paid By</InputLabel>
+                  <Select
+                    value={paymentForm.paidBy}
+                    label="Paid By"
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paidBy: e.target.value })}
+                  >
+                    {tenants.map((tenant) => (
+                      <MenuItem key={tenant} value={tenant}>
+                        {tenant}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Paid For</InputLabel>
+                  <Select
+                    multiple
+                    value={paymentForm.paidFor}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paidFor: e.target.value })}
+                    input={<OutlinedInput label="Paid For" />}
+                    renderValue={(selected) => (
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                        {selected.map((value) => (
+                          <Chip key={value} label={value} size="small" />
+                        ))}
+                      </Box>
+                    )}
+                  >
+                    {tenants.map((tenant) => (
+                      <MenuItem key={tenant} value={tenant}>
+                        <Checkbox checked={paymentForm.paidFor.indexOf(tenant) > -1} />
+                        <ListItemText primary={tenant} />
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Payment Type</InputLabel>
+                  <Select
+                    value={paymentForm.paymentType}
+                    label="Payment Type"
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentType: e.target.value })}
+                  >
+                    {PAYMENT_TYPES.map((type) => (
+                      <MenuItem key={type.value} value={type.value}>
+                        {type.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Payment Method</InputLabel>
+                  <Select
+                    value={paymentForm.paymentMethod}
+                    label="Payment Method"
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })}
+                  >
+                    {PAYMENT_METHODS.map((method) => (
+                      <MenuItem key={method.value} value={method.value}>
+                        {method.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Payment Date"
+                  type="date"
+                  value={paymentForm.paymentDate}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Grid container spacing={1}>
+                  <Grid item xs={8}>
+                    <FormControl fullWidth>
+                      <InputLabel>Month</InputLabel>
+                      <Select
+                        value={paymentForm.month}
+                        label="Month"
+                        onChange={(e) => setPaymentForm({ ...paymentForm, month: e.target.value })}
+                      >
+                        {MONTHS.map((month) => (
+                          <MenuItem key={month} value={month}>
+                            {month}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <TextField
+                      fullWidth
+                      label="Year"
+                      type="number"
+                      value={paymentForm.year}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, year: parseInt(e.target.value) })}
+                    />
+                  </Grid>
                 </Grid>
               </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Notes (optional)"
+                  multiline
+                  rows={3}
+                  value={paymentForm.notes}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                />
+              </Grid>
             </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Notes (optional)"
-                multiline
-                rows={3}
-                value={paymentForm.notes}
-                onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
-              />
+          ) : (
+            // Individual Payment Form
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Amount"
+                  type="number"
+                  value={individualPaymentForm.amount}
+                  onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, amount: e.target.value })}
+                  required
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth required>
+                  <InputLabel>Tenant</InputLabel>
+                  <Select
+                    value={individualPaymentForm.tenant_name}
+                    label="Tenant"
+                    onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, tenant_name: e.target.value })}
+                  >
+                    {tenants.map((tenant) => (
+                      <MenuItem key={tenant} value={tenant}>
+                        {tenant}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Payment Type</InputLabel>
+                  <Select
+                    value={individualPaymentForm.payment_type}
+                    label="Payment Type"
+                    onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, payment_type: e.target.value })}
+                  >
+                    {PAYMENT_TYPES.map((type) => (
+                      <MenuItem key={type.value} value={type.value}>
+                        {type.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Payment Method</InputLabel>
+                  <Select
+                    value={individualPaymentForm.payment_method}
+                    label="Payment Method"
+                    onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, payment_method: e.target.value })}
+                  >
+                    {PAYMENT_METHODS.map((method) => (
+                      <MenuItem key={method.value} value={method.value}>
+                        {method.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Payment Date"
+                  type="date"
+                  value={individualPaymentForm.payment_date}
+                  onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, payment_date: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Grid container spacing={1}>
+                  <Grid item xs={8}>
+                    <FormControl fullWidth>
+                      <InputLabel>Month</InputLabel>
+                      <Select
+                        value={individualPaymentForm.month}
+                        label="Month"
+                        onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, month: e.target.value })}
+                      >
+                        {MONTHS.map((month) => (
+                          <MenuItem key={month} value={month}>
+                            {month}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <TextField
+                      fullWidth
+                      label="Year"
+                      type="number"
+                      value={individualPaymentForm.year}
+                      onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, year: parseInt(e.target.value) })}
+                    />
+                  </Grid>
+                </Grid>
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Notes (optional)"
+                  multiline
+                  rows={3}
+                  value={individualPaymentForm.notes}
+                  onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, notes: e.target.value })}
+                />
+              </Grid>
             </Grid>
-          </Grid>
+          )}
         </DialogContent>
         <DialogActions sx={{ p: 3 }}>
           <Button onClick={() => setDialogOpen(false)}>
@@ -924,7 +1130,10 @@ function PaymentScreen({ showNotification }) {
           <Button
             variant="contained"
             onClick={handleSubmitPayment}
-            disabled={loading || !paymentForm.amount || !paymentForm.paidBy || paymentForm.paidFor.length === 0}
+            disabled={loading || 
+              (paymentMode === 0 && (!paymentForm.amount || !paymentForm.paidBy || paymentForm.paidFor.length === 0)) ||
+              (paymentMode === 1 && (!individualPaymentForm.amount || !individualPaymentForm.tenant_name))
+            }
           >
             {editingPayment ? 'Update' : 'Add'} Payment
           </Button>

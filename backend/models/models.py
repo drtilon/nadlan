@@ -190,7 +190,8 @@ class Payment(db.Model):
     
     def to_dict(self):
         # Determine if this is an individual payment
-        is_individual = bool(self.amount and self.tenant_name)
+        is_individual = bool(hasattr(self, 'amount') and self.amount and 
+                           hasattr(self, 'tenant_name') and self.tenant_name)
         
         result = {
             "id": self.id,
@@ -199,20 +200,24 @@ class Payment(db.Model):
             "year": self.year,
             "status": self.status,
             "paymentDate": self.paymentDate.isoformat() if self.paymentDate else None,
-            "paymentMethod": self.paymentMethod or "bank_transfer",
-            "notes": self.notes or "",
+            "paymentMethod": getattr(self, 'paymentMethod', None) or "bank_transfer",
+            "notes": getattr(self, 'notes', None) or "",
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "isIndividual": is_individual
         }
         
         if is_individual:
             # Individual payment
+            amount_value = getattr(self, 'amount', 0) or 0
+            tenant_name_value = getattr(self, 'tenant_name', '') or ''
+            payment_type_value = getattr(self, 'payment_type', 'rent') or 'rent'
+            
             result.update({
-                "amount": float(self.amount) if self.amount is not None else 0.0,
-                "tenant_name": self.tenant_name,
-                "payment_type": self.payment_type or "rent",
-                "amountPaid": float(self.amount) if self.amount is not None else 0.0,
-                "tenant_names": [self.tenant_name] if self.tenant_name else []
+                "amount": float(amount_value),
+                "tenant_name": tenant_name_value,
+                "payment_type": payment_type_value,
+                "amountPaid": float(amount_value),
+                "tenant_names": [tenant_name_value] if tenant_name_value else []
             })
         else:
             # Batch payment (legacy format)
@@ -232,7 +237,8 @@ class Payment(db.Model):
                 
                 # Parse extra payments
                 try:
-                    extra_payments = json.loads(self.extraPayments) if self.extraPayments else {}
+                    extra_payments_str = getattr(self, 'extraPayments', None)
+                    extra_payments = json.loads(extra_payments_str) if extra_payments_str else {}
                     result["extraPayments"] = extra_payments
                 except:
                     result["extraPayments"] = {
@@ -240,7 +246,7 @@ class Payment(db.Model):
                         "electricity": result["electricity"],
                         "other": result["other"]
                     }
-            except:
+            except Exception as e:
                 # Fallback for malformed data
                 result.update({
                     "tenants": [],

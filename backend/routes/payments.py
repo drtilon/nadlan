@@ -255,7 +255,11 @@ def get_payment_history(apartment_id):
         if year_filter:
             query = query.filter_by(year=year_filter)
         
-        payments = query.order_by(Payment.paymentDate.desc().nullslast(), Payment.updated_at.desc()).all()
+        # MySQL-compatible ordering - NULL paymentDates will come last naturally with DESC
+        payments = query.order_by(
+            Payment.paymentDate.desc(),
+            Payment.updated_at.desc()
+        ).all()
         history = []
 
         for payment in payments:

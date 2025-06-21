@@ -1,4 +1,3 @@
-# payment_migration.py - Database migration for Payment table fixes
 from flask import Flask
 from config import Config
 from extentions import db
@@ -12,13 +11,16 @@ db.init_app(app)
 def migrate_payment_table():
     """
     Migrate the Payment table to support both individual and batch payments.
-    This adds the new columns needed for individual payments.
+    This adds the new columns needed for individual payments and removes unnecessary constraints.
     """
     with app.app_context():
         try:
             print("Starting Payment table migration...")
             
             with db.engine.connect() as conn:
+                # Begin a transaction
+                trans = conn.begin()
+                
                 # Add new columns for individual payments if they don't exist
                 try:
                     conn.execute(text("ALTER TABLE payments ADD COLUMN amount FLOAT NULL"))
@@ -38,16 +40,16 @@ def migrate_payment_table():
                 except Exception as e:
                     print(f"Payment_type column already exists or error: {e}")
                 
-                # Ensure month column can handle longer identifiers for individual payments
+                # Ensure month column can handle longer identifiers
                 try:
                     conn.execute(text("ALTER TABLE payments MODIFY COLUMN month VARCHAR(50) NOT NULL"))
                     print("✅ Modified month column to VARCHAR(50)")
                 except Exception as e:
-                    print(f"Month column modification: {e}")
+                    print(f"Month column modification error: {e}")
                 
                 # Remove unique constraint if it exists (to allow multiple payments per month)
                 try:
-                    # First check if the constraint exists
+                    # Check if the constraint exists
                     constraint_check = conn.execute(text("""
                         SELECT CONSTRAINT_NAME 
                         FROM information_schema.TABLE_CONSTRAINTS 
@@ -61,7 +63,7 @@ def migrate_payment_table():
                         conn.execute(text(f"ALTER TABLE payments DROP CONSTRAINT {constraint_name}"))
                         print(f"✅ Removed unique constraint: {constraint_name}")
                     else:
-                        # Try common constraint names
+                        # Try common constraint names as fallback
                         try:
                             conn.execute(text("ALTER TABLE payments DROP CONSTRAINT _apartment_month_year_uc"))
                             print("✅ Removed unique constraint: _apartment_month_year_uc")
@@ -69,7 +71,7 @@ def migrate_payment_table():
                             print("No unique constraint found to remove")
                             
                 except Exception as e:
-                    print(f"Constraint removal: {e}")
+                    print(f"Constraint removal error: {e}")
                 
                 # Ensure paymentDate and paymentMethod columns exist
                 try:
@@ -109,13 +111,14 @@ def migrate_payment_table():
                 except Exception as e:
                     print(f"Error updating year values: {e}")
                 
-                conn.commit()
-            
-            print("✅ Payment table migration completed successfully!")
-            return True
-            
+                # Commit the transaction
+                trans.commit()
+                print("✅ Payment table migration completed successfully!")
+                return True
+                
         except Exception as e:
             print(f"❌ Migration error: {e}")
+            trans.rollback()
             return False
 
 def verify_payment_table():
@@ -170,6 +173,9 @@ def clean_duplicate_payments():
             print("\nCleaning duplicate payments...")
             
             with db.engine.connect() as conn:
+                # Begin a transaction
+                trans = conn.begin()
+                
                 # Find duplicate batch payments (same apartment_id, month, year, and month is a standard month name)
                 duplicates = conn.execute(text("""
                     SELECT apartment_id, month, year, COUNT(*) as count
@@ -206,13 +212,17 @@ def clean_duplicate_payments():
                             'year': year
                         })
                     
-                    conn.commit()
+                    trans.commit()
                     print("✅ Cleaned up duplicate batch payments")
                 else:
                     print("✅ No duplicate batch payments found")
                     
+                return True
+                
         except Exception as e:
             print(f"❌ Error cleaning duplicates: {e}")
+            trans.rollback()
+            return False
 
 if __name__ == "__main__":
     print("Payment Table Migration Tool")
@@ -223,8 +233,11 @@ if __name__ == "__main__":
         # Verify the migration
         if verify_payment_table():
             # Clean up duplicates
-            clean_duplicate_payments()
-            print("\n🎉 Migration completed successfully!")
+            if clean_duplicate_payments():
+                print("\n🎉 Migration completed successfully!")
+            else:
+                print("\n❌ Duplicate cleanup failed!")
+                sys.exit(1)
         else:
             print("\n❌ Migration verification failed!")
             sys.exit(1)

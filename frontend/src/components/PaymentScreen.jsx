@@ -542,7 +542,7 @@ function PaymentScreen({ showNotification }) {
     <Box sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
       {/* Header */}
       <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" gutterBottom sx={{ fontWeight: 600 }}>
+        <Typography variant="h4" gutterBottom sx={{ fontWeight: '600' }}>
           Payment Management
         </Typography>
         <Typography variant="body1" color="text.secondary">
@@ -611,7 +611,7 @@ function PaymentScreen({ showNotification }) {
                 </Grid>
                 <Grid item xs={12} md={4}>
                   <Box sx={{ textAlign: { xs: 'left', md: 'right' } }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: { xs: 'flex-start', md: 'flex-end' }, gap: 1, mb: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyItems: { xs: 'flex-start', md: 'flex-end' }, gap: 1, mb: 1 }}>
                       <Typography variant="body2" color="text.secondary">
                         Current Period
                       </Typography>
@@ -621,10 +621,10 @@ function PaymentScreen({ showNotification }) {
                         size="small"
                       />
                     </Box>
-                    <Typography variant="h6" color="primary" sx={{ fontWeight: 600 }}>
+                    <Typography variant="h6" color="primary" sx={{ fontWeight: '600' }}>
                       {formatCurrency(contractInfo.totalPaid)} / {formatCurrency(contractInfo.totalDue)}
                     </Typography>
-                    <Typography variant="body2" color="error.main" sx={{ fontWeight: 500 }}>
+                    <Typography variant="body2" color="error.main" sx={{ fontWeight: '500' }}>
                       Remaining: {formatCurrency(contractInfo.remaining)}
                     </Typography>
                     <Typography variant="caption" color="text.secondary" display="block">
@@ -649,7 +649,7 @@ function PaymentScreen({ showNotification }) {
           {/* Payments Table */}
           <Card>
             <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyItems: 'space-between', mb: 3 }}>
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   <ReceiptIcon sx={{ mr: 1 }} />
                   <Typography variant="h6">Payment History</Typography>
@@ -677,21 +677,21 @@ function PaymentScreen({ showNotification }) {
 
               {/* Contract Summary */}
               {selectedContract !== 'all' && contractInfo.contract && (
-                <Card sx={{ mb: 3, bgcolor: 'grey.50' }}>
-                  <CardContent sx={{ py: 2 }}>
-                    <Grid container spacing={2} alignItems="center">
-                      <Grid item xs={12} md={8}>
-                        <Typography variant="subtitle2" gutterBottom>
-                          {selectedContract === 'current' ? 'Current Payment Period' : 'Selected Payment Period'} Summary
+                <Box sx={{}}>
+                  <CardContent sx={{ py: '2' }}>
+                    <Grid.container spacing={2} alignItems="center">
+                      <Grid item xs={12} sx={{ md: '8' }}>
+                        <Typography variant="subtitle2" gutterBottom="true">
+                          {selectedContract === 'current' ? 'Current Payment Period' : 'Selected Payment Period'} Summary:
                         </Typography>
-                        <Stack direction="row" spacing={2} flexWrap="wrap">
+                        <Stack direction="row" spacing={2} sx={{ display: 'flex', flexWrap: 'wrap' }}>
                           <Chip
-                            label={`${formatDate(contractInfo.contract.startDate)} - ${contractInfo.contract.endDate ? formatDate(contractInfo.contract.endDate) : 'Ongoing'}`}
+                            label={`${formatDate(contractInfo.contractInfo.contractStartDate)} - ${contractInfo.contract?.endDate ? formatDate(contractInfo.contract?.endDate)} : null}`}
                             variant="outlined"
                             size="small"
                           />
                           <Chip
-                            label={`${formatCurrency(contractInfo.contract.rent || 0)}/month`}
+                            label={`${formatCurrency(contractInfo.contract?.rent || '0')}`}
                             variant="outlined"
                             size="small"
                           />
@@ -702,424 +702,515 @@ function PaymentScreen({ showNotification }) {
                           />
                         </Stack>
                       </Grid>
-                      <Grid item xs={12} md={4}>
+                      <Grid item xs={12} sx={{ md: '4' }}>
                         <Box sx={{ textAlign: { xs: 'left', md: 'right' } }}>
                           <Typography variant="body2" color="text.secondary">
-                            Period Progress
-                          </Typography>
-                          <Typography variant="h6" color="primary" sx={{ fontWeight: 600 }}>
-                            {formatCurrency(contractInfo.totalPaid)} / {formatCurrency(contractInfo.totalDue)}
-                          </Typography>
-                          <Typography variant="body2" color="error.main" sx={{ fontWeight: 500 }}>
-                            Remaining: {formatCurrency(contractInfo.remaining)}
-                          </Typography>
-                        </Box>
+                            Period Progress:
+                              <Typography variant="h6" color="primary} sx={{ fontWeight: '600' }}>
+                                {formatCurrency(contractInfo.totalPaid)} / {formatCurrency(contractInfo.totalDue)}
+                              </Typography>
+                              <Typography variant="body2" color="error.main" sx={{ fontWeight: '500' }}>
+                                Remaining: {formatCurrency(contractInfo.remaining)}
+                              </Typography>
+                            </Typography>
+                          </Box>
+                        </Grid>
                       </Grid>
-                    </Grid>
-                  </CardContent>
+                    </CardContent>
+                  ))}
                 </Card>
-              )}
+              ))}
 
               {/* Payments Table */}
               {filteredPayments.length === 0 ? (
-                <Box sx={{ textAlign: 'center', py: 6 }}>
-                  <Typography variant="h6" color="text.secondary">
-                    No payments recorded
-                  </Typography>
-                  <Button
-                    variant="outlined"
-                    startIcon={<AddIcon />}
-                    onClick={handleAddPayment}
-                    sx={{ mt: 2 }}
-                  >
-                    Add First Payment
-                  </Button>
-                </Box>
-              ) : (
-                <TableContainer>
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Date</TableCell>
-                        <TableCell>Period</TableCell>
-                        <TableCell>Paid By</TableCell>
-                        <TableCell>Paid For</TableCell>
-                        <TableCell>Type</TableCell>
-                        <TableCell align="right">Amount</TableCell>
-                        <TableCell>Method</TableCell>
-                        <TableCell>Mode</TableCell>
-                        <TableCell align="center">Actions</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {filteredPayments.map((payment) => (
-                        <TableRow key={payment.id} hover>
-                          <TableCell>{formatDate(payment.paymentDate)}</TableCell>
-                          <TableCell>{payment.month} {payment.year}</TableCell>
-                          <TableCell>{payment.paidBy || 'N/A'}</TableCell>
-                          <TableCell>
-                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                              {(payment.paidFor || []).map((tenant, idx) => (
+                <Box sx={{ textAlign: 'center', py: '6' }}>
+                    <Typography variant="h6" color="text.secondary">
+                      No payments recorded
+                    </Typography>
+                    <Button
+                      variant="outlined"
+                      startIcon={<AddIcon />}
+                      onClick={handleAddPayment}
+                      sx={{ mt: 2 }}
+                    >
+                      Add First Payment
+                    </Button>
+                  </Box>
+                ) : (
+                  <TableContainer>
+                    <Table>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Date</TableCell>
+                          <TableCell>Period</TableCell>
+                          <TableCell>Paid By</TableCell>
+                          <TableCell>Paid For</TableCell>
+                          <TableCell>Type</TableCell>
+                          <TableCell align="right">Amount</TableCell>
+                          <TableCell>Method</TableCell>
+                          <TableCell>Mode</TableCell>
+                          <TableCell align="center">Actions</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {filteredPayments.map((payment) => (
+                          <TableRow key={payment.id} hover>
+                            <TableCell>{formatDate(payment.paymentDate)}</TableCell>
+                            <TableCell>{payment.month} {payment.year}</TableCell>
+                            <TableCell>{payment.paidBy || 'N/A'}</TableCell>
+                            <TableCell>
+                              <Box sx={{}}>
+                                {(payment.paidFor || [])}:payment.paidFor.map((tenant, idx) => (
+                                  <Chip
+                                    key={idx}
+                                    label={tenant}
+                                    size="small"
+                                    variant="outlined"
+                                    sx={{ fontSize: '0.75rem' }}
+                                  />
+                                ))}
+                              </TableCell>
+                              <TableCell>
                                 <Chip
-                                  key={idx}
-                                  label={tenant}
+                                  label={payment.paymentType || 'rent'}
                                   size="small"
                                   variant="outlined"
-                                  sx={{ fontSize: '0.75rem' }}
                                 />
-                              ))}
-                            </Box>
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              label={payment.paymentType || 'rent'}
-                              size="small"
-                              variant="outlined"
-                            />
-                          </TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 600 }}>
-                            {formatCurrency(payment.amountPaid)}
-                          </TableCell>
-                          <TableCell>{payment.paymentMethod || 'bank_transfer'}</TableCell>
-                          <TableCell>
-                            <Chip
-                              label={payment.isIndividual ? 'Individual' : 'Batch'}
-                              size="small"
-                              color={payment.isIndividual ? 'primary' : 'default'}
-                              icon={payment.isIndividual ? <PersonIcon /> : <PaymentIcon />}
-                            />
-                          </TableCell>
-                          <TableCell align="center">
-                            <IconButton
-                              size="small"
-                              onClick={() => handleEditPayment(payment)}
-                            >
-                              <EditIcon />
-                            </IconButton>
-                            <IconButton
-                              size="small"
-                              onClick={() => handleDeletePayment(payment.id)}
-                              color="error"
-                            >
-                              <DeleteIcon />
-                            </IconButton>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
-
-      {/* Add/Edit Payment Dialog */}
-      <Dialog
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>
-          {editingPayment ? 'Edit Payment' : 'Add Payment'}
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-            <Tabs value={paymentMode} onChange={(e, newValue) => setPaymentMode(newValue)}>
-              <Tab label="Batch Payment" icon={<PaymentIcon />} />
-              <Tab label="Individual Payment" icon={<PersonIcon />} />
-            </Tabs>
-          </Box>
-
-          {paymentMode === 1 ? (
-            // Individual Payment Form
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Amount"
-                  type="number"
-                  value={individualPaymentForm.amount}
-                  onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, amount: e.target.value })}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth required>
-                  <InputLabel>Tenant</InputLabel>
-                  <Select
-                    value={individualPaymentForm.tenant_name}
-                    label="Tenant"
-                    onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, tenant_name: e.target.value })}
-                  >
-                    {tenants.map((tenant) => (
-                      <MenuItem key={tenant} value={tenant}>
-                        {tenant}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Paid By</InputLabel>
-                  <Select
-                    value={paymentForm.paidBy}
-                    label="Paid By"
-                    onChange={(e) => setPaymentForm({ ...paymentForm, paidBy: e.target.value })}
-                  >
-                    {tenants.map((tenant) => (
-                      <MenuItem key={tenant} value={tenant}>
-                        {tenant}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Paid For</InputLabel>
-                  <Select
-                    multiple
-                    value={paymentForm.paidFor}
-                    onChange={(e) => setPaymentForm({ ...paymentForm, paidFor: e.target.value })}
-                    input={<OutlinedInput label="Paid For" />}
-                    renderValue={(selected) => (
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                        {selected.map((value) => (
-                          <Chip key={value} label={value} size="small" />
-                        ))}
-                      </Box>
-                    )}
-                  >
-                    {tenants.map((tenant) => (
-                      <MenuItem key={tenant} value={tenant}>
-                        <Checkbox checked={paymentForm.paidFor.indexOf(tenant) > -1} />
-                        <ListItemText primary={tenant} />
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Payment Type</InputLabel>
-                  <Select
-                    value={paymentForm.paymentType}
-                    label="Payment Type"
-                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentType: e.target.value })}
-                  >
-                    {PAYMENT_TYPES.map((type) => (
-                      <MenuItem key={type.value} value={type.value}>
-                        {type.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Payment Method</InputLabel>
-                  <Select
-                    value={paymentForm.paymentMethod}
-                    label="Payment Method"
-                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })}
-                  >
-                    {PAYMENT_METHODS.map((method) => (
-                      <MenuItem key={method.value} value={method.value}>
-                        {method.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Payment Date"
-                  type="date"
-                  value={paymentForm.paymentDate}
-                  onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <Grid container spacing={1}>
-                  <Grid item xs={8}>
-                    <FormControl fullWidth>
-                      <InputLabel>Month</InputLabel>
-                      <Select
-                        value={paymentForm.month}
-                        label="Month"
-                        onChange={(e) => setPaymentForm({ ...paymentForm, month: e.target.value })}
-                      >
-                        {MONTHS.map((month) => (
-                          <MenuItem key={month} value={month}>
-                            {month}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  <Grid item xs={4}>
-                    <TextField
-                      fullWidth
-                      label="Year"
-                      type="number"
-                      value={paymentForm.year}
-                      onChange={(e) => setPaymentForm({ ...paymentForm, year: parseInt(e.target.value) })}
-                    />
-                  </Grid>
-                </Grid>
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Notes (optional)"
-                  multiline
-                  rows={3}
-                  value={paymentForm.notes}
-                  onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
-                />
-              </Grid>
-            </Grid>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ p: 3 }}>
-          <Button onClick={() => setDialogOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={handleSubmitPayment}
-            disabled={loading || 
-              (paymentMode === 0 && (!paymentForm.amount || !paymentForm.paidBy || paymentForm.paidFor.length === 0)) ||
-              (paymentMode === 1 && (!individualPaymentForm.amount || !individualPaymentForm.tenant_name))
-            }
-          >
-            {editingPayment ? 'Update' : 'Add'} Payment
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* New Payment Period Dialog */}
-      <Dialog
-        open={periodDialogOpen}
-        onClose={() => setPeriodDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Create New Payment Period</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Starting a new payment period will update the apartment's contract information with the current tenants.
-          </Typography>
-          <Grid container spacing={3} sx={{ mt: 1 }}>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Period Start Date"
-                type="date"
-                value={periodForm.startDate}
-                onChange={(e) => setPeriodForm({ ...periodForm, startDate: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-                required
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Period End Date"
-                type="date"
-                value={periodForm.endDate}
-                onChange={(e) => setPeriodForm({ ...periodForm, endDate: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-                helperText="Leave empty for open-ended period"
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Monthly Rent"
-                type="number"
-                value={periodForm.rent}
-                onChange={(e) => setPeriodForm({ ...periodForm, rent: e.target.value })}
-                required
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Tenants</InputLabel>
-                <Select
-                  multiple
-                  value={periodForm.tenants}
-                  onChange={(e) => setPeriodForm({ ...periodForm, tenants: e.target.value })}
-                  input={<OutlinedInput label="Tenants" />}
-                  renderValue={(selected) => (
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                      {selected.map((value) => (
-                        <Chip key={value} label={value} size="small" />
-                      ))}
-                    </Box>
-                  )}
-                >
-                  {tenants.map((tenant) => (
-                    <MenuItem key={tenant} value={tenant}>
-                      <Checkbox checked={periodForm.tenants.indexOf(tenant) > -1} />
-                      <ListItemText primary={tenant} />
-                    </MenuItem>
+                              </TableCell>
+                              <TableCell align="right" sx={{ fontWeight: '600' }}>
+                                {formatCurrency(payment.amountPaid)}
+                              </TableCell>
+                              <TableCell>{payment.paymentMethod || 'N/A'}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={payment.isIndividual ? 'Individual' : 'Batch'}
+                                  size="small"
+                                  color={payment.isIndividual ? 'primary' : 'default'}
+                                  icon={payment.isIndividual ? <PersonIcon /> : <PaymentIcon />}
+                                />
+                              </TableCell>
+                              <TableCell align="center">
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleEditPayment(payment)}
+                                >
+                                  <EditIcon />
+                                </Button>
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleDeletePayment(payment.id)}
+                                  color="error"
+                                >
+                                  <DeleteIcon />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
                   ))}
-                </Select>
-              </FormControl>
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions sx={{ p: 3 }}>
-          <Button onClick={() => setPeriodDialogOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={handleCreatePaymentPeriod}
-            disabled={loading || !periodForm.startDate || !periodForm.rent}
-          >
-            Create Payment Period
-          </Button>
-        </DialogActions>
-      </Dialog>
 
-      {/* Loading indicator */}
-      {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
-          <CircularProgress />
-        </Box>
-      )}
+                {/* Add/Edit Payment Dialog */}
+                <Dialog
+                  open={dialogOpen}
+                  onClose={() => setDialogOpen(false)}
+                  maxWidth="md"
+                  fullWidth
+                >
+                  <DialogTitle>
+                    {editingPayment ? 'Edit Payment' : 'Add Payment'}
+                  </DialogTitle>
+                  <DialogContent>
+                    <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+                      <Tabs value={paymentMode} onChange={(e, newValue) => setPaymentMode(newValue)}>
+                        <Tab label="Batch Payment" icon={<PaymentIcon />} />
+                        <Tab label="Individual Payment" icon={<PersonIcon />} />
+                      </Tabs>
+                    </Box>
 
-      {/* No apartment selected state */}
-      {!selectedApartment && !loading && (
-        <Card>
-          <CardContent sx={{ textAlign: 'center', py: 6 }}>
-            <DescriptionIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-            <Typography variant="h6" color="text.secondary" gutterBottom>
-              Select an Apartment
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Choose an apartment from the dropdown above to manage its payments
-            </Typography>
-          </CardContent>
-        </Card>
-      )}
+                    {paymentMode === 1 ? (
+                      // Individual Payment Form
+                      <Grid container spacing={3}>
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            label="Amount"
+                            type="number"
+                            value={individualPaymentForm.amount}
+                            onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, amount: e.target.value })}
+                            required
+                          />
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <FormControl fullWidth required>
+                            <InputLabel>Tenant</InputLabel>
+                            <Select
+                              value={individualPaymentForm.tenant_name}
+                              label="Tenant"
+                              onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, tenant_name: e.target.value })}
+                            >
+                              {tenants.map((tenant) => (
+                                <MenuItem key={tenant} value={tenant}>
+                                  {tenant}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <FormControl fullWidth>
+                            <InputLabel>Payment Type</InputLabel>
+                            <Select
+                              value={individualPaymentForm.payment_type}
+                              label="Payment Type"
+                              onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, payment_type: e.target.value })}
+                            >
+                              {PAYMENT_TYPES.map((type) => (
+                                <MenuItem key={type.value} value={type.value}>
+                                  {type.label}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <FormControl fullWidth>
+                            <InputLabel>Payment Method</InputLabel>
+                            <Select
+                              value={individualPaymentForm.payment_method}
+                              label="Payment Method"
+                              onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, payment_method: e.target.value })}
+                            >
+                              {PAYMENT_METHODS.map((method) => (
+                                <MenuItem key={method.value} value={method.value}>
+                                  {method.label}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            label="Payment Date"
+                            type="date"
+                            value={individualPaymentForm.payment_date}
+                            onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, payment_date: e.target.value })}
+                            InputLabelProps={{ shrink: true }}
+                          />
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <Grid container spacing={1}>
+                            <Grid item xs={8}>
+                              <FormControl fullWidth>
+                                <InputLabel>Month</InputLabel>
+                                <Select
+                                  value={individualPaymentForm.month}
+                                  label="Month"
+                                  onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, month: e.target.value })}
+                                >
+                                  {MONTHS.map((month) => (
+                                    <MenuItem key={month} value={month}>
+                                      {month}
+                                    </MenuItem>
+                                  ))}
+                                </Select>
+                              </FormControl>
+                            </Grid>
+                            <Grid item xs={4}>
+                              <TextField
+                                fullWidth
+                                label="Year"
+                                type="number"
+                                value={individualPaymentForm.year}
+                                onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, year: parseInt(e.target.value) })}
+                              />
+                            </Grid>
+                          </Grid>
+                        </Grid>
+                        <Grid item xs={12}>
+                          <TextField
+                            fullWidth
+                            label="Notes (optional)"
+                            multiline
+                            rows={3}
+                            value={individualPaymentForm.notes}
+                            onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, notes: e.target.value })}
+                          />
+                        </Grid>
+                      </Grid>
+                    ) : (
+                      // Batch Payment Form
+                      <Grid container spacing={3}>
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            label="Amount"
+                            type="number"
+                            value={paymentForm.amount}
+                            onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                            required
+                          />
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <FormControl fullWidth>
+                            <InputLabel>Paid By</InputLabel>
+                            <Select
+                              value={paymentForm.paidBy}
+                              label="Paid By"
+                              onChange={(e) => setPaymentForm({ ...paymentForm, paidBy: e.target.value })}
+                            >
+                              {tenants.map((tenant) => (
+                                <MenuItem key={tenant} value={tenant}>
+                                  {tenant}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <FormControl fullWidth>
+                            <InputLabel>Paid For</InputLabel>
+                            <Select
+                              multiple
+                              value={paymentForm.paidFor}
+                              onChange={(e) => setPaymentForm({ ...paymentForm, paidFor: e.target.value })}
+                              input={<OutlinedInput label="Paid For" />}
+                              renderValue={(selected) => (
+                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                  {selected.map((value) => (
+                                    <Chip key={value} label={value} size="small" />
+                                  ))}
+                                </Box>
+                              )}
+                            >
+                              {tenants.map((tenant) => (
+                                <MenuItem key={tenant} value={tenant}>
+                                  <Checkbox checked={paymentForm.paidFor.indexOf(tenant) > -1} />
+                                  <ListItemText primary={tenant} />
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <FormControl fullWidth>
+                            <InputLabel>Payment Type</InputLabel>
+                            <Select
+                              value={paymentForm.paymentType}
+                              label="Payment Type"
+                              onChange={(e) => setPaymentForm({ ...paymentForm, paymentType: e.target.value })}
+                            >
+                              {PAYMENT_TYPES.map((type) => (
+                                <MenuItem key={type.value} value={type.value}>
+                                  {type.label}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <FormControl fullWidth>
+                            <InputLabel>Payment Method</InputLabel>
+                            <Select
+                              value={paymentForm.paymentMethod}
+                              label="Payment Method"
+                              onChange={(e) => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })}
+                            >
+                              {PAYMENT_METHODS.map((method) => (
+                                <MenuItem key={method.value} value={method.value}>
+                                  {method.label}
+                                </MenuItem>
+                              ))}
+                            </Select>
+                          </FormControl>
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <TextField
+                            fullWidth
+                            label="Payment Date"
+                            type="date"
+                            value={paymentForm.paymentDate}
+                            onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
+                            InputLabelProps={{ shrink: true }}
+                          />
+                        </Grid>
+                        <Grid item xs={12} md={6}>
+                          <Grid container spacing={1}>
+                            <Grid item xs={8}>
+                              <FormControl fullWidth>
+                                <InputLabel>Month</InputLabel>
+                                <Select
+                                  value={paymentForm.month}
+                                  label="Month"
+                                  onChange={(e) => setPaymentForm({ ...paymentForm, month: e.target.value })}
+                                >
+                                  {MONTHS.map((month) => (
+                                    <MenuItem key={month} value={month}>
+                                      {month}
+                                    </MenuItem>
+                                  ))}
+                                </Select>
+                              </FormControl>
+                            </Grid>
+                            <Grid item xs={4}>
+                              <TextField
+                                fullWidth
+                                label="Year"
+                                type="number"
+                                value={paymentForm.year}
+                                onChange={(e) => setPaymentForm({ ...paymentForm, year: parseInt(e.target.value) })}
+                              />
+                            </Grid>
+                          </Grid>
+                        </Grid>
+                        <Grid item xs={12}>
+                          <TextField
+                            fullWidth
+                            label="Notes (optional)"
+                            multiline
+                            rows={3}
+                            value={paymentForm.notes}
+                            onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                          />
+                        </Grid>
+                      </Grid>
+                    )}
+                  </DialogContent>
+                  <DialogActions sx={{ p: 3 }}>
+                    <Button onClick={() => setDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="contained"
+                      onClick={handleSubmitPayment}
+                      disabled={loading || 
+                        (paymentMode === 0 && (!paymentForm.amount || !paymentForm.paidBy || paymentForm.paidFor.length === 0)) ||
+                        (paymentMode === 1 && (!individualPaymentForm.amount || !individualPaymentForm.tenant_name))
+                      }
+                    >
+                      {editingPayment ? 'Update' : 'Add'} Payment
+                    </Button>
+                  </DialogActions>
+                </Dialog>
 
-      {/* Error state */}
-      {selectedApartment && !loading && !apartmentDetails && (
-        <Alert severity="error" sx={{ mt: 2 }}>
-          Failed to load apartment data. Please try selecting the apartment again.
-        </Alert>
-      )}
-    </Box>
-  );
-}
+                {/* New Payment Period Dialog */}
+                <Dialog
+                  open={periodDialogOpen}
+                  onClose={() => setPeriodDialogOpen(false)}
+                  maxWidth="sm"
+                  fullWidth
+                >
+                  <DialogTitle>Create New Payment Period</DialogTitle>
+                  <DialogContent>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                      Starting a new payment period will update the apartment's contract information with the current tenants.
+                    </Typography>
+                    <Grid container spacing={3} sx={{ mt: 1 }}>
+                      <Grid item xs={12} md={6}>
+                        <TextField
+                          fullWidth
+                          label="Period Start Date"
+                          type="date"
+                          value={periodForm.startDate}
+                          onChange={(e) => setPeriodForm({ ...periodForm, startDate: e.target.value })}
+                          InputLabelProps={{ shrink: true }}
+                          required
+                        />
+                      </Grid>
+                      <Grid item xs={12} md={6}>
+                        <TextField
+                          fullWidth
+                          label="Period End Date"
+                          type="date"
+                          value={periodForm.endDate}
+                          onChange={(e) => setPeriodForm({ ...periodForm, endDate: e.target.value })}
+                          InputLabelProps={{ shrink: true }}
+                          helperText="Leave empty for open-ended period"
+                        />
+                      </Grid>
+                      <Grid item xs={12}>
+                        <TextField
+                          fullWidth
+                          label="Monthly Rent"
+                          type="number"
+                          value={periodForm.rent}
+                          onChange={(e) => setPeriodForm({ ...periodForm, rent: e.target.value })}
+                          required
+                        />
+                      </Grid>
+                      <Grid item xs={12}>
+                        <FormControl fullWidth>
+                          <InputLabel>Tenants</InputLabel>
+                          <Select
+                            multiple
+                            value={periodForm.tenants}
+                            onChange={(e) => setPeriodForm({ ...periodForm, tenants: e.target.value })}
+                            input={<OutlinedInput label="Tenants" />}
+                            renderValue={(selected) => (
+                              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                {selected.map((value) => (
+                                  <Chip key={value} label={value} size="small" />
+                                ))}
+                              </Box>
+                            )}
+                          >
+                            {tenants.map((tenant) => (
+                              <MenuItem key={tenant} value={tenant}>
+                                <Checkbox checked={periodForm.tenants.indexOf(tenant) > -1} />
+                                <ListItemText primary={tenant} />
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      </Grid>
+                    </Grid>
+                  </DialogContent>
+                  <DialogActions sx={{ p: 3 }}>
+                    <Button onClick={() => setPeriodDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="contained"
+                      onClick={handleCreatePaymentPeriod}
+                      disabled={loading || !periodForm.startDate || !periodForm.rent}
+                    >
+                      Create Payment Period
+                    </Button>
+                  </DialogActions>
+                </Dialog>
 
-export default PaymentScreen;
+                {/* Loading indicator */}
+                {loading && (
+                  <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+                    <CircularProgress />
+                  </Box>
+                )}
+
+                {/* No apartment selected state */}
+                {!selectedApartment && !loading && (
+                  <Card>
+                    <CardContent sx={{ textAlign: 'center', py: 6 }}>
+                      <DescriptionIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                      <Typography variant="h6" color="text.secondary" gutterBottom>
+                        Select an Apartment
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Choose an apartment from the dropdown above to manage its payments
+                      </Typography>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Error state */}
+                {selectedApartment && !loading && !apartmentDetails && (
+                  <Alert severity="error" sx={{ mt: 2 }}>
+                    Failed to load apartment data. Please try selecting the apartment again.
+                  </Alert>
+                )}
+              </Box>
+            );
+          }
+
+          export default PaymentScreen;

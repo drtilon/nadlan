@@ -56,88 +56,7 @@ def migrate_payment_table():
                         AND CONSTRAINT_NAME LIKE '%apartment%month%year%'
                     """)).fetchall()
                     
-                    if missing_columns:
-                    print(f"\n❌ Missing columns: {missing_columns}")
-                    return False
-                else:
-                    print("\n✅ All required columns are present!")
-                    return True
-                    
-        except Exception as e:
-            print(f"❌ Verification error: {e}")
-            return False
-
-def clean_duplicate_payments():
-    """
-    Clean up any duplicate payments that might have been created.
-    This removes duplicate batch payments for the same apartment/month/year.
-    """
-    with app.app_context():
-        try:
-            print("\nCleaning duplicate payments...")
-            
-            with db.engine.connect() as conn:
-                # Find duplicate batch payments (same apartment_id, month, year, and month is a standard month name)
-                duplicates = conn.execute(text("""
-                    SELECT apartment_id, month, year, COUNT(*) as count
-                    FROM payments 
-                    WHERE month IN ('January', 'February', 'March', 'April', 'May', 'June',
-                                   'July', 'August', 'September', 'October', 'November', 'December')
-                    AND (amount IS NULL OR amount = 0)
-                    GROUP BY apartment_id, month, year 
-                    HAVING COUNT(*) > 1
-                """)).fetchall()
-                
-                if duplicates:
-                    print(f"Found {len(duplicates)} sets of duplicate batch payments")
-                    
-                    for dup in duplicates:
-                        apartment_id, month, year, count = dup
-                        print(f"  - Apartment {apartment_id}, {month} {year}: {count} duplicates")
-                        
-                        # Keep the most recent payment and delete older ones
-                        conn.execute(text("""
-                            DELETE p1 FROM payments p1
-                            INNER JOIN payments p2 
-                            WHERE p1.apartment_id = :apartment_id 
-                            AND p1.month = :month 
-                            AND p1.year = :year
-                            AND p1.month IN ('January', 'February', 'March', 'April', 'May', 'June',
-                                           'July', 'August', 'September', 'October', 'November', 'December')
-                            AND (p1.amount IS NULL OR p1.amount = 0)
-                            AND (p2.amount IS NULL OR p2.amount = 0)
-                            AND p1.id < p2.id
-                        """), {
-                            'apartment_id': apartment_id,
-                            'month': month,
-                            'year': year
-                        })
-                    
-                    conn.commit()
-                    print("✅ Cleaned up duplicate batch payments")
-                else:
-                    print("✅ No duplicate batch payments found")
-                    
-        except Exception as e:
-            print(f"❌ Error cleaning duplicates: {e}")
-
-if __name__ == "__main__":
-    print("Payment Table Migration Tool")
-    print("=" * 40)
-    
-    # Run migration
-    if migrate_payment_table():
-        # Verify the migration
-        if verify_payment_table():
-            # Clean up duplicates
-            clean_duplicate_payments()
-            print("\n🎉 Migration completed successfully!")
-        else:
-            print("\n❌ Migration verification failed!")
-            sys.exit(1)
-    else:
-        print("\n❌ Migration failed!")
-        sys.exit(1) constraint_check:
+                    if constraint_check:
                         constraint_name = constraint_check[0][0]
                         conn.execute(text(f"ALTER TABLE payments DROP CONSTRAINT {constraint_name}"))
                         print(f"✅ Removed unique constraint: {constraint_name}")
@@ -230,4 +149,85 @@ def verify_payment_table():
                 existing_columns = [col[0] for col in columns]
                 missing_columns = [col for col in required_columns if col not in existing_columns]
                 
-                if
+                if missing_columns:
+                    print(f"\n❌ Missing columns: {missing_columns}")
+                    return False
+                else:
+                    print("\n✅ All required columns are present!")
+                    return True
+                    
+        except Exception as e:
+            print(f"❌ Verification error: {e}")
+            return False
+
+def clean_duplicate_payments():
+    """
+    Clean up any duplicate payments that might have been created.
+    This removes duplicate batch payments for the same apartment/month/year.
+    """
+    with app.app_context():
+        try:
+            print("\nCleaning duplicate payments...")
+            
+            with db.engine.connect() as conn:
+                # Find duplicate batch payments (same apartment_id, month, year, and month is a standard month name)
+                duplicates = conn.execute(text("""
+                    SELECT apartment_id, month, year, COUNT(*) as count
+                    FROM payments 
+                    WHERE month IN ('January', 'February', 'March', 'April', 'May', 'June',
+                                   'July', 'August', 'September', 'October', 'November', 'December')
+                    AND (amount IS NULL OR amount = 0)
+                    GROUP BY apartment_id, month, year 
+                    HAVING COUNT(*) > 1
+                """)).fetchall()
+                
+                if duplicates:
+                    print(f"Found {len(duplicates)} sets of duplicate batch payments")
+                    
+                    for dup in duplicates:
+                        apartment_id, month, year, count = dup
+                        print(f"  - Apartment {apartment_id}, {month} {year}: {count} duplicates")
+                        
+                        # Keep the most recent payment and delete older ones
+                        conn.execute(text("""
+                            DELETE p1 FROM payments p1
+                            INNER JOIN payments p2 
+                            WHERE p1.apartment_id = :apartment_id 
+                            AND p1.month = :month 
+                            AND p1.year = :year
+                            AND p1.month IN ('January', 'February', 'March', 'April', 'May', 'June',
+                                           'July', 'August', 'September', 'October', 'November', 'December')
+                            AND (p1.amount IS NULL OR p1.amount = 0)
+                            AND (p2.amount IS NULL OR p2.amount = 0)
+                            AND p1.id < p2.id
+                        """), {
+                            'apartment_id': apartment_id,
+                            'month': month,
+                            'year': year
+                        })
+                    
+                    conn.commit()
+                    print("✅ Cleaned up duplicate batch payments")
+                else:
+                    print("✅ No duplicate batch payments found")
+                    
+        except Exception as e:
+            print(f"❌ Error cleaning duplicates: {e}")
+
+if __name__ == "__main__":
+    print("Payment Table Migration Tool")
+    print("=" * 40)
+    
+    # Run migration
+    if migrate_payment_table():
+        # Verify the migration
+        if verify_payment_table():
+            # Clean up duplicates
+            clean_duplicate_payments()
+            print("\n🎉 Migration completed successfully!")
+        else:
+            print("\n❌ Migration verification failed!")
+            sys.exit(1)
+    else:
+        print("\n❌ Migration failed!")
+        sys.exit(1)

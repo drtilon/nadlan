@@ -338,9 +338,7 @@ function PaymentScreen({ showNotification }) {
         amount: payment.amountPaid?.toString() || '',
         tenant_name: payment.paidBy || '',
         payment_method: payment.paymentMethod || 'bank_transfer',
-        payment_date: payment.paymentDate?.split
-
-('T')[0] || '',
+        payment_date: payment.paymentDate?.split('T')[0] || '',
         payment_type: payment.paymentType || 'rent',
         month: payment.month || MONTHS[new Date().getMonth()],
         year: payment.year || currentYear,
@@ -607,7 +605,7 @@ function PaymentScreen({ showNotification }) {
                   </Stack>
                   <Box sx={{ mt: 2 }}>
                     <Typography variant="body2" color="text.secondary">
-                      Tenants: {tenants.join(', ') || 'No tenants')
+                      Tenants: {tenants.join(', ') || 'No tenants'}
                     </Typography>
                   </Box>
                 </Grid>
@@ -949,7 +947,7 @@ function PaymentScreen({ showNotification }) {
           ) : (
             // Batch Payment Form
             <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
+              <Grid item xs={12} md={5}>
                 <TextField
                   fullWidth
                   label="Amount"
@@ -959,7 +957,7 @@ function PaymentScreen({ showNotification }) {
                   required
                 />
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid item xs={12} md={7}>
                 <FormControl fullWidth>
                   <InputLabel>Paid By</InputLabel>
                   <Select
@@ -975,7 +973,7 @@ function PaymentScreen({ showNotification }) {
                   </Select>
                 </FormControl>
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid item xs={12}>
                 <FormControl fullWidth>
                   <InputLabel>Paid For</InputLabel>
                   <Select
@@ -1043,7 +1041,7 @@ function PaymentScreen({ showNotification }) {
                 />
               </Grid>
               <Grid item xs={12} md={6}>
-                <Grid container spacing={1}>
+                <Grid container spacing={2}>
                   <Grid item xs={8}>
                     <FormControl fullWidth>
                       <InputLabel>Month</InputLabel>
@@ -1084,7 +1082,7 @@ function PaymentScreen({ showNotification }) {
             </Grid>
           )}
         </DialogContent>
-        <DialogActions sx={{ p: 3 }}>
+        <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setDialogOpen(false)}>
             Cancel
           </Button>
@@ -1110,11 +1108,11 @@ function PaymentScreen({ showNotification }) {
       >
         <DialogTitle>Create New Payment Period</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Starting a new payment period will update the apartment's contract information with the current tenants.
           </Typography>
-          <Grid container spacing={3} sx={{ mt: 1 }}>
-            <Grid item xs={12} md={6}>
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={6}>
               <TextField
                 fullWidth
                 label="Period Start Date"
@@ -1125,7 +1123,7 @@ function PaymentScreen({ showNotification }) {
                 required
               />
             </Grid>
-            <Grid item xs={12} md={6}>
+            <Grid item xs={12} sm={6}>
               <TextField
                 fullWidth
                 label="Period End Date"
@@ -1173,7 +1171,7 @@ function PaymentScreen({ showNotification }) {
             </Grid>
           </Grid>
         </DialogContent>
-        <DialogActions sx={{ p: 3 }}>
+        <DialogActions sx={{ p: 2 }}>
           <Button onClick={() => setPeriodDialogOpen(false)}>
             Cancel
           </Button>
@@ -1211,7 +1209,7 @@ function PaymentScreen({ showNotification }) {
 
       {/* Error state */}
       {selectedApartment && !loading && !apartmentDetails && (
-        <Alert severity="error" sx={{ mt: 2 }}>
+        <Alert severity="error" sx={{ mt: 3 }}>
           Failed to load apartment data. Please try selecting the apartment again.
         </Alert>
       )}

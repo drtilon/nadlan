@@ -1,8 +1,9 @@
-# models/models.py
+# models/models.py - Fixed version with consistent Payment model
 from datetime import date
 from flask_bcrypt import Bcrypt
 from extentions import db, bcrypt
 from datetime import datetime
+import json
 
 
 class Landlord(db.Model):
@@ -146,58 +147,112 @@ class User(db.Model):
         }
 
 
-
-
-
 class Payment(db.Model):
+    """
+    Unified Payment model that supports both individual and batch payments.
+    
+    For individual payments:
+    - amount, tenant_name, payment_type are set
+    - month might be a unique identifier for non-rent payments
+    
+    For batch payments (legacy):
+    - tenants JSON contains multiple tenant payment details
+    - amount, tenant_name, payment_type are None/empty
+    - month is a standard month name
+    """
     __tablename__ = "payments"
+    
     id = db.Column(db.Integer, primary_key=True)
     apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=False)
-    month = db.Column(db.String(20), nullable=False)
+    
+    # Core payment fields
+    month = db.Column(db.String(50), nullable=False)  # Month name or unique identifier
     year = db.Column(db.Integer, nullable=False, default=lambda: datetime.utcnow().year)
     status = db.Column(db.String(50), nullable=False, default="not_paid")
-    tenants = db.Column(db.Text, nullable=True)
+    
+    # Legacy batch payment fields
+    tenants = db.Column(db.Text, nullable=True)  # JSON string for batch payments
     internet = db.Column(db.Float, nullable=True, default=0.0)
     electricity = db.Column(db.Float, nullable=True, default=0.0)
     other = db.Column(db.Float, nullable=True, default=0.0)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    extraPayments = db.Column(db.Text, nullable=True)  # JSON string
+    
+    # Common payment fields
     paymentDate = db.Column(db.DateTime, nullable=True)
     paymentMethod = db.Column(db.String(50), nullable=True, default="bank_transfer")
-    extraPayments = db.Column(db.Text, nullable=True)
     notes = db.Column(db.Text, nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # ADD THESE NEW FIELDS:
-    amount = db.Column(db.Float, nullable=True)
-    tenant_name = db.Column(db.String(255), nullable=True)
-    payment_type = db.Column(db.String(50), nullable=True, default="rent")
-    
-    # REMOVE OR COMMENT OUT THIS LINE:
-    # __table_args__ = (db.UniqueConstraint('apartment_id', 'month', 'year', name='_apartment_month_year_uc'),)
+    # Individual payment fields (new)
+    amount = db.Column(db.Float, nullable=True)  # For individual payments
+    tenant_name = db.Column(db.String(255), nullable=True)  # For individual payments
+    payment_type = db.Column(db.String(50), nullable=True, default="rent")  # rent, deposit, utilities, other
     
     def to_dict(self):
-        return {
+        # Determine if this is an individual payment
+        is_individual = bool(self.amount and self.tenant_name)
+        
+        result = {
             "id": self.id,
             "apartment_id": self.apartment_id,
             "month": self.month,
             "year": self.year,
             "status": self.status,
-            "tenants": json.loads(self.tenants) if self.tenants else [],
-            "internet": float(self.internet) if self.internet is not None else 0.0,
-            "electricity": float(self.electricity) if self.electricity is not None else 0.0,
-            "other": float(self.other) if self.other is not None else 0.0,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "paymentDate": self.paymentDate.isoformat() if self.paymentDate else None,
             "paymentMethod": self.paymentMethod or "bank_transfer",
-            "extraPayments": json.loads(self.extraPayments) if self.extraPayments else {},
             "notes": self.notes or "",
-            # New fields
-            "amount": float(self.amount) if self.amount is not None else None,
-            "tenant_name": self.tenant_name,
-            "payment_type": self.payment_type or "rent"
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "isIndividual": is_individual
         }
-
-
-
+        
+        if is_individual:
+            # Individual payment
+            result.update({
+                "amount": float(self.amount) if self.amount is not None else 0.0,
+                "tenant_name": self.tenant_name,
+                "payment_type": self.payment_type or "rent",
+                "amountPaid": float(self.amount) if self.amount is not None else 0.0,
+                "tenant_names": [self.tenant_name] if self.tenant_name else []
+            })
+        else:
+            # Batch payment (legacy format)
+            try:
+                tenants_data = json.loads(self.tenants) if self.tenants else []
+                total_paid = sum(float(t.get("amountPaid", 0)) for t in tenants_data)
+                tenant_names = [t.get("name", "") for t in tenants_data if t.get("name")]
+                
+                result.update({
+                    "tenants": tenants_data,
+                    "amountPaid": total_paid,
+                    "tenant_names": tenant_names,
+                    "internet": float(self.internet) if self.internet is not None else 0.0,
+                    "electricity": float(self.electricity) if self.electricity is not None else 0.0,
+                    "other": float(self.other) if self.other is not None else 0.0,
+                })
+                
+                # Parse extra payments
+                try:
+                    extra_payments = json.loads(self.extraPayments) if self.extraPayments else {}
+                    result["extraPayments"] = extra_payments
+                except:
+                    result["extraPayments"] = {
+                        "internet": result["internet"],
+                        "electricity": result["electricity"],
+                        "other": result["other"]
+                    }
+            except:
+                # Fallback for malformed data
+                result.update({
+                    "tenants": [],
+                    "amountPaid": 0.0,
+                    "tenant_names": [],
+                    "internet": 0.0,
+                    "electricity": 0.0,
+                    "other": 0.0,
+                    "extraPayments": {}
+                })
+        
+        return result
 
 
 class Contract(db.Model):

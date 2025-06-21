@@ -79,20 +79,7 @@ function PaymentScreen({ showNotification }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [periodDialogOpen, setPeriodDialogOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState(null);
-  const [paymentMode, setPaymentMode] = useState(0); // 0: batch, 1: individual
-
-  // Form state for payment dialog
-  const [paymentForm, setPaymentForm] = useState({
-    amount: '',
-    paidBy: '',
-    paidFor: [],
-    paymentMethod: 'bank_transfer',
-    paymentDate: new Date().toISOString().split('T')[0],
-    paymentType: 'rent',
-    month: MONTHS[new Date().getMonth()],
-    year: currentYear,
-    notes: ''
-  });
+  const [paymentMode, setPaymentMode] = useState(1); // Default to individual mode
 
   // Form state for individual payment
   const [individualPaymentForm, setIndividualPaymentForm] = useState({
@@ -101,6 +88,19 @@ function PaymentScreen({ showNotification }) {
     payment_method: 'bank_transfer',
     payment_date: new Date().toISOString().split('T')[0],
     payment_type: 'rent',
+    month: MONTHS[new Date().getMonth()],
+    year: currentYear,
+    notes: ''
+  });
+
+  // Form state for batch payment (legacy)
+  const [paymentForm, setPaymentForm] = useState({
+    amount: '',
+    paidBy: '',
+    paidFor: [],
+    paymentMethod: 'bank_transfer',
+    paymentDate: new Date().toISOString().split('T')[0],
+    paymentType: 'rent',
     month: MONTHS[new Date().getMonth()],
     year: currentYear,
     notes: ''
@@ -148,67 +148,25 @@ function PaymentScreen({ showNotification }) {
       const apartmentResponse = await api.get(`/apartment/${selectedApartment}`);
       setApartmentDetails(apartmentResponse.data);
 
-      // Fetch current year's payment data
-      const currentYear = new Date().getFullYear();
-      const paymentsResponse = await api.get(`/payments/${selectedApartment}?year=${currentYear}`);
-      const paymentsData = paymentsResponse.data?.payments || {};
+      // Fetch payment history from the payment-history endpoint
+      const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
+      const historyPayments = historyResponse.data || [];
 
-      // Convert the monthly payment data to a list format for display
-      const paymentsList = [];
-      Object.entries(paymentsData).forEach(([month, paymentData]) => {
-        if (paymentData.status === 'paid' && paymentData.paymentDate) {
-          const tenants = paymentData.tenants || [];
-          const totalAmount = tenants.reduce((sum, tenant) => sum + (tenant.amountPaid || 0), 0);
-
-          paymentsList.push({
-            id: `${selectedApartment}-${month}-${currentYear}`,
-            month: month,
-            year: currentYear,
-            amountPaid: totalAmount,
-            paymentDate: paymentData.paymentDate,
-            paymentMethod: paymentData.paymentMethod || 'bank_transfer',
-            paymentType: 'rent',
-            paidBy: tenants[0]?.name || '',
-            paidFor: tenants.map(t => t.name) || [],
-            notes: paymentData.notes || '',
-            status: paymentData.status
-          });
-        }
-      });
-
-      // Fetch individual payments from new endpoint
-      try {
-        const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
-        const historyPayments = historyResponse.data || [];
-
-        // Add individual payments
-        historyPayments.forEach(payment => {
-          const existingIndex = paymentsList.findIndex(p =>
-            p.month === payment.month &&
-            p.year === payment.year &&
-            p.id === payment.id
-          );
-
-          if (existingIndex === -1) {
-            paymentsList.push({
-              id: payment.id,
-              month: payment.month,
-              year: payment.year,
-              amountPaid: payment.amountPaid,
-              paymentDate: payment.paymentDate,
-              paymentMethod: payment.paymentMethod || 'bank_transfer',
-              paymentType: payment.paymentType || 'rent',
-              paidBy: payment.tenant_name || '',
-              paidFor: payment.tenant_name ? [payment.tenant_name] : [],
-              notes: payment.notes || '',
-              status: payment.status,
-              isIndividual: true
-            });
-          }
-        });
-      } catch (historyError) {
-        console.log('Payment history endpoint not available:', historyError.message);
-      }
+      // Transform payment data for display
+      const paymentsList = historyPayments.map(payment => ({
+        id: payment.id,
+        month: payment.month,
+        year: payment.year,
+        amountPaid: payment.amountPaid,
+        paymentDate: payment.paymentDate,
+        paymentMethod: payment.paymentMethod || 'bank_transfer',
+        paymentType: payment.paymentType || 'rent',
+        paidBy: payment.tenant_name || '',
+        paidFor: payment.tenant_names || (payment.tenant_name ? [payment.tenant_name] : []),
+        notes: payment.notes || '',
+        status: payment.status,
+        isIndividual: payment.isIndividual || false
+      }));
 
       // Sort payments by date (newest first)
       paymentsList.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
@@ -336,6 +294,20 @@ function PaymentScreen({ showNotification }) {
   };
 
   // Form handlers
+  const resetIndividualPaymentForm = () => {
+    const tenants = getCurrentTenants();
+    setIndividualPaymentForm({
+      amount: '',
+      tenant_name: tenants[0] || '',
+      payment_method: 'bank_transfer',
+      payment_date: new Date().toISOString().split('T')[0],
+      payment_type: 'rent',
+      month: MONTHS[new Date().getMonth()],
+      year: currentYear,
+      notes: ''
+    });
+  };
+
   const resetPaymentForm = () => {
     const tenants = getCurrentTenants();
     setPaymentForm({
@@ -351,25 +323,11 @@ function PaymentScreen({ showNotification }) {
     });
   };
 
-  const resetIndividualPaymentForm = () => {
-    const tenants = getCurrentTenants();
-    setIndividualPaymentForm({
-      amount: '',
-      tenant_name: tenants[0] || '',
-      payment_method: 'bank_transfer',
-      payment_date: new Date().toISOString().split('T')[0],
-      payment_type: 'rent',
-      month: MONTHS[new Date().getMonth()],
-      year: currentYear,
-      notes: ''
-    });
-  };
-
   const handleAddPayment = () => {
-    resetPaymentForm();
     resetIndividualPaymentForm();
+    resetPaymentForm();
     setEditingPayment(null);
-    setPaymentMode(0); // Default to batch mode
+    setPaymentMode(1); // Default to individual mode
     setDialogOpen(true);
   };
 
@@ -430,10 +388,10 @@ function PaymentScreen({ showNotification }) {
 
         if (editingPayment && editingPayment.isIndividual) {
           await api.put(`/payment/${editingPayment.id}`, paymentData);
-          showNotification?.('Individual payment updated successfully', 'success');
+          showNotification?.('Payment updated successfully', 'success');
         } else {
-          await api.post('/payment/individual', paymentData);
-          showNotification?.('Individual payment added successfully', 'success');
+          await api.post('/payment', paymentData);
+          showNotification?.('Payment added successfully', 'success');
         }
 
         setDialogOpen(false);
@@ -441,13 +399,13 @@ function PaymentScreen({ showNotification }) {
         await loadApartmentData();
       } catch (error) {
         console.error('Error saving individual payment:', error);
-        const errorMessage = error.response?.data?.message || 'Error saving individual payment';
+        const errorMessage = error.response?.data?.message || 'Error saving payment';
         showNotification?.(errorMessage, 'error');
       } finally {
         setLoading(false);
       }
     } else {
-      // Batch payment submission (existing logic)
+      // Batch payment submission (legacy)
       if (!paymentForm.amount || !paymentForm.paidBy || paymentForm.paidFor.length === 0) {
         showNotification?.('Please fill in all required fields', 'error');
         return;
@@ -456,6 +414,7 @@ function PaymentScreen({ showNotification }) {
       try {
         setLoading(true);
 
+        // Get current payments for the year
         const currentPaymentsResponse = await api.get(`/payments/${selectedApartment}?year=${paymentForm.year}`);
         const currentPayments = currentPaymentsResponse.data?.payments || {};
 
@@ -493,13 +452,13 @@ function PaymentScreen({ showNotification }) {
 
         await api.post(`/payments/${selectedApartment}`, updateData);
 
-        showNotification?.('Payment saved successfully', 'success');
+        showNotification?.('Batch payment saved successfully', 'success');
         setDialogOpen(false);
         setEditingPayment(null);
         await loadApartmentData();
 
       } catch (error) {
-        console.error('Error saving payment:', error);
+        console.error('Error saving batch payment:', error);
         const errorMessage = error.response?.data?.message || error.message || 'Error saving payment';
         showNotification?.(errorMessage, 'error');
       } finally {
@@ -874,18 +833,34 @@ function PaymentScreen({ showNotification }) {
             </Tabs>
           </Box>
 
-          {paymentMode === 0 ? (
-            // Batch Payment Form
+          {paymentMode === 1 ? (
+            // Individual Payment Form
             <Grid container spacing={3}>
               <Grid item xs={12} md={6}>
                 <TextField
                   fullWidth
                   label="Amount"
                   type="number"
-                  value={paymentForm.amount}
-                  onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                  value={individualPaymentForm.amount}
+                  onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, amount: e.target.value })}
                   required
                 />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth required>
+                  <InputLabel>Tenant</InputLabel>
+                  <Select
+                    value={individualPaymentForm.tenant_name}
+                    label="Tenant"
+                    onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, tenant_name: e.target.value })}
+                  >
+                    {tenants.map((tenant) => (
+                      <MenuItem key={tenant} value={tenant}>
+                        {tenant}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
               </Grid>
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth>
@@ -1007,117 +982,6 @@ function PaymentScreen({ showNotification }) {
                   rows={3}
                   value={paymentForm.notes}
                   onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
-                />
-              </Grid>
-            </Grid>
-          ) : (
-            // Individual Payment Form
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Amount"
-                  type="number"
-                  value={individualPaymentForm.amount}
-                  onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, amount: e.target.value })}
-                  required
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth required>
-                  <InputLabel>Tenant</InputLabel>
-                  <Select
-                    value={individualPaymentForm.tenant_name}
-                    label="Tenant"
-                    onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, tenant_name: e.target.value })}
-                  >
-                    {tenants.map((tenant) => (
-                      <MenuItem key={tenant} value={tenant}>
-                        {tenant}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Payment Type</InputLabel>
-                  <Select
-                    value={individualPaymentForm.payment_type}
-                    label="Payment Type"
-                    onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, payment_type: e.target.value })}
-                  >
-                    {PAYMENT_TYPES.map((type) => (
-                      <MenuItem key={type.value} value={type.value}>
-                        {type.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth>
-                  <InputLabel>Payment Method</InputLabel>
-                  <Select
-                    value={individualPaymentForm.payment_method}
-                    label="Payment Method"
-                    onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, payment_method: e.target.value })}
-                  >
-                    {PAYMENT_METHODS.map((method) => (
-                      <MenuItem key={method.value} value={method.value}>
-                        {method.label}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Payment Date"
-                  type="date"
-                  value={individualPaymentForm.payment_date}
-                  onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, payment_date: e.target.value })}
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <Grid container spacing={1}>
-                  <Grid item xs={8}>
-                    <FormControl fullWidth>
-                      <InputLabel>Month</InputLabel>
-                      <Select
-                        value={individualPaymentForm.month}
-                        label="Month"
-                        onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, month: e.target.value })}
-                      >
-                        {MONTHS.map((month) => (
-                          <MenuItem key={month} value={month}>
-                            {month}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  <Grid item xs={4}>
-                    <TextField
-                      fullWidth
-                      label="Year"
-                      type="number"
-                      value={individualPaymentForm.year}
-                      onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, year: parseInt(e.target.value) })}
-                    />
-                  </Grid>
-                </Grid>
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  fullWidth
-                  label="Notes (optional)"
-                  multiline
-                  rows={3}
-                  value={individualPaymentForm.notes}
-                  onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, notes: e.target.value })}
                 />
               </Grid>
             </Grid>

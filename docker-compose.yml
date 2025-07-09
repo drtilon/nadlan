@@ -1,57 +1,56 @@
-version: '3.8'
-
 services:
   mysql:
     image: mysql:8.0
-    container_name: mysql_db
     restart: always
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
+    ports: ["3306:3306"]
+    volumes: [mysql_data:/var/lib/mysql]
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: mydatabase
       MYSQL_USER: myuser
       MYSQL_PASSWORD: mypassword
-    networks:
-      - app_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      retries: 5
+      start_period: 20s
+    networks: [app_network]
+
+  nginx:
+    image: nginx:latest
+    restart: always
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    networks: [app_network]
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: flask_backend
-    restart: always
+    build: ./backend            # see Dockerfile below
+    ports: ["5001:5001"]
+    volumes: ["./backend:/app"]
+    depends_on:
+      mysql:
+        condition: service_healthy
     environment:
-      - FLASK_ENV=${FLASK_ENV:-production}
-    networks:
-      - app_network
+      FLASK_ENV: production
+      DB_USER: myuser
+      DB_PASSWORD: mypassword
+      DB_HOST: mysql
+      DB_NAME: mydatabase
+      SECRET_KEY: mysecret
+    networks: [app_network]
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
-    container_name: vite_frontend
-    restart: always
-    environment:
-      - VITE_HOST=${VITE_HOST:-0.0.0.0}
-      - VITE_PORT=${VITE_PORT:-3001}
-    networks:
-      - app_network
-
-  nginx:
-    image: nginx:1.27.5
-    container_name: nginx
-    restart: always
-    depends_on:
-      - backend
-      - frontend
-    networks:
-      - app_network
+      dockerfile: Dockerfile       # static build
+    ports: ["3001:80"]             # host 3001 → container 80
+    networks: [app_network]
 
 volumes:
   mysql_data:
+  frontend_node_modules:
 
 networks:
   app_network:

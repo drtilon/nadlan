@@ -32,7 +32,7 @@ services:
       - DB_HOST=mysql
       - DB_NAME=mydatabase
       - SECRET_KEY=mysecret
-      - CORS_ALLOWED_ORIGINS=http://shefa.com,https://shefa.com,http://localhost,http://localhost:80,http://207.154.221.54,http://frontend:3001,http://www.shefaug.com,https://www.shefaug.com,http://vite_frontend:3001
+      - CORS_ALLOWED_ORIGINS=https://www.shefaug.com,https://shefaug.com,http://localhost,http://localhost:80,http://localhost:3001,http://207.154.221.54
     networks:
       - app_network
 

@@ -1,11 +1,12 @@
+version: '3.8'
+
 services:
+  # mount the dev‐config, expose HTTP only
   nginx:
     volumes:
       - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "80:80"
-    # Remove SSL port for development
-    # No SSL certificates needed
 
   backend:
     environment:
@@ -18,6 +19,5 @@ services:
       - VITE_PORT=3001
       - CHOKIDAR_USEPOLLING=true
       - CHOKIDAR_INTERVAL=1000
-    # Override volumes to remove node_modules mount for development
     volumes:
       - ./frontend:/app

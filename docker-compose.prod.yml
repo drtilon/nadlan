@@ -1,4 +1,7 @@
+version: '3.8'
+
 services:
+  # mount the prod‐config + SSL, expose both HTTP+HTTPS
   nginx:
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
@@ -17,4 +20,4 @@ services:
       - VITE_PORT=3001
     volumes:
       - ./frontend:/app
-      - /app/node_modules  # Keep node_modules for production
+      - /app/node_modules

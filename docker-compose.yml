@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   mysql:
     image: mysql:8.0
@@ -16,53 +18,32 @@ services:
       - app_network
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
     container_name: flask_backend
-    restart: unless-stopped
-    ports:
-      - "5001:5001"
-    volumes:
-      - ./backend:/app
-    depends_on:
-      - mysql
+    restart: always
     environment:
-      - FLASK_ENV=production
-      - DB_USER=myuser
-      - DB_PASSWORD=mypassword
-      - DB_HOST=mysql
-      - DB_NAME=mydatabase
-      - SECRET_KEY=mysecret
-      - CORS_ALLOWED_ORIGINS=https://www.shefaug.com,https://shefaug.com,http://localhost,http://localhost:80,http://localhost:3001,http://207.154.221.54
+      - FLASK_ENV=${FLASK_ENV:-production}
     networks:
       - app_network
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
     container_name: vite_frontend
-    restart: unless-stopped
-    ports:
-      - "3001:3001"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+    restart: always
     environment:
-      - CHOKIDAR_USEPOLLING=true
-      - CHOKIDAR_INTERVAL=1000
-      - VITE_HOST=0.0.0.0
-      - VITE_PORT=3001
+      - VITE_HOST=${VITE_HOST:-0.0.0.0}
+      - VITE_PORT=${VITE_PORT:-3001}
     networks:
       - app_network
 
   nginx:
-    image: nginx:latest
-    container_name: nginx_proxy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
+    image: nginx:1.27.5
+    container_name: nginx
+    restart: always
     depends_on:
       - backend
       - frontend

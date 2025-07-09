@@ -1,5 +1,5 @@
 # app.py
-from flask import Flask, current_app
+from flask import Flask, current_app, request, Response
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from config import Config
@@ -48,14 +48,57 @@ def create_app():
             # Allow requests from any origin during development
             # For production, specify your frontend domain
             allowed_origins = os.environ.get(
-                "CORS_ALLOWED_ORIGINS", "http://localhost:80"
+                "CORS_ALLOWED_ORIGINS",
+                "http://localhost,http://localhost:80,http://localhost:3001,http://vite_frontend:3001"
             ).split(",")
+
+            # Strip whitespace from origins
+            allowed_origins = [origin.strip() for origin in allowed_origins]
+
+            app.logger.info(f"Configuring CORS with origins: {allowed_origins}")
+
             CORS(
                 app,
                 resources={
-                    r"/*": {"origins": allowed_origins, "supports_credentials": True}
+                    r"/api/*": {
+                        "origins": allowed_origins,
+                        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+                        "supports_credentials": True,
+                        "expose_headers": ["Authorization"]
+                    }
                 },
+                supports_credentials=True
             )
+
+            # Add OPTIONS handler for preflight requests
+            @app.before_request
+            def handle_preflight():
+                if request.method == "OPTIONS":
+                    response = Response()
+                    origin = request.headers.get('Origin')
+                    if origin in allowed_origins:
+                        response.headers.add("Access-Control-Allow-Origin", origin)
+                    else:
+                        response.headers.add("Access-Control-Allow-Origin", "*")
+                    response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,X-Requested-With")
+                    response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
+                    response.headers.add('Access-Control-Allow-Credentials', 'true')
+                    return response
+
+            # Add CORS headers to all responses
+            @app.after_request
+            def after_request(response):
+                origin = request.headers.get('Origin')
+                if origin in allowed_origins:
+                    response.headers.add('Access-Control-Allow-Origin', origin)
+                else:
+                    response.headers.add('Access-Control-Allow-Origin', '*')
+                response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
+                response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+                response.headers.add('Access-Control-Allow-Credentials', 'true')
+                return response
+
         except Exception as e:
             app.logger.error(f"Error initializing CORS: {e}")
 
@@ -85,9 +128,7 @@ def create_app():
             from routes.auth_routes import auth_bp
             from routes.apartments import apartments_bp
             from routes.tenants import tenants_bp
-            from routes.landlords import (
-                landlords_bp,
-            )  # Import the new landlords blueprint
+            from routes.landlords import landlords_bp
             from routes.adminPanel.user_actions import adminPanel_bp
             from routes.payments import payments_bp
             from routes.analytics import analytics_bp
@@ -101,9 +142,7 @@ def create_app():
             app.register_blueprint(adminPanel_bp, url_prefix="/api/adminPanel")
             app.register_blueprint(apartments_bp, url_prefix="/api/")
             app.register_blueprint(tenants_bp, url_prefix="/api/")
-            app.register_blueprint(
-                landlords_bp, url_prefix="/api/"
-            )  # Register landlords blueprint
+            app.register_blueprint(landlords_bp, url_prefix="/api/")
             app.register_blueprint(payments_bp, url_prefix="/api/")
             app.register_blueprint(analytics_bp, url_prefix="/api/")
             app.register_blueprint(payment_history_bp, url_prefix="/api")
@@ -120,12 +159,15 @@ def create_app():
     except Exception as e:
         # If the app hasn't been created, fall back to using Python's logging
         import logging
-
         logging.error(f"Critical error creating the Flask app: {e}")
         return None
 
 
 if __name__ == "__main__":
     app = create_app()
-    # In production, you should disable debug mode
-    app.run(debug=True, host="0.0.0.0", port=5001)
+    if app:
+        # In production, you should disable debug mode
+        app.run(debug=True, host="0.0.0.0", port=5001)
+    else:
+        print("Failed to create Flask app")
+        exit(1)

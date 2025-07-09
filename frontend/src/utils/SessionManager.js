@@ -186,10 +186,8 @@ class SessionManager {
   // Verify token with the server
   async verifyToken() {
     try {
-      // Get the base URL from current window location
-      const baseUrl = window.location.protocol === 'https:'
-        ? 'https://localhost:5001/api'
-        : 'http://localhost:5001/api';
+      // Use relative path to go through the proxy
+      const baseUrl = '/api';
 
       // Use a new instance to avoid interference with interceptors
       const api = axios.create({

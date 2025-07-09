@@ -1,0 +1,20 @@
+services:
+  nginx:
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    ports:
+      - "80:80"
+      - "443:443"
+
+  backend:
+    environment:
+      - FLASK_ENV=production
+
+  frontend:
+    environment:
+      - VITE_HOST=0.0.0.0
+      - VITE_PORT=3001
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules  # Keep node_modules for production

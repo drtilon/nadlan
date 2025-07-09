@@ -51,7 +51,7 @@ import {
 } from '@mui/icons-material';
 import api from '../utils/api';
 import PasswordChangeDialog from './PasswordChangeDialog';
-
+// TODO do thsi or handleTabChange
 function AdminPanel({ showNotification }) {
   const [users, setUsers] = useState([]);
   const [filteredUsers, setFilteredUsers] = useState([]);
@@ -68,7 +68,6 @@ function AdminPanel({ showNotification }) {
     admins: 0,
     pendingApproval: 0,
   });
-
   // Password change state
   const [passwordChangeOpen, setPasswordChangeOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState(null);

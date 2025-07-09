@@ -107,7 +107,7 @@ function MainLayout({ onLogout }) {
       title: 'Contracts',
       icon: <DescriptionIcon />,
       hasChildren: true,
-      adminOnly: true,
+      adminOnly: false, // Changed from true to false - now available to all users
       children: [
         { id: 61, title: 'Generate Contract', icon: <DriveFileRenameOutlineIcon />, path: 'contracts/generate' },
         { id: 62, title: 'Contract Manager', icon: <FileOpenIcon />, path: 'contracts/manage' },
@@ -127,7 +127,7 @@ function MainLayout({ onLogout }) {
       id: 7,
       title: 'Analytics',
       icon: <InsightsIcon />,
-      path: 'user-analytics', 
+      path: 'user-analytics',
       hasChildren: false,
       adminOnly: false
     },
@@ -213,7 +213,7 @@ function MainLayout({ onLogout }) {
             letterSpacing: '0.5px',
             cursor: 'pointer'
           }}
-          onClick={() => navigateTo('properties')}
+          onClick={() => navigateTo('dashboard')}
         >
           Shefa UG
         </Typography>
@@ -266,8 +266,8 @@ function MainLayout({ onLogout }) {
                         borderRadius: 1,
                         py: 1.25,
                         px: 1.5,
-                        backgroundColor: (item.title === 'Contracts' && location.pathname.includes('contracts')) || 
-                                         (item.title === 'Analytics' && isAnalyticsActive())
+                        backgroundColor: (item.title === 'Contracts' && location.pathname.includes('contracts')) ||
+                          (item.title === 'Analytics' && isAnalyticsActive())
                           ? '#f3f4f6'
                           : 'transparent',
                         '&:hover': {
@@ -277,8 +277,8 @@ function MainLayout({ onLogout }) {
                     >
                       <ListItemIcon sx={{
                         minWidth: 40,
-                        color: (item.title === 'Contracts' && location.pathname.includes('contracts')) || 
-                              (item.title === 'Analytics' && isAnalyticsActive())
+                        color: (item.title === 'Contracts' && location.pathname.includes('contracts')) ||
+                          (item.title === 'Analytics' && isAnalyticsActive())
                           ? '#2563eb'
                           : '#6b7280'
                       }}>
@@ -287,19 +287,19 @@ function MainLayout({ onLogout }) {
                       <ListItemText
                         primary={item.title}
                         primaryTypographyProps={{
-                          fontWeight: (item.title === 'Contracts' && location.pathname.includes('contracts')) || 
-                                      (item.title === 'Analytics' && isAnalyticsActive())
+                          fontWeight: (item.title === 'Contracts' && location.pathname.includes('contracts')) ||
+                            (item.title === 'Analytics' && isAnalyticsActive())
                             ? 600 : 500,
                           fontSize: '0.9rem',
                           color: '#374151'
                         }}
                       />
-                      <ExpandMoreIcon 
-                        sx={{ 
+                      <ExpandMoreIcon
+                        sx={{
                           fontSize: '1.2rem',
                           color: '#9ca3af',
-                          transform: (item.title === 'Contracts' && contractsMenuOpen) || 
-                                    (item.title === 'Analytics' && analyticsMenuOpen) 
+                          transform: (item.title === 'Contracts' && contractsMenuOpen) ||
+                            (item.title === 'Analytics' && analyticsMenuOpen)
                             ? 'rotate(180deg)' : 'rotate(0deg)',
                           transition: 'transform 0.2s'
                         }}
@@ -307,8 +307,8 @@ function MainLayout({ onLogout }) {
                     </ListItemButton>
                   </ListItem>
 
-                  <Collapse 
-                    in={item.title === 'Contracts' ? contractsMenuOpen : analyticsMenuOpen} 
+                  <Collapse
+                    in={item.title === 'Contracts' ? contractsMenuOpen : analyticsMenuOpen}
                     timeout={200}
                     unmountOnExit
                   >
@@ -438,8 +438,8 @@ function MainLayout({ onLogout }) {
             aria-label="open drawer"
             edge="start"
             onClick={handleDrawerToggle}
-            sx={{ 
-              mr: 2, 
+            sx={{
+              mr: 2,
               display: { lg: 'none' },
               color: '#6b7280'
             }}
@@ -529,14 +529,14 @@ function MainLayout({ onLogout }) {
                 {notifications.length} new updates
               </Typography>
             </Box>
-            
+
             <Box sx={{ maxHeight: 300, overflow: 'auto' }}>
               {notifications.map((notification, index) => (
-                <MenuItem 
+                <MenuItem
                   key={notification.id}
                   onClick={handleNotificationMenuClose}
-                  sx={{ 
-                    p: 2, 
+                  sx={{
+                    p: 2,
                     borderBottom: index < notifications.length - 1 ? '1px solid #f3f4f6' : 'none',
                     '&:hover': { backgroundColor: '#f9fafb' }
                   }}
@@ -599,8 +599,8 @@ function MainLayout({ onLogout }) {
               </Box>
             </Box>
 
-            <MenuItem 
-              onClick={handleUserMenuClose} 
+            <MenuItem
+              onClick={handleUserMenuClose}
               sx={{ py: 1.5, '&:hover': { backgroundColor: '#f9fafb' } }}
             >
               <ListItemIcon>
@@ -609,8 +609,8 @@ function MainLayout({ onLogout }) {
               <ListItemText primary="Profile" />
             </MenuItem>
 
-            <MenuItem 
-              onClick={handleUserMenuClose} 
+            <MenuItem
+              onClick={handleUserMenuClose}
               sx={{ py: 1.5, '&:hover': { backgroundColor: '#f9fafb' } }}
             >
               <ListItemIcon>
@@ -621,10 +621,10 @@ function MainLayout({ onLogout }) {
 
             <Divider />
 
-            <MenuItem 
-              onClick={handleLogout} 
-              sx={{ 
-                py: 1.5, 
+            <MenuItem
+              onClick={handleLogout}
+              sx={{
+                py: 1.5,
                 color: '#dc2626',
                 '&:hover': { backgroundColor: '#fef2f2' }
               }}

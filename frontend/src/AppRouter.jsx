@@ -289,9 +289,9 @@ const AppRouterContainer = () => {
             />
           } />
 
-          {/* Admin Only Routes */}
+          {/* Apartment Management Routes - Admin Only */}
           <Route path="apartments/add" element={
-            <ProtectedRoute >
+            <ProtectedRoute adminOnly={true}>
               <ApartmentForm
                 showNotification={showNotification}
                 onSuccess={() => navigate('/dashboard')}
@@ -300,7 +300,7 @@ const AppRouterContainer = () => {
           } />
 
           <Route path="apartments/edit" element={
-            <ProtectedRoute >
+            <ProtectedRoute adminOnly={true}>
               <ApartmentForm
                 isEdit={true}
                 initialData={editingApartment}
@@ -312,7 +312,7 @@ const AppRouterContainer = () => {
 
           {/* Analytics Panel Routes */}
           <Route path="analytics" element={
-            <ProtectedRoute>
+            <ProtectedRoute adminOnly={true}>
               <AnalyticsPanel showNotification={showNotification} />
             </ProtectedRoute>
           } />
@@ -323,24 +323,24 @@ const AppRouterContainer = () => {
             </ProtectedRoute>
           } />
 
-          {/* Contract Generator Route */}
+          {/* Contract Routes - Available to all users */}
           <Route path="contracts/generate" element={
-            <ProtectedRoute adminOnly={true}>
+            <ProtectedRoute adminOnly={false}>
               <ContractGenerator
                 showNotification={showNotification}
               />
             </ProtectedRoute>
           } />
 
-          {/* Contract Manager Route */}
           <Route path="contracts/manage" element={
-            <ProtectedRoute adminOnly={true}>
+            <ProtectedRoute adminOnly={false}>
               <ContractManager
                 showNotification={showNotification}
               />
             </ProtectedRoute>
           } />
 
+          {/* Admin Only Routes */}
           <Route path="admin" element={
             <ProtectedRoute adminOnly={true}>
               <AdminPanel

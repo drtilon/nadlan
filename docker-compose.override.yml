@@ -1,0 +1,23 @@
+services:
+  nginx:
+    volumes:
+      - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "80:80"
+    # Remove SSL port for development
+    # No SSL certificates needed
+
+  backend:
+    environment:
+      - FLASK_ENV=development
+      - CORS_ALLOWED_ORIGINS=http://localhost,http://localhost:80,http://localhost:3001,http://vite_frontend:3001
+
+  frontend:
+    environment:
+      - VITE_HOST=0.0.0.0
+      - VITE_PORT=3001
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=1000
+    # Override volumes to remove node_modules mount for development
+    volumes:
+      - ./frontend:/app

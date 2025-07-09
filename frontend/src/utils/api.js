@@ -11,8 +11,11 @@ const getBaseUrl = () => {
   if (hostname === '207.154.221.54' || hostname === 'shefaug.com' || hostname === 'www.shefaug.com') {
     return 'https://www.shefaug.com/api'; // Use HTTPS and your domain
   }
-  // Local development
-  return 'http://localhost:5001/api';
+
+  // Local development - use relative path to go through proxy
+  // This will use the current origin (e.g., http://localhost or http://localhost:3001)
+  // and the Vite proxy or nginx will handle routing to the backend
+  return '/api';
 };
 
 // API service with dynamic base URL configuration

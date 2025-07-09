@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mysql:
     image: mysql:8.0
@@ -14,11 +12,6 @@ services:
       MYSQL_DATABASE: mydatabase
       MYSQL_USER: myuser
       MYSQL_PASSWORD: mypassword
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      retries: 5
-      start_period: 30s
     networks:
       - app_network
 
@@ -31,8 +24,7 @@ services:
     volumes:
       - ./backend:/app
     depends_on:
-      mysql:
-        condition: service_healthy
+      - mysql
     environment:
       - FLASK_ENV=production
       - DB_USER=myuser
@@ -41,12 +33,6 @@ services:
       - DB_NAME=mydatabase
       - SECRET_KEY=mysecret
       - CORS_ALLOWED_ORIGINS=http://shefa.com,https://shefa.com,http://localhost,http://localhost:80,http://207.154.221.54,http://frontend:3001,http://www.shefaug.com,https://www.shefaug.com,http://vite_frontend:3001
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5001/api/auth/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
     networks:
       - app_network
 
@@ -64,12 +50,6 @@ services:
       - CHOKIDAR_INTERVAL=1000
       - VITE_HOST=0.0.0.0
       - VITE_PORT=3001
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
     networks:
       - app_network
 
@@ -84,10 +64,8 @@ services:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
     depends_on:
-      backend:
-        condition: service_healthy
-      frontend:
-        condition: service_healthy
+      - backend
+      - frontend
     networks:
       - app_network
 

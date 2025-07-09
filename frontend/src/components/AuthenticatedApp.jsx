@@ -102,7 +102,7 @@ function AuthenticatedApp({
     { title: 'Add Apartment', icon: <AddCircleIcon />, view: 'add', adminOnly: true },
     { title: 'Tenants', icon: <PersonIcon />, view: 'tenants', adminOnly: false },
     { title: 'Payments', icon: <AttachMoneyIcon />, view: 'payments', adminOnly: false },
-    { title: 'Contracts', icon: <DescriptionIcon />, view: 'contracts', adminOnly: true },
+    { title: 'Contracts', icon: <DescriptionIcon />, view: 'contracts', adminOnly: false },
     { title: 'Analytics', icon: <InsightsIcon />, view: 'analytics', adminOnly: false },
     { title: 'Admin Panel', icon: <AdminPanelSettingsIcon />, view: 'admin', adminOnly: true },
     { title: 'System Logs', icon: <AssessmentIcon />, view: 'logs', adminOnly: true },

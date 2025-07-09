@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import {
   Paper,
   Typography,
+  Autocomplete,
   Grid,
   FormControl,
   InputLabel,
@@ -292,7 +293,7 @@ function PaymentScreen({ showNotification }) {
       contract: targetContract
     };
   };
-
+  const [searchQuery, setSearchQuery] = useState("");
   // Form handlers
   const resetIndividualPaymentForm = () => {
     const tenants = getCurrentTenants();
@@ -535,8 +536,10 @@ function PaymentScreen({ showNotification }) {
 
   // Get contract info for display
   const contractInfo = getContractInfo();
-  const filteredPayments = getFilteredPayments();
-  const tenants = getCurrentTenants();
+  const filteredPayments = getFilteredPayments().filter(p =>
+    (p.paidBy || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (Array.isArray(p.paidFor) && p.paidFor.some(name => name.toLowerCase().includes(searchQuery.toLowerCase())))
+  ); const tenants = getCurrentTenants();
 
   return (
     <Box sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
@@ -555,20 +558,27 @@ function PaymentScreen({ showNotification }) {
         <CardContent>
           <Grid container spacing={2} alignItems="center">
             <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>Select Apartment</InputLabel>
-                <Select
-                  value={selectedApartment}
-                  label="Select Apartment"
-                  onChange={(e) => setSelectedApartment(e.target.value)}
-                >
-                  {apartments.map((apt) => (
-                    <MenuItem key={apt.id} value={apt.id}>
-                      {apt.address}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+
+              <Autocomplete
+                options={apartments}
+                getOptionLabel={(option) => option.address}
+                value={apartments.find(a => a.id === selectedApartment) || null}
+                onChange={(event, newValue) => {
+                  if (newValue) {
+                    setSelectedApartment(newValue.id);
+                  }
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Select Apartment"
+                    variant="outlined"
+                    fullWidth
+                  />
+                )}
+                isOptionEqualToValue={(option, value) => option.id === value.id}
+              />
+
             </Grid>
             {selectedApartment && (
               <Grid item xs={12} md={6}>
@@ -650,10 +660,20 @@ function PaymentScreen({ showNotification }) {
           <Card>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <TextField
+                    size="small"
+                    label="Search by name"
+                    variant="outlined"
+                    sx={{ mr: 2 }}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
                   <ReceiptIcon sx={{ mr: 1 }} />
                   <Typography variant="h6">Payment History</Typography>
                 </Box>
+
 
                 {contracts.length > 0 && (
                   <FormControl size="small" sx={{ minWidth: 200 }}>
@@ -1089,7 +1109,7 @@ function PaymentScreen({ showNotification }) {
           <Button
             variant="contained"
             onClick={handleSubmitPayment}
-            disabled={loading || 
+            disabled={loading ||
               (paymentMode === 0 && (!paymentForm.amount || !paymentForm.paidBy || paymentForm.paidFor.length === 0)) ||
               (paymentMode === 1 && (!individualPaymentForm.amount || !individualPaymentForm.tenant_name))
             }

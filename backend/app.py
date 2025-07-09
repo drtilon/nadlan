@@ -17,6 +17,7 @@ import os
 from dotenv import load_dotenv
 from activity_logger import ActivityLogger, configure_activity_logger
 
+
 def wait_for_mysql(app):
     """Retry MySQL connection until it's available."""
     max_retries = 10
@@ -49,7 +50,7 @@ def create_app():
             # For production, specify your frontend domain
             allowed_origins = os.environ.get(
                 "CORS_ALLOWED_ORIGINS",
-                "http://localhost,http://localhost:80,http://localhost:3001,http://vite_frontend:3001"
+                "http://localhost,http://localhost:80,http://localhost:3001,http://vite_frontend:3001",
             ).split(",")
 
             # Strip whitespace from origins
@@ -63,12 +64,16 @@ def create_app():
                     r"/api/*": {
                         "origins": allowed_origins,
                         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-                        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+                        "allow_headers": [
+                            "Content-Type",
+                            "Authorization",
+                            "X-Requested-With",
+                        ],
                         "supports_credentials": True,
-                        "expose_headers": ["Authorization"]
+                        "expose_headers": ["Authorization"],
                     }
                 },
-                supports_credentials=True
+                supports_credentials=True,
             )
 
             # Add OPTIONS handler for preflight requests
@@ -76,27 +81,37 @@ def create_app():
             def handle_preflight():
                 if request.method == "OPTIONS":
                     response = Response()
-                    origin = request.headers.get('Origin')
+                    origin = request.headers.get("Origin")
                     if origin in allowed_origins:
                         response.headers.add("Access-Control-Allow-Origin", origin)
                     else:
                         response.headers.add("Access-Control-Allow-Origin", "*")
-                    response.headers.add('Access-Control-Allow-Headers', "Content-Type,Authorization,X-Requested-With")
-                    response.headers.add('Access-Control-Allow-Methods', "GET,PUT,POST,DELETE,OPTIONS")
-                    response.headers.add('Access-Control-Allow-Credentials', 'true')
+                    response.headers.add(
+                        "Access-Control-Allow-Headers",
+                        "Content-Type,Authorization,X-Requested-With",
+                    )
+                    response.headers.add(
+                        "Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS"
+                    )
+                    response.headers.add("Access-Control-Allow-Credentials", "true")
                     return response
 
             # Add CORS headers to all responses
             @app.after_request
             def after_request(response):
-                origin = request.headers.get('Origin')
+                origin = request.headers.get("Origin")
                 if origin in allowed_origins:
-                    response.headers.add('Access-Control-Allow-Origin', origin)
+                    response.headers.add("Access-Control-Allow-Origin", origin)
                 else:
-                    response.headers.add('Access-Control-Allow-Origin', '*')
-                response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Requested-With')
-                response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-                response.headers.add('Access-Control-Allow-Credentials', 'true')
+                    response.headers.add("Access-Control-Allow-Origin", "*")
+                response.headers.add(
+                    "Access-Control-Allow-Headers",
+                    "Content-Type,Authorization,X-Requested-With",
+                )
+                response.headers.add(
+                    "Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS"
+                )
+                response.headers.add("Access-Control-Allow-Credentials", "true")
                 return response
 
         except Exception as e:
@@ -137,7 +152,9 @@ def create_app():
             from routes.payment_history import payment_history_bp
             from routes.contracts import contracts_bp
             from routes.contract_templates import contract_templates_bp
+            from routes.health import health_bp
 
+            app.register_blueprint(health_bp, url_prefix="/api")
             app.register_blueprint(auth_bp, url_prefix="/api/auth")
             app.register_blueprint(adminPanel_bp, url_prefix="/api/adminPanel")
             app.register_blueprint(apartments_bp, url_prefix="/api/")
@@ -159,6 +176,7 @@ def create_app():
     except Exception as e:
         # If the app hasn't been created, fall back to using Python's logging
         import logging
+
         logging.error(f"Critical error creating the Flask app: {e}")
         return None
 

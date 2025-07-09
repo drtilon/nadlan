@@ -1,28 +1,28 @@
-FROM node:18-alpine
+FROM node:18-alpine as builder
 
 WORKDIR /app
 
-# Copy package files first for better caching
+# Copy package files
 COPY package.json package-lock.json* ./
 
-# Install dependencies as root
-RUN npm ci --include=dev
+# Install dependencies
+RUN npm ci --only=production
 
 # Copy source code
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p /app/node_modules/.vite-temp
+# Build the application
+RUN npm run build
 
-# Add user and set permissions AFTER installing dependencies
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nextjs -u 1001 && \
-    chown -R nextjs:nodejs /app && \
-    chmod -R 755 /app
+# Production stage
+FROM nginx:alpine
 
-USER nextjs
+# Copy built files to nginx
+COPY --from=builder /app/dist /usr/share/nginx/html
 
-EXPOSE 3001
+# Copy nginx configuration
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Use npm run dev with explicit config
-CMD ["npm", "run", "dev"]
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

@@ -581,22 +581,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
           }}
         >
           <Button
-            variant="outlined"
-            startIcon={<FileDownloadIcon />}
-            onClick={handleExport}
-            sx={{
-              borderRadius: 1,
-              textTransform: 'none',
-              fontWeight: 500,
-              borderWidth: 1.5,
-              px: 3,
-              height: '48px'
-            }}
-          >
-            Export
-          </Button>
-
-          <Button
             variant="contained"
             startIcon={<ApartmentIcon />}
             onClick={() => onEdit(null)}

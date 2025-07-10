@@ -1,13 +1,13 @@
-# Use newer Node version for better performance
+# Build stage
 FROM node:20-alpine as build
 
 WORKDIR /app
 
-# Copy package files first (better caching)
+# Copy package files
 COPY package*.json ./
 
-# Install dependencies with optimizations
-RUN npm ci --only=production --no-audit --no-fund --prefer-offline
+# Install ALL dependencies (including devDependencies for build)
+RUN npm ci --no-audit --no-fund --prefer-offline
 
 # Copy source code
 COPY . .

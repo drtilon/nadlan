@@ -1,14 +1,14 @@
 version: '3.8'
 
 services:
-  # mount the prod‐config + SSL, expose both HTTP+HTTPS
+  # Simplified nginx - Cloudflare handles SSL
   nginx:
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
+      # SSL volume removed - Cloudflare handles SSL
     ports:
       - "80:80"
-      - "443:443"
+      # Port 443 removed - Cloudflare handles HTTPS
 
   backend:
     environment:

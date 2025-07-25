@@ -19,14 +19,14 @@ services:
   nginx:
     image: nginx:latest
     restart: always
-    ports: ["80:80", "443:443"]
+    ports: ["80:80"]  # Only HTTP port needed - Cloudflare handles HTTPS
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
+      # SSL volume removed - Cloudflare handles SSL certificates
     networks: [app_network]
 
   backend:
-    build: ./backend            # see Dockerfile below
+    build: ./backend
     ports: ["5001:5001"]
     volumes: ["./backend:/app"]
     depends_on:

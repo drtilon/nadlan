@@ -23,6 +23,9 @@ services:
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
       # SSL volume removed - Cloudflare handles SSL certificates
+    depends_on:
+      - backend
+      - frontend
     networks: [app_network]
 
   backend:

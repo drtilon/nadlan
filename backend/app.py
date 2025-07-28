@@ -45,6 +45,10 @@ def create_app():
         app = Flask(__name__)
         app.config.from_object(Config)
 
+        # Set file upload limits - 100MB max file size and request size
+        app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB
+        app.config['UPLOAD_FOLDER'] = os.path.join(app.root_path, 'uploads')
+
         try:
             # Allow requests from any origin during development
             # For production, specify your frontend domain
@@ -115,6 +119,11 @@ def create_app():
 
         except Exception as e:
             app.logger.error(f"Error initializing CORS: {e}")
+
+        # Add error handler for file too large
+        @app.errorhandler(413)
+        def too_large(e):
+            return {"error": "File too large. Maximum file size is 100MB."}, 413
 
         try:
             db.init_app(app)

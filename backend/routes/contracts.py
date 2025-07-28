@@ -30,6 +30,11 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def get_file_size_mb(size_bytes):
+    """Convert bytes to MB for display"""
+    return round(size_bytes / (1024 * 1024), 2)
+
+
 @contracts_bp.route("/contracts/<int:apartment_id>", methods=["GET"])
 @token_required
 def get_contracts(apartment_id):
@@ -89,8 +94,34 @@ def upload_contract():
         files = request.files.getlist("files")
         uploaded_contracts = []
 
+        # Maximum file size in bytes (50MB per file)
+        MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+
+        # Maximum total upload size (100MB for all files combined)
+        MAX_TOTAL_SIZE = 100 * 1024 * 1024  # 100MB
+
+        # Check total size of all files
+        total_size = sum(len(file.read()) for file in files)
         for file in files:
-            if file and allowed_file(file.filename):
+            file.seek(0)  # Reset file pointer after reading
+
+        if total_size > MAX_TOTAL_SIZE:
+            return jsonify({
+                "message": f"Total file size ({get_file_size_mb(total_size)}MB) exceeds maximum allowed size (100MB)"
+            }), 413
+
+        for file in files:
+            if file and file.filename and allowed_file(file.filename):
+                # Check individual file size
+                file.seek(0, os.SEEK_END)  # Seek to end
+                file_size = file.tell()    # Get position (file size)
+                file.seek(0)               # Reset to beginning
+
+                if file_size > MAX_FILE_SIZE:
+                    return jsonify({
+                        "message": f"File '{file.filename}' ({get_file_size_mb(file_size)}MB) exceeds maximum file size (50MB)"
+                    }), 413
+
                 # Secure the filename and generate a unique name
                 original_filename = secure_filename(file.filename)
                 filename_parts = os.path.splitext(original_filename)
@@ -101,28 +132,50 @@ def upload_contract():
                 # Create file path
                 file_path = os.path.join(upload_dir, unique_filename)
 
-                # Save the file
-                file.save(file_path)
+                try:
+                    # Save the file
+                    file.save(file_path)
 
-                # Get file size and type
-                file_size = os.path.getsize(file_path)
-                file_extension = os.path.splitext(original_filename)[1].lstrip(".")
+                    # Verify file was saved successfully
+                    if not os.path.exists(file_path):
+                        current_app.logger.error(f"File was not saved successfully: {file_path}")
+                        continue
 
-                # Create contract record in database
-                contract = Contract(
-                    apartment_id=apartment_id,
-                    file_path=file_path,
-                    file_name=original_filename,
-                    file_size=file_size,
-                    file_type=file_extension,
-                    notes=notes,
-                    uploaded_by=user_id,
-                )
+                    # Get actual file size after saving
+                    actual_file_size = os.path.getsize(file_path)
+                    file_extension = os.path.splitext(original_filename)[1].lstrip(".")
 
-                db.session.add(contract)
-                uploaded_contracts.append(contract)
-            else:
-                return jsonify({"message": f"Invalid file: {file.filename}"}), 400
+                    # Create contract record in database
+                    contract = Contract(
+                        apartment_id=apartment_id,
+                        file_path=file_path,
+                        file_name=original_filename,
+                        file_size=actual_file_size,
+                        file_type=file_extension,
+                        notes=notes,
+                        uploaded_by=user_id,
+                    )
+
+                    db.session.add(contract)
+                    uploaded_contracts.append(contract)
+
+                    current_app.logger.info(f"Successfully saved file: {original_filename} ({get_file_size_mb(actual_file_size)}MB)")
+
+                except Exception as file_error:
+                    current_app.logger.error(f"Error saving file {original_filename}: {file_error}")
+                    # Clean up partially saved file if it exists
+                    if os.path.exists(file_path):
+                        try:
+                            os.remove(file_path)
+                        except:
+                            pass
+                    continue
+
+            elif file and file.filename:
+                return jsonify({"message": f"Invalid file type: {file.filename}. Allowed types: PDF, DOC, DOCX, TXT, JPG, JPEG, PNG"}), 400
+
+        if not uploaded_contracts:
+            return jsonify({"message": "No valid files were uploaded"}), 400
 
         # Commit changes to database
         db.session.commit()
@@ -180,7 +233,12 @@ def delete_contract(contract_id):
 
         # First delete the file from storage
         if os.path.exists(contract.file_path):
-            os.remove(contract.file_path)
+            try:
+                os.remove(contract.file_path)
+                current_app.logger.info(f"Deleted file: {contract.file_path}")
+            except Exception as file_error:
+                current_app.logger.error(f"Error deleting file {contract.file_path}: {file_error}")
+                # Continue with database deletion even if file deletion fails
 
         # Then delete the database record
         db.session.delete(contract)

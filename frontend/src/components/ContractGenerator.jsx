@@ -21,7 +21,8 @@ import {
   IconButton,
   Tooltip,
   Tabs,
-  Tab
+  Tab,
+  LinearProgress
 } from '@mui/material';
 import {
   DescriptionOutlined as DescriptionIcon,
@@ -31,7 +32,8 @@ import {
   Settings as SettingsIcon,
   Add as AddIcon,
   ListAlt as ListIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  Warning as WarningIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import api from '../utils/api';
@@ -50,6 +52,8 @@ function ContractGenerator({ showNotification }) {
   const [defaultTemplate, setDefaultTemplate] = useState(null);
   const [tabValue, setTabValue] = useState(0);
   const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
   const navigate = useNavigate();
 
   // Fetch apartments and templates when component mounts
@@ -184,14 +188,53 @@ function ContractGenerator({ showNotification }) {
     }
 
     setGenerating(true);
+    setIsUploading(true);
+    setUploadProgress(0);
+
     try {
-      // API call with template selection
+      // Simulate progress for better UX
+      const progressInterval = setInterval(() => {
+        setUploadProgress(prev => {
+          if (prev >= 90) {
+            clearInterval(progressInterval);
+            return prev;
+          }
+          return prev + 10;
+        });
+      }, 200);
+
+      // Create AbortController for request cancellation if needed
+      const controller = new AbortController();
+
+      // API call with template selection and better error handling
       const response = await api.post('/documents/createContract', {
         apartmentId: selectedApartment,
         templateId: selectedTemplate
       }, {
-        responseType: 'blob' // Important for file download
+        responseType: 'blob', // Important for file download
+        timeout: 30000, // 30 second timeout
+        signal: controller.signal,
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.total) {
+            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+            setUploadProgress(percentCompleted);
+          }
+        }
       });
+
+      // Clear progress interval and set to 100%
+      clearInterval(progressInterval);
+      setUploadProgress(100);
+
+      // Check if response is actually a blob
+      if (!(response.data instanceof Blob)) {
+        throw new Error('Invalid response format');
+      }
+
+      // Check if the blob is empty or too small (likely an error response)
+      if (response.data.size < 100) {
+        throw new Error('Generated contract file is empty or corrupted');
+      }
 
       // Create a blob from the response data
       const blob = new Blob([response.data], {
@@ -204,7 +247,7 @@ function ContractGenerator({ showNotification }) {
 
       // Get apartment details for filename
       const apartment = apartments.find(apt => apt.id === selectedApartment);
-      const fileName = `Rental_Contract_${apartment ? (apartment.address || 'Apartment') : 'Apartment'}.docx`;
+      const fileName = `Rental_Contract_${apartment ? (apartment.address || 'Apartment').replace(/[^a-zA-Z0-9]/g, '_') : 'Apartment'}.docx`;
 
       link.href = url;
       link.setAttribute('download', fileName);
@@ -212,12 +255,33 @@ function ContractGenerator({ showNotification }) {
       link.click();
       document.body.removeChild(link);
 
+      // Clean up the object URL
+      setTimeout(() => {
+        window.URL.revokeObjectURL(url);
+      }, 100);
+
       showNotification('Contract generated successfully', 'success');
     } catch (error) {
       console.error('Error generating contract:', error);
-      showNotification('Failed to generate contract', 'error');
+
+      // Handle specific error cases
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        showNotification('Request timed out. Please try again with a smaller file or check your connection.', 'error');
+      } else if (error.response?.status === 413) {
+        showNotification('File too large. Please reduce the template size and try again.', 'error');
+      } else if (error.response?.status === 404) {
+        showNotification('Contract template not found. Please select a different template.', 'error');
+      } else if (error.response?.status >= 500) {
+        showNotification('Server error. Please try again later.', 'error');
+      } else if (error.message.includes('Network Error')) {
+        showNotification('Network error. Please check your connection and try again.', 'error');
+      } else {
+        showNotification('Failed to generate contract. Please try again.', 'error');
+      }
     } finally {
       setGenerating(false);
+      setIsUploading(false);
+      setUploadProgress(0);
     }
   };
 
@@ -318,7 +382,11 @@ function ContractGenerator({ showNotification }) {
                     </FormControl>
 
                     {templates.length === 0 && !templatesLoading && (
-                      <Alert severity="info" sx={{ mb: 3 }}>
+                      <Alert
+                        severity="warning"
+                        sx={{ mb: 3 }}
+                        icon={<WarningIcon />}
+                      >
                         No contract templates found. Please add a template first using the "Manage Templates" tab.
                       </Alert>
                     )}
@@ -409,6 +477,20 @@ function ContractGenerator({ showNotification }) {
                       </Box>
                     )}
 
+                    {/* Progress indicator */}
+                    {isUploading && (
+                      <Box sx={{ mb: 3 }}>
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          Generating contract... {uploadProgress}%
+                        </Typography>
+                        <LinearProgress
+                          variant="determinate"
+                          value={uploadProgress}
+                          sx={{ height: 8, borderRadius: 4 }}
+                        />
+                      </Box>
+                    )}
+
                     <Box display="flex" justifyContent="center" mt={4}>
                       <Button
                         variant="contained"
@@ -427,6 +509,24 @@ function ContractGenerator({ showNotification }) {
                       >
                         {generating ? 'Generating...' : 'Generate Contract'}
                       </Button>
+                    </Box>
+
+                    {/* Additional info for users */}
+                    <Box sx={{ mt: 3 }}>
+                      <Alert severity="info" sx={{ mb: 2 }}>
+                        <Typography variant="body2">
+                          <strong>Note:</strong> Contract generation may take a few moments.
+                          The file will automatically download when ready.
+                        </Typography>
+                      </Alert>
+
+                      {templates.length > 0 && (
+                        <Alert severity="success">
+                          <Typography variant="body2">
+                            Using template: <strong>{templates.find(t => t.id === selectedTemplate)?.name || 'Default'}</strong>
+                          </Typography>
+                        </Alert>
+                      )}
                     </Box>
                   </Grid>
                 </Grid>

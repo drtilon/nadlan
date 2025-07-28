@@ -45,9 +45,12 @@ def create_app():
         app = Flask(__name__)
         app.config.from_object(Config)
 
-        # Set file upload limits - 100MB max file size and request size
-        app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB
+        # Set file upload limits - reduced for better reliability
+        app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size (reduced from 100MB)
         app.config['UPLOAD_FOLDER'] = os.path.join(app.root_path, 'uploads')
+
+        # Additional configuration for better file handling
+        app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching for file uploads
 
         try:
             # Allow requests from any origin during development
@@ -74,6 +77,7 @@ def create_app():
                         ],
                         "supports_credentials": True,
                         "expose_headers": ["Authorization"],
+                        "max_age": 600,  # Cache preflight requests for 10 minutes
                     }
                 },
                 supports_credentials=True,
@@ -97,6 +101,7 @@ def create_app():
                         "Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS"
                     )
                     response.headers.add("Access-Control-Allow-Credentials", "true")
+                    response.headers.add("Access-Control-Max-Age", "600")
                     return response
 
             # Add CORS headers to all responses
@@ -123,7 +128,15 @@ def create_app():
         # Add error handler for file too large
         @app.errorhandler(413)
         def too_large(e):
-            return {"error": "File too large. Maximum file size is 100MB."}, 413
+            return {"error": "File too large. Maximum file size is 50MB."}, 413
+
+        # Add error handler for request entity too large (Nginx/server level)
+        @app.errorhandler(400)
+        def bad_request(e):
+            # Check if it's a file size related error
+            if "too large" in str(e).lower() or "413" in str(e):
+                return {"error": "Request too large. Please reduce file size and try again."}, 413
+            return {"error": "Bad request"}, 400
 
         try:
             db.init_app(app)

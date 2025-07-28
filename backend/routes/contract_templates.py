@@ -27,6 +27,11 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def get_file_size_mb(size_bytes):
+    """Convert bytes to MB for display"""
+    return round(size_bytes / (1024 * 1024), 2)
+
+
 @contract_templates_bp.route("/templates", methods=["GET"])
 @token_required
 def get_templates():
@@ -134,6 +139,21 @@ def upload_template():
         if not allowed_file(file.filename):
             return jsonify({"message": "Only DOCX files are allowed"}), 400
 
+        # Check file size (reduced limit for better reliability)
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB (reduced from larger sizes)
+
+        file.seek(0, os.SEEK_END)
+        file_size = file.tell()
+        file.seek(0)
+
+        if file_size > MAX_FILE_SIZE:
+            return jsonify({
+                "message": f"File size ({get_file_size_mb(file_size)}MB) exceeds maximum allowed size (10MB)"
+            }), 413
+
+        if file_size == 0:
+            return jsonify({"message": "Cannot upload empty file"}), 400
+
         # Get form data
         name = request.form.get("name")
         description = request.form.get("description", "")
@@ -156,8 +176,36 @@ def upload_template():
         # Save the file
         templates_dir = ensure_templates_dir()
         filename = secure_filename(file.filename)
+        if not filename:
+            return jsonify({"message": "Invalid filename"}), 400
+
         file_path = os.path.join(templates_dir, f"{uuid.uuid4().hex}_{filename}")
-        file.save(file_path)
+
+        try:
+            # Save file in chunks for better handling of larger files
+            with open(file_path, 'wb') as f:
+                chunk_size = 8192  # 8KB chunks
+                while True:
+                    chunk = file.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+
+            # Verify file was saved successfully
+            if not os.path.exists(file_path):
+                return jsonify({"message": "Failed to save file"}), 500
+
+            actual_file_size = os.path.getsize(file_path)
+
+        except Exception as save_error:
+            current_app.logger.error(f"Error saving template file: {save_error}")
+            # Clean up partially saved file
+            if os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
+            return jsonify({"message": "Failed to save template file"}), 500
 
         # Create new template record in database
         template = ContractTemplate(
@@ -165,7 +213,7 @@ def upload_template():
             description=description,
             file_path=file_path,
             file_name=filename,
-            file_size=os.path.getsize(file_path),
+            file_size=actual_file_size,
             is_default=is_default,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
@@ -174,6 +222,8 @@ def upload_template():
 
         db.session.add(template)
         db.session.commit()
+
+        current_app.logger.info(f"Successfully uploaded template: {name} ({get_file_size_mb(actual_file_size)}MB)")
 
         return jsonify(
             {
@@ -303,7 +353,11 @@ def delete_template(template_id):
 
         # Delete the file if it exists
         if template.file_path and os.path.exists(template.file_path):
-            os.remove(template.file_path)
+            try:
+                os.remove(template.file_path)
+                current_app.logger.info(f"Deleted template file: {template.file_path}")
+            except Exception as file_error:
+                current_app.logger.error(f"Error deleting template file: {file_error}")
 
         # Delete from database
         db.session.delete(template)

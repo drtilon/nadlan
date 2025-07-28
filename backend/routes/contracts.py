@@ -94,36 +94,46 @@ def upload_contract():
         files = request.files.getlist("files")
         uploaded_contracts = []
 
-        # Maximum file size in bytes (50MB per file)
-        MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
-
-        # Maximum total upload size (100MB for all files combined)
-        MAX_TOTAL_SIZE = 100 * 1024 * 1024  # 100MB
+        # Reduced file size limits for better reliability
+        MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB per file (reduced from 50MB)
+        MAX_TOTAL_SIZE = 50 * 1024 * 1024  # 50MB for all files combined (reduced from 100MB)
 
         # Check total size of all files
-        total_size = sum(len(file.read()) for file in files)
+        total_size = 0
         for file in files:
-            file.seek(0)  # Reset file pointer after reading
+            file.seek(0, os.SEEK_END)
+            file_size = file.tell()
+            file.seek(0)
+            total_size += file_size
 
         if total_size > MAX_TOTAL_SIZE:
             return jsonify({
-                "message": f"Total file size ({get_file_size_mb(total_size)}MB) exceeds maximum allowed size (100MB)"
+                "message": f"Total file size ({get_file_size_mb(total_size)}MB) exceeds maximum allowed size (50MB)"
             }), 413
 
         for file in files:
             if file and file.filename and allowed_file(file.filename):
                 # Check individual file size
-                file.seek(0, os.SEEK_END)  # Seek to end
-                file_size = file.tell()    # Get position (file size)
-                file.seek(0)               # Reset to beginning
+                file.seek(0, os.SEEK_END)
+                file_size = file.tell()
+                file.seek(0)
 
                 if file_size > MAX_FILE_SIZE:
                     return jsonify({
-                        "message": f"File '{file.filename}' ({get_file_size_mb(file_size)}MB) exceeds maximum file size (50MB)"
+                        "message": f"File '{file.filename}' ({get_file_size_mb(file_size)}MB) exceeds maximum file size (25MB)"
                     }), 413
+
+                # Skip empty files
+                if file_size == 0:
+                    current_app.logger.warning(f"Skipping empty file: {file.filename}")
+                    continue
 
                 # Secure the filename and generate a unique name
                 original_filename = secure_filename(file.filename)
+                if not original_filename:
+                    current_app.logger.warning(f"Invalid filename, skipping file")
+                    continue
+
                 filename_parts = os.path.splitext(original_filename)
                 unique_filename = (
                     f"{filename_parts[0]}_{uuid.uuid4().hex}{filename_parts[1]}"
@@ -133,8 +143,14 @@ def upload_contract():
                 file_path = os.path.join(upload_dir, unique_filename)
 
                 try:
-                    # Save the file
-                    file.save(file_path)
+                    # Save the file in chunks to handle large files better
+                    with open(file_path, 'wb') as f:
+                        chunk_size = 8192  # 8KB chunks
+                        while True:
+                            chunk = file.read(chunk_size)
+                            if not chunk:
+                                break
+                            f.write(chunk)
 
                     # Verify file was saved successfully
                     if not os.path.exists(file_path):

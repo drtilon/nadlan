@@ -17,7 +17,7 @@ tenants_bp = Blueprint("tenants_bp", __name__)
 def list_tenants() -> Tuple[Response, int]:
     """
     Returns a list of all tenants in the system.
-    Administrators see all details, while regular users see limited information.
+    Now allows default users to see tenant information.
     """
     try:
         # Query all tenants from the database
@@ -44,12 +44,8 @@ def list_tenants() -> Tuple[Response, int]:
 
             tenants_data.append(tenant_dict)
 
-        # For non-admin users, remove sensitive information
-        role = g.user.get("role", "limited")
-        if role != "admin":
-            for tenant in tenants_data:
-                tenant.pop("email", None)
-                tenant.pop("phone", None)
+        # REMOVED: No longer filtering sensitive information for non-admin users
+        # All authenticated users can now see tenant details
 
         # Log this activity
         ActivityLogger.log_activity(
@@ -110,7 +106,7 @@ def add_tenant() -> Tuple[Response, int]:
     except Exception as e:
         current_app.logger.error(f"Error adding tenant: {e}")
         db.session.rollback()
-        
+
         # Log failure
         ActivityLogger.log_tenant_action(
             action="create",
@@ -119,7 +115,7 @@ def add_tenant() -> Tuple[Response, int]:
             success=False,
             error=e
         )
-        
+
         return jsonify({"message": "Error adding tenant", "error": str(e)}), 500
 
 
@@ -128,6 +124,7 @@ def add_tenant() -> Tuple[Response, int]:
 def get_tenant(tenant_id: int) -> Tuple[Response, int]:
     """
     Returns details for a specific tenant.
+    Now allows all authenticated users to see tenant details.
     """
     try:
         tenant = Tenant.query.get(tenant_id)
@@ -144,13 +141,9 @@ def get_tenant(tenant_id: int) -> Tuple[Response, int]:
             "refundIban": tenant.refundIban,
         }
 
-        # For non-admin users, remove sensitive information
-        role = g.user.get("role", "limited")
-        if role != "admin":
-            tenant_data.pop("email", None)
-            tenant_data.pop("phone", None)
+        # REMOVED: No longer filtering sensitive information for non-admin users
+        # All authenticated users can now see tenant details
 
-        # No need to log simple data retrieval
         return jsonify(tenant_data), 200
 
     except Exception as e:
@@ -198,7 +191,7 @@ def update_tenant(tenant_id: int) -> Tuple[Response, int]:
         current_app.logger.info(f"Updated tenant: {tenant.to_dict()}")
 
         db.session.commit()
-        
+
         # Prepare updated data for logging
         updated_data = {
             "name": tenant.name,
@@ -208,10 +201,10 @@ def update_tenant(tenant_id: int) -> Tuple[Response, int]:
             "bornOn": tenant.bornOn,
             "refundIban": tenant.refundIban
         }
-        
+
         # Find which fields were actually changed
         changed_fields = [k for k, v in updated_data.items() if k in original_data and original_data[k] != v]
-        
+
         # Log tenant update
         ActivityLogger.log_tenant_action(
             action="update",
@@ -222,13 +215,13 @@ def update_tenant(tenant_id: int) -> Tuple[Response, int]:
                 "changed_fields": changed_fields
             }
         )
-        
+
         return jsonify({"message": "Tenant updated successfully"}), 200
 
     except Exception as e:
         current_app.logger.error(f"Error updating tenant: {e}")
         db.session.rollback()
-        
+
         # Log failure
         ActivityLogger.log_tenant_action(
             action="update",
@@ -237,7 +230,7 @@ def update_tenant(tenant_id: int) -> Tuple[Response, int]:
             success=False,
             error=e
         )
-        
+
         return jsonify({"message": "Error updating tenant", "error": str(e)}), 500
 
 
@@ -260,23 +253,23 @@ def delete_tenant(tenant_id: int) -> Tuple[Response, int]:
             "phone": tenant.phone,
             "apartment_id": tenant.apartment_id
         }
-        
+
         db.session.delete(tenant)
         db.session.commit()
-        
+
         # Log deletion
         ActivityLogger.log_tenant_action(
             action="delete",
             tenant_id=tenant_id,
             details=tenant_data
         )
-        
+
         return jsonify({"message": "Tenant deleted successfully"}), 200
 
     except Exception as e:
         current_app.logger.error(f"Error deleting tenant: {e}")
         db.session.rollback()
-        
+
         # Log failure
         ActivityLogger.log_tenant_action(
             action="delete",
@@ -285,7 +278,7 @@ def delete_tenant(tenant_id: int) -> Tuple[Response, int]:
             success=False,
             error=e
         )
-        
+
         return jsonify({"message": "Error deleting tenant", "error": str(e)}), 500
 
 
@@ -294,6 +287,7 @@ def delete_tenant(tenant_id: int) -> Tuple[Response, int]:
 def search_tenants() -> Tuple[Response, int]:
     """
     Searches for tenants based on query parameters.
+    Now shows full tenant information to all authenticated users.
     """
     try:
         query = request.args.get("q", "")
@@ -309,8 +303,8 @@ def search_tenants() -> Tuple[Response, int]:
             tenant_dict = {
                 "id": tenant.id,
                 "name": tenant.name,
-                "email": tenant.email if g.user.get("role") == "admin" else None,
-                "phone": tenant.phone if g.user.get("role") == "admin" else None,
+                "email": tenant.email,  # Now visible to all users
+                "phone": tenant.phone,  # Now visible to all users
                 "apartment_id": tenant.apartment_id,
             }
             tenants_data.append(tenant_dict)
@@ -321,7 +315,7 @@ def search_tenants() -> Tuple[Response, int]:
             entity_type="tenant",
             details={"query": query, "results": len(tenants_data)}
         )
-        
+
         return jsonify(tenants_data), 200
 
     except Exception as e:
@@ -334,6 +328,7 @@ def search_tenants() -> Tuple[Response, int]:
 def get_apartment_tenants(apartment_id: int) -> Tuple[Response, int]:
     """
     Returns all tenants for a specific apartment.
+    Now shows full tenant information to all authenticated users.
     """
     try:
         # Query tenants associated with this apartment
@@ -361,8 +356,10 @@ def get_apartment_tenants(apartment_id: int) -> Tuple[Response, int]:
                 "name": tenant.name,
                 "firstName": first_name,
                 "lastName": last_name,
-                "email": tenant.email,
-                "phone": tenant.phone,
+                "email": tenant.email,      # Now visible to all users
+                "phone": tenant.phone,      # Now visible to all users
+                "bornOn": tenant.bornOn,    # Now visible to all users
+                "refundIban": tenant.refundIban,  # Now visible to all users
                 "apartment_id": tenant.apartment_id,
                 "isPrimary": tenant.is_primary
                 if hasattr(tenant, "is_primary")

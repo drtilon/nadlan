@@ -240,7 +240,19 @@ def list_apartments() -> Tuple[Response, int]:
 
             # Get tenants for this apartment
             tenants = Tenant.query.filter_by(apartment_id=apt.id).all()
-            tenants_list = [tenant.to_dict() for tenant in tenants]
+            tenants_list = []
+
+            # Build tenant list with full information for ALL authenticated users
+            for tenant in tenants:
+                tenant_data = {
+                    "id": tenant.id,
+                    "name": tenant.name,
+                    "email": tenant.email,      # Now visible to all users
+                    "phone": tenant.phone,      # Now visible to all users
+                    "bornOn": tenant.bornOn,    # Now visible to all users
+                    "refundIban": tenant.refundIban  # Now visible to all users
+                }
+                tenants_list.append(tenant_data)
 
             # Convert tenants to comma-separated string for backward compatibility
             tenant_names = ", ".join(
@@ -250,7 +262,7 @@ def list_apartments() -> Tuple[Response, int]:
             apt_dict["tenants"] = tenant_names if not tenants_list else tenants_list
             apartments_data.append(apt_dict)
 
-        # For non-admin users, remove sensitive fields
+        # For non-admin users, remove sensitive apartment fields but KEEP tenant info
         role = g.user.get("role", "limited")
         if role != "admin":
             for apt in apartments_data:
@@ -260,6 +272,7 @@ def list_apartments() -> Tuple[Response, int]:
                 apt.pop("notes", None)
                 apt.pop("managementFee", None)
                 apt.pop("rentCost", None)
+                # NOTE: We are NOT removing tenant information anymore
 
         return jsonify(apartments_data), 200
 

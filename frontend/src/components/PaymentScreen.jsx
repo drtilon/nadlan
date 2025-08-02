@@ -1,3 +1,4 @@
+// Updated PaymentScreen.jsx with Contract Management
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import {
@@ -34,7 +35,8 @@ import {
   Alert,
   Tabs,
   Tab,
-  Divider
+  Divider,
+  Tooltip
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -43,9 +45,13 @@ import {
   Receipt as ReceiptIcon,
   Payment as PaymentIcon,
   Description as DescriptionIcon,
-  Person as PersonIcon
+  Person as PersonIcon,
+  History as HistoryIcon,
+  Business as BusinessIcon,
+  Event as EventIcon
 } from '@mui/icons-material';
 import api from '../utils/api';
+import ContractManagementDialog from './ContractManagementDialog';
 
 const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -78,7 +84,7 @@ function PaymentScreen({ showNotification }) {
   const [selectedContract, setSelectedContract] = useState('current');
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [periodDialogOpen, setPeriodDialogOpen] = useState(false);
+  const [contractDialogOpen, setContractDialogOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState(null);
   const [paymentMode, setPaymentMode] = useState(1); // Default to individual mode
 
@@ -91,7 +97,8 @@ function PaymentScreen({ showNotification }) {
     payment_type: 'rent',
     month: MONTHS[new Date().getMonth()],
     year: currentYear,
-    notes: ''
+    notes: '',
+    contract_period_id: null
   });
 
   // Form state for batch payment (legacy)
@@ -104,16 +111,11 @@ function PaymentScreen({ showNotification }) {
     paymentType: 'rent',
     month: MONTHS[new Date().getMonth()],
     year: currentYear,
-    notes: ''
+    notes: '',
+    contract_period_id: null
   });
 
-  // Form state for new payment period dialog
-  const [periodForm, setPeriodForm] = useState({
-    startDate: new Date().toISOString().split('T')[0],
-    endDate: '',
-    rent: '',
-    tenants: []
-  });
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Initialize data on component mount
   useEffect(() => {
@@ -124,6 +126,7 @@ function PaymentScreen({ showNotification }) {
   useEffect(() => {
     if (selectedApartment) {
       loadApartmentData();
+      loadContracts();
     }
   }, [selectedApartment]);
 
@@ -141,6 +144,27 @@ function PaymentScreen({ showNotification }) {
     }
   };
 
+  const loadContracts = async () => {
+    if (!selectedApartment) return;
+
+    try {
+      const response = await api.get(`/apartments/${selectedApartment}/contracts`);
+      const contractsData = response.data || [];
+      setContracts(contractsData);
+
+      // Auto-select current contract if available
+      const currentContract = contractsData.find(c => c.is_current);
+      if (currentContract) {
+        setSelectedContract(currentContract.id.toString());
+      } else if (contractsData.length > 0) {
+        setSelectedContract(contractsData[0].id.toString());
+      }
+    } catch (error) {
+      console.error('Error loading contracts:', error);
+      setContracts([]);
+    }
+  };
+
   const loadApartmentData = async () => {
     try {
       setLoading(true);
@@ -149,48 +173,8 @@ function PaymentScreen({ showNotification }) {
       const apartmentResponse = await api.get(`/apartment/${selectedApartment}`);
       setApartmentDetails(apartmentResponse.data);
 
-      // Fetch payment history from the payment-history endpoint
-      const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
-      const historyPayments = historyResponse.data || [];
-
-      // Transform payment data for display
-      const paymentsList = historyPayments.map(payment => ({
-        id: payment.id,
-        month: payment.month,
-        year: payment.year,
-        amountPaid: payment.amountPaid,
-        paymentDate: payment.paymentDate,
-        paymentMethod: payment.paymentMethod || 'bank_transfer',
-        paymentType: payment.paymentType || 'rent',
-        paidBy: payment.tenant_name || '',
-        paidFor: payment.tenant_names || (payment.tenant_name ? [payment.tenant_name] : []),
-        notes: payment.notes || '',
-        status: payment.status,
-        isIndividual: payment.isIndividual || false
-      }));
-
-      // Sort payments by date (newest first)
-      paymentsList.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
-      setPayments(paymentsList);
-
-      // Fetch contracts/payment periods
-      try {
-        const contractsResponse = await api.get(`/apartment/${selectedApartment}/contracts`);
-        setContracts(contractsResponse.data || []);
-      } catch (contractError) {
-        console.log('Contracts endpoint not available, using fallback');
-        if (apartmentResponse.data?.moveInDate) {
-          const fallbackContract = {
-            id: 'current',
-            startDate: apartmentResponse.data.moveInDate,
-            endDate: apartmentResponse.data.contractEndDate || null,
-            rent: apartmentResponse.data.rent
-          };
-          setContracts([fallbackContract]);
-        } else {
-          setContracts([]);
-        }
-      }
+      // Fetch payment history
+      await loadPaymentHistory();
 
     } catch (error) {
       console.error('Error loading apartment data:', error);
@@ -200,8 +184,83 @@ function PaymentScreen({ showNotification }) {
     }
   };
 
+  const loadPaymentHistory = async () => {
+    try {
+      if (selectedContract === 'all') {
+        // Load all payments for the apartment
+        const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
+        setPayments(transformPaymentsData(historyResponse.data || []));
+      } else if (selectedContract && selectedContract !== 'current') {
+        // Load payments for specific contract
+        const contractResponse = await api.get(`/contracts/${selectedContract}/payments`);
+        setPayments(transformPaymentsData(contractResponse.data?.payments || []));
+      } else {
+        // Load current payments (default behavior)
+        const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
+        const allPayments = transformPaymentsData(historyResponse.data || []);
+
+        // Filter to current contract if available
+        const currentContract = contracts.find(c => c.is_current);
+        if (currentContract) {
+          const filtered = allPayments.filter(payment =>
+            payment.contract_period_id === currentContract.id ||
+            (!payment.contract_period_id && isPaymentInDateRange(payment, currentContract))
+          );
+          setPayments(filtered);
+        } else {
+          setPayments(allPayments);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading payment history:', error);
+      setPayments([]);
+    }
+  };
+
+  const transformPaymentsData = (paymentsData) => {
+    return paymentsData.map(payment => ({
+      id: payment.id,
+      month: payment.month,
+      year: payment.year,
+      amountPaid: payment.amountPaid,
+      paymentDate: payment.paymentDate,
+      paymentMethod: payment.paymentMethod || 'bank_transfer',
+      paymentType: payment.paymentType || 'rent',
+      paidBy: payment.tenant_name || '',
+      paidFor: payment.tenant_names || (payment.tenant_name ? [payment.tenant_name] : []),
+      notes: payment.notes || '',
+      status: payment.status,
+      isIndividual: payment.isIndividual || false,
+      contract_period_id: payment.contract_period_id,
+      contract_info: payment.contract_info
+    }));
+  };
+
+  const isPaymentInDateRange = (payment, contract) => {
+    if (!payment.paymentDate || !contract.start_date) return false;
+
+    const paymentDate = new Date(payment.paymentDate);
+    const startDate = new Date(contract.start_date);
+    const endDate = contract.end_date ? new Date(contract.end_date) : new Date();
+
+    return paymentDate >= startDate && paymentDate <= endDate;
+  };
+
+  // Update payments when contract selection changes
+  useEffect(() => {
+    if (selectedApartment && contracts.length > 0) {
+      loadPaymentHistory();
+    }
+  }, [selectedContract]);
+
   // Helper functions
   const getCurrentTenants = () => {
+    const currentContract = getCurrentContractData();
+    if (currentContract && currentContract.tenants) {
+      return currentContract.tenants.map(ct => ct.tenant?.name || 'Unknown').filter(name => name !== 'Unknown');
+    }
+
+    // Fallback to apartment tenants
     if (!apartmentDetails?.tenants) return [];
     if (Array.isArray(apartmentDetails.tenants)) {
       return apartmentDetails.tenants.map(t => t.name || t);
@@ -212,47 +271,16 @@ function PaymentScreen({ showNotification }) {
     return [];
   };
 
-  const getCurrentContract = () => {
-    if (!contracts || contracts.length === 0) return null;
-
-    const now = new Date();
-    const activeContract = contracts.find(contract => {
-      const startDate = new Date(contract.startDate);
-      const endDate = contract.endDate ? new Date(contract.endDate) : null;
-      return now >= startDate && (!endDate || now <= endDate);
-    });
-
-    return activeContract || contracts[contracts.length - 1]; // Latest if none active
-  };
-
-  const getContractPayments = (contract) => {
-    if (!contract || !payments) return [];
-
-    const startDate = new Date(contract.startDate);
-    const endDate = contract.endDate ? new Date(contract.endDate) : new Date();
-
-    return payments.filter(payment => {
-      if (!payment.paymentDate) return false;
-      const paymentDate = new Date(payment.paymentDate);
-      return paymentDate >= startDate && paymentDate <= endDate;
-    });
-  };
-
-  const getFilteredPayments = () => {
-    if (!payments) return [];
-    if (selectedContract === 'all') return payments;
-    if (selectedContract === 'current') {
-      const currentContract = getCurrentContract();
-      return currentContract ? getContractPayments(currentContract) : [];
+  const getCurrentContractData = () => {
+    if (selectedContract === 'current' || selectedContract === 'all') {
+      return contracts.find(c => c.is_current);
     }
-
-    const contract = contracts.find(c => c.id === selectedContract);
-    return contract ? getContractPayments(contract) : [];
+    return contracts.find(c => c.id.toString() === selectedContract);
   };
 
   const getContractInfo = () => {
-    const targetContract = getCurrentContract();
-    if (!targetContract || !apartmentDetails) {
+    const targetContract = getCurrentContractData();
+    if (!targetContract) {
       return {
         totalDue: 0,
         totalPaid: 0,
@@ -264,12 +292,12 @@ function PaymentScreen({ showNotification }) {
       };
     }
 
-    const contractStartDate = new Date(targetContract.startDate);
-    const contractEndDate = targetContract.endDate ? new Date(targetContract.endDate) : null;
-    const monthlyRent = targetContract.rent || apartmentDetails?.rent || 0;
+    const contractStartDate = new Date(targetContract.start_date);
+    const contractEndDate = targetContract.end_date ? new Date(targetContract.end_date) : null;
+    const monthlyRent = targetContract.monthly_rent || 0;
     const now = new Date();
 
-    const isActive = now >= contractStartDate && (!contractEndDate || now <= contractEndDate);
+    const isActive = targetContract.is_current;
     const isExpired = contractEndDate && now > contractEndDate;
 
     const effectiveEndDate = contractEndDate || now;
@@ -279,8 +307,7 @@ function PaymentScreen({ showNotification }) {
     );
 
     const totalDue = monthlyRent * monthsDiff;
-    const contractPayments = getContractPayments(targetContract);
-    const totalPaid = contractPayments.reduce((sum, p) => sum + (parseFloat(p.amountPaid) || 0), 0);
+    const totalPaid = payments.reduce((sum, p) => sum + (parseFloat(p.amountPaid) || 0), 0);
     const remaining = Math.max(0, totalDue - totalPaid);
 
     return {
@@ -293,10 +320,11 @@ function PaymentScreen({ showNotification }) {
       contract: targetContract
     };
   };
-  const [searchQuery, setSearchQuery] = useState("");
+
   // Form handlers
   const resetIndividualPaymentForm = () => {
     const tenants = getCurrentTenants();
+    const currentContract = getCurrentContractData();
     setIndividualPaymentForm({
       amount: '',
       tenant_name: tenants[0] || '',
@@ -305,12 +333,14 @@ function PaymentScreen({ showNotification }) {
       payment_type: 'rent',
       month: MONTHS[new Date().getMonth()],
       year: currentYear,
-      notes: ''
+      notes: '',
+      contract_period_id: currentContract?.id || null
     });
   };
 
   const resetPaymentForm = () => {
     const tenants = getCurrentTenants();
+    const currentContract = getCurrentContractData();
     setPaymentForm({
       amount: '',
       paidBy: tenants[0] || '',
@@ -320,7 +350,8 @@ function PaymentScreen({ showNotification }) {
       paymentType: 'rent',
       month: MONTHS[new Date().getMonth()],
       year: currentYear,
-      notes: ''
+      notes: '',
+      contract_period_id: currentContract?.id || null
     });
   };
 
@@ -328,13 +359,12 @@ function PaymentScreen({ showNotification }) {
     resetIndividualPaymentForm();
     resetPaymentForm();
     setEditingPayment(null);
-    setPaymentMode(1); // Default to individual mode
+    setPaymentMode(1);
     setDialogOpen(true);
   };
 
   const handleEditPayment = (payment) => {
     if (payment.isIndividual) {
-      // Edit individual payment
       setIndividualPaymentForm({
         amount: payment.amountPaid?.toString() || '',
         tenant_name: payment.paidBy || '',
@@ -343,11 +373,11 @@ function PaymentScreen({ showNotification }) {
         payment_type: payment.paymentType || 'rent',
         month: payment.month || MONTHS[new Date().getMonth()],
         year: payment.year || currentYear,
-        notes: payment.notes || ''
+        notes: payment.notes || '',
+        contract_period_id: payment.contract_period_id || null
       });
       setPaymentMode(1);
     } else {
-      // Edit batch payment
       setPaymentForm({
         amount: payment.amountPaid?.toString() || '',
         paidBy: payment.paidBy || '',
@@ -357,7 +387,8 @@ function PaymentScreen({ showNotification }) {
         paymentType: payment.paymentType || 'rent',
         month: payment.month || MONTHS[new Date().getMonth()],
         year: payment.year || currentYear,
-        notes: payment.notes || ''
+        notes: payment.notes || '',
+        contract_period_id: payment.contract_period_id || null
       });
       setPaymentMode(0);
     }
@@ -384,7 +415,8 @@ function PaymentScreen({ showNotification }) {
           payment_type: individualPaymentForm.payment_type,
           month: individualPaymentForm.month,
           year: individualPaymentForm.year,
-          notes: individualPaymentForm.notes
+          notes: individualPaymentForm.notes,
+          contract_period_id: individualPaymentForm.contract_period_id
         };
 
         if (editingPayment && editingPayment.isIndividual) {
@@ -397,7 +429,7 @@ function PaymentScreen({ showNotification }) {
 
         setDialogOpen(false);
         setEditingPayment(null);
-        await loadApartmentData();
+        await loadPaymentHistory();
       } catch (error) {
         console.error('Error saving individual payment:', error);
         const errorMessage = error.response?.data?.message || 'Error saving payment';
@@ -414,8 +446,6 @@ function PaymentScreen({ showNotification }) {
 
       try {
         setLoading(true);
-
-        // Get current payments for the year
         const currentPaymentsResponse = await api.get(`/payments/${selectedApartment}?year=${paymentForm.year}`);
         const currentPayments = currentPaymentsResponse.data?.payments || {};
 
@@ -435,14 +465,11 @@ function PaymentScreen({ showNotification }) {
             ...currentPayments[paymentForm.month],
             status: 'paid',
             tenants: tenantData,
-            extraPayments: {
-              internet: 0,
-              electricity: 0,
-              other: 0
-            },
+            extraPayments: { internet: 0, electricity: 0, other: 0 },
             paymentDate: paymentForm.paymentDate,
             paymentMethod: paymentForm.paymentMethod,
-            notes: paymentForm.notes || ''
+            notes: paymentForm.notes || '',
+            contract_period_id: paymentForm.contract_period_id
           }
         };
 
@@ -452,11 +479,10 @@ function PaymentScreen({ showNotification }) {
         };
 
         await api.post(`/payments/${selectedApartment}`, updateData);
-
         showNotification?.('Batch payment saved successfully', 'success');
         setDialogOpen(false);
         setEditingPayment(null);
-        await loadApartmentData();
+        await loadPaymentHistory();
 
       } catch (error) {
         console.error('Error saving batch payment:', error);
@@ -475,7 +501,7 @@ function PaymentScreen({ showNotification }) {
       setLoading(true);
       await api.delete(`/payment/${paymentId}`);
       showNotification?.('Payment deleted successfully', 'success');
-      await loadApartmentData();
+      await loadPaymentHistory();
     } catch (error) {
       console.error('Error deleting payment:', error);
       showNotification?.('Error deleting payment', 'error');
@@ -484,41 +510,10 @@ function PaymentScreen({ showNotification }) {
     }
   };
 
-  const handleNewPaymentPeriod = () => {
-    const currentTenants = getCurrentTenants();
-    setPeriodForm({
-      startDate: new Date().toISOString().split('T')[0],
-      endDate: '',
-      rent: apartmentDetails?.rent?.toString() || '',
-      tenants: currentTenants
-    });
-    setPeriodDialogOpen(true);
-  };
-
-  const handleCreatePaymentPeriod = async () => {
-    if (!periodForm.startDate || !periodForm.rent) {
-      showNotification?.('Please fill in all required fields', 'error');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      await api.post(`/apartment/${selectedApartment}/new-payment-period`, {
-        start_date: periodForm.startDate,
-        end_date: periodForm.endDate || null,
-        rent: parseFloat(periodForm.rent),
-        tenants: periodForm.tenants
-      });
-
-      showNotification?.('New payment period created successfully', 'success');
-      setPeriodDialogOpen(false);
-      await loadApartmentData();
-    } catch (error) {
-      console.error('Error creating payment period:', error);
-      showNotification?.('Error creating new payment period', 'error');
-    } finally {
-      setLoading(false);
-    }
+  const handleContractChange = () => {
+    // Refresh contracts and payments when contracts are modified
+    loadContracts();
+    loadPaymentHistory();
   };
 
   // Utility functions
@@ -536,10 +531,12 @@ function PaymentScreen({ showNotification }) {
 
   // Get contract info for display
   const contractInfo = getContractInfo();
-  const filteredPayments = getFilteredPayments().filter(p =>
+  const filteredPayments = payments.filter(p =>
     (p.paidBy || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
     (Array.isArray(p.paidFor) && p.paidFor.some(name => name.toLowerCase().includes(searchQuery.toLowerCase())))
-  ); const tenants = getCurrentTenants();
+  );
+  const tenants = getCurrentTenants();
+  const currentContract = getCurrentContractData();
 
   return (
     <Box sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
@@ -549,7 +546,7 @@ function PaymentScreen({ showNotification }) {
           Payment Management
         </Typography>
         <Typography variant="body1" color="text.secondary">
-          Track and manage apartment payments
+          Track and manage apartment payments by contract period
         </Typography>
       </Box>
 
@@ -557,8 +554,7 @@ function PaymentScreen({ showNotification }) {
       <Card sx={{ mb: 3 }}>
         <CardContent>
           <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} md={6}>
-
+            <Grid item xs={12} md={4}>
               <Autocomplete
                 options={apartments}
                 getOptionLabel={(option) => option.address}
@@ -578,16 +574,56 @@ function PaymentScreen({ showNotification }) {
                 )}
                 isOptionEqualToValue={(option, value) => option.id === value.id}
               />
-
             </Grid>
+
+            {selectedApartment && contracts.length > 0 && (
+              <Grid item xs={12} md={4}>
+                <FormControl fullWidth>
+                  <InputLabel>Contract Period</InputLabel>
+                  <Select
+                    value={selectedContract}
+                    label="Contract Period"
+                    onChange={(e) => setSelectedContract(e.target.value)}
+                  >
+                    <MenuItem value="current">Current Contract</MenuItem>
+                    <MenuItem value="all">All Contracts</MenuItem>
+                    <Divider />
+                    {contracts.map((contract) => (
+                      <MenuItem key={contract.id} value={contract.id.toString()}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
+                          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                            {contract.contract_number}
+                          </Typography>
+                          {contract.is_current && (
+                            <Chip label="CURRENT" size="small" color="success" />
+                          )}
+                          <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+                            {formatDate(contract.start_date)} - {formatDate(contract.end_date) || 'Ongoing'}
+                          </Typography>
+                        </Box>
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+            )}
+
             {selectedApartment && (
-              <Grid item xs={12} md={6}>
-                <Box sx={{ textAlign: { xs: 'left', md: 'right' } }}>
+              <Grid item xs={12} md={4}>
+                <Box sx={{ display: 'flex', gap: 1, justifyContent: { xs: 'flex-start', md: 'flex-end' } }}>
+                  <Button
+                    variant="outlined"
+                    startIcon={<BusinessIcon />}
+                    onClick={() => setContractDialogOpen(true)}
+                    size="medium"
+                  >
+                    Manage Contracts
+                  </Button>
                   <Button
                     variant="contained"
                     startIcon={<AddIcon />}
                     onClick={handleAddPayment}
-                    size="large"
+                    size="medium"
                   >
                     Add Payment
                   </Button>
@@ -600,7 +636,7 @@ function PaymentScreen({ showNotification }) {
 
       {selectedApartment && !loading && apartmentDetails && (
         <>
-          {/* Apartment Info Card */}
+          {/* Apartment & Contract Info Card */}
           <Card sx={{ mb: 3 }}>
             <CardContent>
               <Grid container spacing={3}>
@@ -608,12 +644,47 @@ function PaymentScreen({ showNotification }) {
                   <Typography variant="h6" gutterBottom>
                     {apartmentDetails.address}
                   </Typography>
-                  <Stack direction="row" spacing={2} flexWrap="wrap">
+                  <Stack direction="row" spacing={2} flexWrap="wrap" sx={{ mb: 2 }}>
                     <Chip label={`${tenants.length} tenants`} />
-                    <Chip label={`${formatCurrency(apartmentDetails.rent)}/month`} />
+                    <Chip label={`${formatCurrency(currentContract?.monthly_rent || apartmentDetails.rent)}/month`} />
                     <Chip label={`${apartmentDetails.rooms || 'N/A'} rooms`} />
+                    {currentContract && (
+                      <Chip
+                        label={currentContract.contract_number}
+                        color="primary"
+                        variant="outlined"
+                      />
+                    )}
                   </Stack>
-                  <Box sx={{ mt: 2 }}>
+
+                  {/* Contract Details */}
+                  {currentContract && (
+                    <Box sx={{ bgcolor: 'grey.50', p: 2, borderRadius: 1, mb: 2 }}>
+                      <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 600 }}>
+                        Current Contract: {currentContract.contract_number}
+                      </Typography>
+                      <Grid container spacing={2}>
+                        <Grid item xs={12} sm={6}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <EventIcon fontSize="small" color="action" />
+                            <Typography variant="body2">
+                              {formatDate(currentContract.start_date)} - {formatDate(currentContract.end_date) || 'Ongoing'}
+                            </Typography>
+                          </Box>
+                        </Grid>
+                        <Grid item xs={12} sm={6}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <PersonIcon fontSize="small" color="action" />
+                            <Typography variant="body2">
+                              {tenants.join(', ') || 'No tenants assigned'}
+                            </Typography>
+                          </Box>
+                        </Grid>
+                      </Grid>
+                    </Box>
+                  )}
+
+                  <Box>
                     <Typography variant="body2" color="text.secondary">
                       Tenants: {tenants.join(', ') || 'No tenants'}
                     </Typography>
@@ -623,7 +694,7 @@ function PaymentScreen({ showNotification }) {
                   <Box sx={{ textAlign: { xs: 'left', md: 'right' } }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: { xs: 'flex-start', md: 'flex-end' }, gap: 1, mb: 1 }}>
                       <Typography variant="body2" color="text.secondary">
-                        Current Period
+                        Contract Progress
                       </Typography>
                       <Chip
                         label={contractInfo.isExpired ? 'Expired' : contractInfo.isActive ? 'Active' : 'Inactive'}
@@ -640,16 +711,6 @@ function PaymentScreen({ showNotification }) {
                     <Typography variant="caption" color="text.secondary" display="block">
                       {contractInfo.monthsTotal} months total
                     </Typography>
-                    {(contractInfo.isExpired || contractInfo.remaining === 0) && (
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        onClick={handleNewPaymentPeriod}
-                        sx={{ mt: 1 }}
-                      >
-                        New Payment Period
-                      </Button>
-                    )}
                   </Box>
                 </Grid>
               </Grid>
@@ -660,7 +721,6 @@ function PaymentScreen({ showNotification }) {
           <Card>
             <CardContent>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   <TextField
                     size="small"
@@ -671,28 +731,15 @@ function PaymentScreen({ showNotification }) {
                     onChange={(e) => setSearchQuery(e.target.value)}
                   />
                   <ReceiptIcon sx={{ mr: 1 }} />
-                  <Typography variant="h6">Payment History</Typography>
+                  <Typography variant="h6">
+                    Payment History
+                    {currentContract && selectedContract !== 'all' && (
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        Contract: {currentContract.contract_number}
+                      </Typography>
+                    )}
+                  </Typography>
                 </Box>
-
-
-                {contracts.length > 0 && (
-                  <FormControl size="small" sx={{ minWidth: 200 }}>
-                    <InputLabel>Payment Period</InputLabel>
-                    <Select
-                      value={selectedContract}
-                      label="Payment Period"
-                      onChange={(e) => setSelectedContract(e.target.value)}
-                    >
-                      <MenuItem value="current">Current Period</MenuItem>
-                      <MenuItem value="all">All Periods</MenuItem>
-                      {contracts.map((contract, index) => (
-                        <MenuItem key={contract.id} value={contract.id}>
-                          Period {contracts.length - index}: {formatDate(contract.startDate)} - {contract.endDate ? formatDate(contract.endDate) : 'Ongoing'}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                )}
               </Box>
 
               {/* Contract Summary */}
@@ -702,16 +749,16 @@ function PaymentScreen({ showNotification }) {
                     <Grid container spacing={2} alignItems="center">
                       <Grid item xs={12} md={8}>
                         <Typography variant="subtitle2" gutterBottom>
-                          {selectedContract === 'current' ? 'Current Payment Period' : 'Selected Payment Period'} Summary
+                          Contract Period Summary
                         </Typography>
                         <Stack direction="row" spacing={2} flexWrap="wrap">
                           <Chip
-                            label={`${formatDate(contractInfo.contract.startDate)} - ${contractInfo.contract.endDate ? formatDate(contractInfo.contract.endDate) : 'Ongoing'}`}
+                            label={`${formatDate(contractInfo.contract.start_date)} - ${contractInfo.contract.end_date ? formatDate(contractInfo.contract.end_date) : 'Ongoing'}`}
                             variant="outlined"
                             size="small"
                           />
                           <Chip
-                            label={`${formatCurrency(contractInfo.contract.rent || 0)}/month`}
+                            label={`${formatCurrency(contractInfo.contract.monthly_rent || 0)}/month`}
                             variant="outlined"
                             size="small"
                           />
@@ -767,6 +814,7 @@ function PaymentScreen({ showNotification }) {
                         <TableCell>Type</TableCell>
                         <TableCell align="right">Amount</TableCell>
                         <TableCell>Method</TableCell>
+                        <TableCell>Contract</TableCell>
                         <TableCell>Mode</TableCell>
                         <TableCell align="center">Actions</TableCell>
                       </TableRow>
@@ -801,6 +849,25 @@ function PaymentScreen({ showNotification }) {
                             {formatCurrency(payment.amountPaid)}
                           </TableCell>
                           <TableCell>{payment.paymentMethod || 'bank_transfer'}</TableCell>
+                          <TableCell>
+                            {payment.contract_info ? (
+                              <Tooltip title={`${payment.contract_info.start_date} - ${payment.contract_info.end_date || 'Ongoing'}`}>
+                                <Chip
+                                  label={payment.contract_info.contract_number}
+                                  size="small"
+                                  variant="outlined"
+                                  color="primary"
+                                />
+                              </Tooltip>
+                            ) : (
+                              <Chip
+                                label="Legacy"
+                                size="small"
+                                variant="outlined"
+                                color="default"
+                              />
+                            )}
+                          </TableCell>
                           <TableCell>
                             <Chip
                               label={payment.isIndividual ? 'Individual' : 'Batch'}
@@ -852,6 +919,17 @@ function PaymentScreen({ showNotification }) {
               <Tab label="Individual Payment" icon={<PersonIcon />} />
             </Tabs>
           </Box>
+
+          {/* Contract Selection for Payment */}
+          {contracts.length > 0 && (
+            <Grid container spacing={3} sx={{ mb: 3 }}>
+              <Grid item xs={12}>
+                <Alert severity="info">
+                  This payment will be associated with: <strong>{currentContract?.contract_number || 'No contract selected'}</strong>
+                </Alert>
+              </Grid>
+            </Grid>
+          )}
 
           {paymentMode === 1 ? (
             // Individual Payment Form
@@ -1051,16 +1129,6 @@ function PaymentScreen({ showNotification }) {
                 </FormControl>
               </Grid>
               <Grid item xs={12} md={6}>
-                <TextField
-                  fullWidth
-                  label="Payment Date"
-                  type="date"
-                  value={paymentForm.paymentDate}
-                  onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
                 <Grid container spacing={2}>
                   <Grid item xs={8}>
                     <FormControl fullWidth>
@@ -1119,91 +1187,14 @@ function PaymentScreen({ showNotification }) {
         </DialogActions>
       </Dialog>
 
-      {/* New Payment Period Dialog */}
-      <Dialog
-        open={periodDialogOpen}
-        onClose={() => setPeriodDialogOpen(false)}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>Create New Payment Period</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Starting a new payment period will update the apartment's contract information with the current tenants.
-          </Typography>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Period Start Date"
-                type="date"
-                value={periodForm.startDate}
-                onChange={(e) => setPeriodForm({ ...periodForm, startDate: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-                required
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Period End Date"
-                type="date"
-                value={periodForm.endDate}
-                onChange={(e) => setPeriodForm({ ...periodForm, endDate: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-                helperText="Leave empty for open-ended period"
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Monthly Rent"
-                type="number"
-                value={periodForm.rent}
-                onChange={(e) => setPeriodForm({ ...periodForm, rent: e.target.value })}
-                required
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Tenants</InputLabel>
-                <Select
-                  multiple
-                  value={periodForm.tenants}
-                  onChange={(e) => setPeriodForm({ ...periodForm, tenants: e.target.value })}
-                  input={<OutlinedInput label="Tenants" />}
-                  renderValue={(selected) => (
-                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                      {selected.map((value) => (
-                        <Chip key={value} label={value} size="small" />
-                      ))}
-                    </Box>
-                  )}
-                >
-                  {tenants.map((tenant) => (
-                    <MenuItem key={tenant} value={tenant}>
-                      <Checkbox checked={periodForm.tenants.indexOf(tenant) > -1} />
-                      <ListItemText primary={tenant} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setPeriodDialogOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={handleCreatePaymentPeriod}
-            disabled={loading || !periodForm.startDate || !periodForm.rent}
-          >
-            Create Payment Period
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* Contract Management Dialog */}
+      <ContractManagementDialog
+        open={contractDialogOpen}
+        onClose={() => setContractDialogOpen(false)}
+        apartment={apartmentDetails}
+        showNotification={showNotification}
+        onContractChange={handleContractChange}
+      />
 
       {/* Loading indicator */}
       {loading && (
@@ -1221,7 +1212,7 @@ function PaymentScreen({ showNotification }) {
               Select an Apartment
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Choose an apartment from the dropdown above to manage its payments
+              Choose an apartment from the dropdown above to manage its payments and contracts
             </Typography>
           </CardContent>
         </Card>

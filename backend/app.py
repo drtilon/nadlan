@@ -174,7 +174,9 @@ def create_app():
             from routes.contracts import contracts_bp
             from routes.contract_templates import contract_templates_bp
             from routes.health import health_bp
+            from routes.contract_periods import contract_periods_bp
 
+            app.register_blueprint(contract_periods_bp, url_prefix="/api")
             app.register_blueprint(health_bp, url_prefix="/api")
             app.register_blueprint(auth_bp, url_prefix="/api/auth")
             app.register_blueprint(adminPanel_bp, url_prefix="/api/adminPanel")

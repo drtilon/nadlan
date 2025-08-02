@@ -109,12 +109,26 @@ function TenantsPanel({ showNotification }) {
       setTenants(tenantsResponse.data);
       setFilteredTenants(tenantsResponse.data);
 
-      // Fetch apartments for dropdown
+      // FIXED: Handle the new apartment API response structure
       const apartmentsResponse = await api.get('/list');
-      setApartments(apartmentsResponse.data);
+
+      // Check if the response has the new paginated structure
+      if (apartmentsResponse.data && apartmentsResponse.data.apartments) {
+        // New structure: { apartments: [...], pagination: {...} }
+        setApartments(apartmentsResponse.data.apartments);
+      } else if (Array.isArray(apartmentsResponse.data)) {
+        // Old structure: [apartment1, apartment2, ...]
+        setApartments(apartmentsResponse.data);
+      } else {
+        // Fallback: set empty array to prevent errors
+        console.warn('Unexpected apartments API response structure:', apartmentsResponse.data);
+        setApartments([]);
+      }
     } catch (error) {
       console.error('Error fetching data:', error);
       showNotification('Error loading tenant data', 'error');
+      // Set apartments to empty array on error to prevent crashes
+      setApartments([]);
     } finally {
       setLoading(false);
     }
@@ -207,8 +221,13 @@ function TenantsPanel({ showNotification }) {
     setSelectedTenant(tenant.id);
   };
 
-  // Get apartment address by ID
+  // FIXED: Get apartment address by ID with safety checks
   const getApartmentAddress = (apartmentId) => {
+    // Safety check: ensure apartments is an array
+    if (!apartments || !Array.isArray(apartments)) {
+      return 'Not Assigned';
+    }
+
     const apartment = apartments.find(apt => apt.id === apartmentId);
     return apartment ? apartment.address : 'Not Assigned';
   };

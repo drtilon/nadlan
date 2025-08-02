@@ -1,35 +1,26 @@
-// src/components/ApartmentForm.jsx - Fixed tenant duplication issue
 import React, { useState, useEffect } from 'react';
 import {
   Typography,
-  TextField,
-  Button,
-  FormControl,
-  Select,
-  MenuItem,
-  Grid,
-  CircularProgress,
-  Box,
   Paper,
-  Autocomplete,
-  Tooltip,
-  Avatar,
-  Chip
+  Box
 } from '@mui/material';
-import {
-  Home as HomeIcon,
-  Person as PersonIcon,
-  Description as DescriptionIcon,
-  Delete as DeleteIcon,
-  Save as SaveIcon,
-  Business as BusinessIcon,
-  AccountBalance as BankIcon,
-  Refresh as RefreshIcon,
-} from '@mui/icons-material';
 import api from '../utils/api';
 import ApartmentDetailsForm from './ApartmentDetailsForm';
 import TenantFormDialog from './TenantFormDialog';
+import TenantSelector from './TenantSelector';
 import { getUserData } from '../utils/api';
+
+// Constants
+const APARTMENT_STATUS = {
+  VACANT: 'vacant',
+  OCCUPIED: 'occupied',
+  CONTRACT_SENT: 'contract_sent'
+};
+
+const PROPERTY_MODELS = {
+  MANAGEMENT: 'management',
+  RENTAL: 'rental'
+};
 
 function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotification }) {
   // Get user data to check if admin
@@ -40,29 +31,30 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     address: '',
     rooms: 0,
     size: 0,
-    landlord_id: null, // Using the new landlord_id field
+    landlord_id: null,
     moveInDate: '',
     contractEndDate: '',
     rent: 0,
     deposit: 0,
     notes: '',
-    status: 'vacant', // Set a default status
-    model: 'management', // Default model is management
+    status: APARTMENT_STATUS.VACANT,
+    model: PROPERTY_MODELS.MANAGEMENT,
     managementFee: 0,
     rentCost: 0
   };
 
   const [tenantData, setTenantData] = useState([]);
-  // Use initialData if provided, otherwise use emptyForm
-  const validStatusOptions = ['occupied', 'vacant', 'contract_sent', ''];
+
+  // Clean initial data
   const cleanedInitialData = isEdit ? {
     ...initialData,
-    status: validStatusOptions.includes(initialData.status) ? initialData.status : 'vacant',
-    // If there's a landlord object nested in initialData, use its ID
-    landlord_id: initialData.landlord ? initialData.landlord.id : initialData.landlord_id
+    status: Object.values(APARTMENT_STATUS).includes(initialData.status)
+      ? initialData.status
+      : APARTMENT_STATUS.VACANT,
+    landlord_id: initialData.landlord?.id || initialData.landlord_id
   } : emptyForm;
 
-  // Remove rentInSentance from initialData if it exists
+  // Remove any invalid fields
   if (cleanedInitialData.rentInSentance) {
     delete cleanedInitialData.rentInSentance;
   }
@@ -72,19 +64,16 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   const [availableTenants, setAvailableTenants] = useState([]);
   const [loading, setLoading] = useState(false);
   const [tenantFormOpen, setTenantFormOpen] = useState(false);
-  // Track tenant IDs to prevent duplication
   const [addedTenantIds, setAddedTenantIds] = useState(new Set());
 
-  // Fetch the list of tenants once on component mount
+  // Fetch tenants
   useEffect(() => {
     const fetchTenants = async () => {
       try {
         setLoading(true);
         const response = await api.get('/tenants/list');
 
-        // Process tenant data to match our component needs
         const processedTenants = response.data.map(tenant => {
-          // Split name into firstName and lastName if needed
           let firstName = '', lastName = '';
           if (tenant.name && !tenant.firstName && !tenant.lastName) {
             const nameParts = tenant.name.split(' ');
@@ -96,7 +85,6 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
             ...tenant,
             firstName: tenant.firstName || firstName,
             lastName: tenant.lastName || lastName,
-            // Identify if this tenant is assigned to the current apartment
             isCurrentTenant: isEdit && initialData.id && tenant.apartment_id === initialData.id
           };
         });
@@ -108,17 +96,13 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         if (isEdit && initialData.id) {
           const currentTenants = processedTenants.filter(t => t.apartment_id === initialData.id);
 
-          // If we have current tenants from the database and no tenant data yet, use them
           if (currentTenants.length > 0 && tenantData.length === 0) {
-            // Mark the first tenant as primary by default
             const tenantsWithPrimary = currentTenants.map((tenant, index) => ({
               ...tenant,
               isPrimary: index === 0
             }));
 
             setTenantData(tenantsWithPrimary);
-
-            // Update the set of added tenant IDs
             const tenantIdSet = new Set(tenantsWithPrimary.map(t => t.id).filter(Boolean));
             setAddedTenantIds(tenantIdSet);
           }
@@ -133,95 +117,79 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     fetchTenants();
   }, [isEdit, initialData.id]);
 
-  // Initialize tenant data if editing
+  // Initialize tenant data from current contract if editing
   useEffect(() => {
-    if (isEdit && initialData.tenants) {
-      // Handle both string format and array format
-      if (typeof initialData.tenants === 'string') {
-        const tenantNames = initialData.tenants.split(',').map(name => name.trim()).filter(name => name);
+    if (isEdit && initialData) {
+      let tenantsToProcess = [];
 
-        // Match with available tenants or create placeholder objects
-        const initialTenantData = tenantNames.map((name, index) => {
-          // Look for matching tenant in available tenants list
-          const existingTenant = availableTenants.find(t =>
-            // Match by exact name
-            t.name === name ||
-            // Match by constructed name (if we have firstName/lastName fields)
-            (t.firstName && t.lastName && `${t.firstName} ${t.lastName}` === name) ||
-            // Match by apartment_id if we're looking at current tenants for this apartment
-            (initialData.id && t.apartment_id === initialData.id)
-          );
+      // Try to get tenants from current_contract first
+      if (initialData.current_contract?.tenants) {
+        tenantsToProcess = initialData.current_contract.tenants.map(ct => ct.tenant).filter(Boolean);
+      }
+      // Fallback to legacy tenants array
+      else if (initialData.tenants) {
+        if (typeof initialData.tenants === 'string') {
+          const tenantNames = initialData.tenants.split(',').map(name => name.trim()).filter(name => name);
+          tenantsToProcess = tenantNames.map((name, index) => {
+            const existingTenant = availableTenants.find(t =>
+              t.name === name ||
+              (t.firstName && t.lastName && `${t.firstName} ${t.lastName}` === name) ||
+              (initialData.id && t.apartment_id === initialData.id)
+            );
 
-          if (existingTenant) {
-            return {
-              ...existingTenant,
-              isPrimary: index === 0 // Make first tenant primary by default
-            };
-          } else {
-            // Create a placeholder with name parts split
-            const nameParts = name.split(' ');
-            const firstName = nameParts[0] || '';
-            const lastName = nameParts.slice(1).join(' ') || '';
+            if (existingTenant) {
+              return { ...existingTenant, isPrimary: index === 0 };
+            } else {
+              const nameParts = name.split(' ');
+              return {
+                id: `temp-${index}`,
+                firstName: nameParts[0] || '',
+                lastName: nameParts.slice(1).join(' ') || '',
+                name,
+                email: '',
+                phone: '',
+                isPrimary: index === 0
+              };
+            }
+          });
+        } else if (Array.isArray(initialData.tenants)) {
+          tenantsToProcess = initialData.tenants.map((tenant, index) => ({
+            ...tenant,
+            firstName: tenant.firstName || (tenant.name ? tenant.name.split(' ')[0] : ''),
+            lastName: tenant.lastName || (tenant.name ? tenant.name.split(' ').slice(1).join(' ') : ''),
+            isPrimary: tenant.isPrimary === undefined ? index === 0 : tenant.isPrimary
+          }));
+        }
+      }
 
-            return {
-              id: `temp-${index}`,
-              firstName,
-              lastName,
-              name,
-              email: '',
-              phone: '',
-              isPrimary: index === 0
-            };
-          }
-        });
-
-        setTenantData(initialTenantData);
-
-        // Update the set of added tenant IDs
-        const tenantIdSet = new Set(initialTenantData.map(t => t.id).filter(id => !id.toString().startsWith('temp-')));
-        setAddedTenantIds(tenantIdSet);
-      } else if (Array.isArray(initialData.tenants)) {
-        // If it's already an array, ensure each tenant has the expected fields
-        const processedTenants = initialData.tenants.map((tenant, index) => ({
-          ...tenant,
-          // If tenant has name but not firstName/lastName, split it
-          firstName: tenant.firstName || (tenant.name ? tenant.name.split(' ')[0] : ''),
-          lastName: tenant.lastName || (tenant.name ? tenant.name.split(' ').slice(1).join(' ') : ''),
-          // Ensure isPrimary is set
-          isPrimary: tenant.isPrimary === undefined ? index === 0 : tenant.isPrimary
-        }));
-
-        setTenantData(processedTenants);
-
-        // Update the set of added tenant IDs
-        const tenantIdSet = new Set(processedTenants.map(t => t.id).filter(Boolean));
+      if (tenantsToProcess.length > 0 && tenantData.length === 0) {
+        setTenantData(tenantsToProcess);
+        const tenantIdSet = new Set(tenantsToProcess.map(t => t.id).filter(id => !id.toString().startsWith('temp-')));
         setAddedTenantIds(tenantIdSet);
       }
     }
   }, [isEdit, initialData, availableTenants]);
 
-  // Handle input changes for the main form fields with model-specific logic
+  // Handle input changes for the main form fields
   const handleChange = (e, isNumber) => {
     const { name, value } = e.target;
 
-    // Skip rentInSentance field if it's somehow passed
     if (name === 'rentInSentance') return;
 
     const processedValue = isNumber ? (value ? parseFloat(value) : 0) : value;
 
-    // When changing the model, clear data that doesn't apply to the new model
     if (name === 'model') {
-      if (processedValue === 'management') {
+      if (processedValue === PROPERTY_MODELS.MANAGEMENT) {
         setFormData(prev => ({
           ...prev,
           model: processedValue,
-          rentCost: 0  // Clear rental data when switching to management
+          rentCost: 0
         }));
-      } else if (processedValue === 'rental') {
+      } else if (processedValue === PROPERTY_MODELS.RENTAL) {
         setFormData(prev => ({
           ...prev,
           model: processedValue,
-          managementFee: 0  // Clear management data when switching to rental
+          managementFee: 0
         }));
       } else {
         setFormData(prev => ({
@@ -237,7 +205,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     }
   };
 
-  // Handle changes for tenant fields
+  // Handle tenant changes
   const handleTenantChange = (index, field, value) => {
     setTenantData(prev =>
       prev.map((tenant, i) =>
@@ -257,18 +225,15 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   };
 
   // Add a selected tenant
-  const handleTenantSelection = (event, tenant) => {
+  const handleTenantSelection = (tenant) => {
     if (tenant) {
-      // Check if tenant is already added (prevent duplication)
       if (tenant.id && addedTenantIds.has(tenant.id)) {
         showNotification('This tenant is already added to the apartment', 'warning');
         return;
       }
 
-      // If this is the first tenant, make them primary
       const isPrimary = tenantData.length === 0;
 
-      // Ensure the tenant has firstName and lastName
       const enrichedTenant = {
         ...tenant,
         firstName: tenant.firstName || (tenant.name ? tenant.name.split(' ')[0] : ''),
@@ -278,37 +243,31 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
 
       setTenantData([...tenantData, enrichedTenant]);
 
-      // Add to the set of tenant IDs to prevent duplication
       if (tenant.id) {
         setAddedTenantIds(new Set([...addedTenantIds, tenant.id]));
       }
     }
   };
 
-  // Add a newly created tenant to the list
+  // Add a newly created tenant
   const handleNewTenantCreated = (newTenant) => {
-    // Check if tenant is already added (prevent duplication)
     if (newTenant.id && addedTenantIds.has(newTenant.id)) {
       showNotification('This tenant is already added to the apartment', 'warning');
       setTenantFormOpen(false);
       return;
     }
 
-    // If this is the first tenant, make them primary
     const isPrimary = tenantData.length === 0;
 
-    // Add the new tenant to the tenant data
     setTenantData([...tenantData, {
       ...newTenant,
       isPrimary
     }]);
 
-    // Add to the set of tenant IDs to prevent duplication
     if (newTenant.id) {
       setAddedTenantIds(new Set([...addedTenantIds, newTenant.id]));
     }
 
-    // Close the tenant form dialog
     setTenantFormOpen(false);
   };
 
@@ -317,15 +276,12 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     const removedTenant = tenantData[index];
     const newTenantData = tenantData.filter((item, i) => i !== index);
 
-    // If we removed the primary tenant and there are still tenants left,
-    // set the first remaining tenant as primary
     if (removedTenant.isPrimary && newTenantData.length > 0) {
       newTenantData[0].isPrimary = true;
     }
 
     setTenantData(newTenantData);
 
-    // Remove from the set of added tenant IDs
     if (removedTenant.id) {
       const newAddedTenantIds = new Set(addedTenantIds);
       newAddedTenantIds.delete(removedTenant.id);
@@ -339,46 +295,33 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     setIsSubmitting(true);
 
     try {
-      // Ensure all required fields are present
       if (!formData.address) {
         showNotification('Address is required', 'error');
         setIsSubmitting(false);
         return;
       }
 
-      // Create a clean copy of formData without the rentInSentance field
       const cleanedFormData = { ...formData };
       delete cleanedFormData.rentInSentance;
 
-      // FIX: Modify the tenant data to identify existing vs. new tenants
-      // Existing tenants will already have an ID and should only be reassigned, not created again
-      // New tenants (without a real ID or with a temp ID) need to be created
       const processedTenants = tenantData.map(tenant => {
-        // Check if this is a real tenant with a real ID (not a temp ID)
         const isExistingTenant = tenant.id && !String(tenant.id).startsWith('temp-');
 
-        // For existing tenants, we only need to pass the ID for reassignment
-        // For new tenants, we need to pass all their details for creation
         if (isExistingTenant) {
-          // For existing tenants, just send the ID and minimal info
           return {
             id: tenant.id,
             name: tenant.name || `${tenant.firstName} ${tenant.lastName}`.trim(),
-            // Include these fields but don't update them if they're already set
             email: tenant.email || '',
             phone: tenant.phone || '',
-            // Explicitly flag this as an existing tenant for the backend
             isExistingTenant: true
           };
         } else {
-          // For new tenants, send all details
           return {
             name: tenant.name || `${tenant.firstName} ${tenant.lastName}`.trim(),
             email: tenant.email || '',
             phone: tenant.phone || '',
             bornOn: tenant.bornOn || '',
             refundIban: tenant.refundIban || '',
-            // Explicitly flag this as a new tenant
             isExistingTenant: false
           };
         }
@@ -424,30 +367,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     }
   };
 
-  // Generate tenant display name
-  const getTenantDisplayName = (tenant) => {
-    if (tenant.firstName && tenant.lastName) {
-      return `${tenant.firstName} ${tenant.lastName}`;
-    } else if (tenant.name) {
-      return tenant.name;
-    } else {
-      return 'Unnamed Tenant';
-    }
-  };
-
-  // Get tenant display details for tooltip
-  const getTenantTooltip = (tenant) => {
-    const parts = [];
-    if (tenant.email) parts.push(`Email: ${tenant.email}`);
-    if (tenant.phone) parts.push(`Phone: ${tenant.phone}`);
-    if (tenant.apartment_address && tenant.apartment_id !== initialData.id) {
-      parts.push(`Current apartment: ${tenant.apartment_address}`);
-    }
-
-    return parts.length > 0 ? parts.join('\n') : 'No contact information';
-  };
-
-  // Modified props to pass to ApartmentDetailsForm
+  // Props to pass to ApartmentDetailsForm
   const formProps = {
     formData,
     tenantData,
@@ -457,86 +377,18 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     handleDelete,
     isEdit,
     isSubmitting,
-    isAdmin, // Pass the admin status to the details form
-    // New tenant selection components
+    isAdmin,
     tenantSelection: (
-      <Box sx={{ mb: 3 }}>
-        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 2 }}>
-          {tenantData.map((tenant, index) => (
-            <Tooltip
-              key={index}
-              title={getTenantTooltip(tenant)}
-              placement="top"
-            >
-              <Chip
-                avatar={
-                  <Avatar
-                    sx={{
-                      bgcolor: tenant.isPrimary ? 'primary.main' : 'default'
-                    }}
-                  >
-                    <PersonIcon />
-                  </Avatar>
-                }
-                label={getTenantDisplayName(tenant)}
-                onDelete={() => removeTenant(index)}
-                onClick={() => setTenantAsPrimary(index)}
-                color={tenant.isPrimary ? "primary" : "default"}
-                variant={tenant.isPrimary ? "filled" : "outlined"}
-                sx={{ cursor: 'pointer' }}
-              />
-            </Tooltip>
-          ))}
-          {tenantData.length === 0 && (
-            <Typography variant="body2" color="text.secondary">
-              No tenants assigned to this apartment
-            </Typography>
-          )}
-        </Box>
-
-        <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-          <Autocomplete
-            options={availableTenants.filter(
-              // Filter out tenants that are already added to prevent duplication
-              tenant => !tenantData.some(t => t.id === tenant.id)
-            )}
-            getOptionLabel={(option) => {
-              if (option.firstName && option.lastName) {
-                return `${option.firstName} ${option.lastName}`;
-              }
-              return option.name || 'Unnamed Tenant';
-            }}
-            onChange={handleTenantSelection}
-            renderInput={(params) => (
-              <TextField
-                {...params}
-                label="Add existing tenant"
-                variant="outlined"
-                fullWidth
-                placeholder="Search and select a tenant"
-              />
-            )}
-            loading={loading}
-            loadingText="Loading tenants..."
-            noOptionsText="No tenants found or all tenants already added"
-            sx={{ flexGrow: 1 }}
-          />
-
-          <Button
-            variant="contained"
-            color="primary"
-            startIcon={<PersonIcon />}
-            onClick={() => setTenantFormOpen(true)}
-            sx={{ whiteSpace: 'nowrap' }}
-          >
-            New Tenant
-          </Button>
-        </Box>
-
-        <Typography variant="caption" color="text.secondary">
-          Select from existing tenants or create a new one. Click on a tenant chip to mark as primary.
-        </Typography>
-      </Box>
+      <TenantSelector
+        tenantData={tenantData}
+        availableTenants={availableTenants}
+        addedTenantIds={addedTenantIds}
+        loading={loading}
+        onTenantSelection={handleTenantSelection}
+        onSetTenantAsPrimary={setTenantAsPrimary}
+        onRemoveTenant={removeTenant}
+        onOpenTenantForm={() => setTenantFormOpen(true)}
+      />
     )
   };
 
@@ -547,7 +399,6 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       </Typography>
       <ApartmentDetailsForm {...formProps} />
 
-      {/* Tenant creation dialog */}
       <TenantFormDialog
         open={tenantFormOpen}
         onClose={() => setTenantFormOpen(false)}

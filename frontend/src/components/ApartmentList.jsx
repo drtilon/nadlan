@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -23,17 +23,18 @@ import {
   Menu,
   MenuItem,
   ListItemIcon,
-  ListItemText
+  ListItemText,
+  Pagination,
+  FormControl,
+  Select,
+  Stack
 } from '@mui/material';
 
 // Icons
 import EditIcon from '@mui/icons-material/Edit';
 import HomeIcon from '@mui/icons-material/Home';
-import PhoneIcon from '@mui/icons-material/Phone';
-import EmailIcon from '@mui/icons-material/Email';
 import PersonIcon from '@mui/icons-material/Person';
 import PaymentIcon from '@mui/icons-material/Payment';
-import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import SearchIcon from '@mui/icons-material/Search';
 import BedIcon from '@mui/icons-material/Bed';
 import SquareFootIcon from '@mui/icons-material/SquareFoot';
@@ -49,34 +50,38 @@ import DateRangeIcon from '@mui/icons-material/DateRange';
 import WarningIcon from '@mui/icons-material/Warning';
 import ErrorIcon from '@mui/icons-material/Error';
 import CheckIcon from '@mui/icons-material/Check';
+import BusinessIcon from '@mui/icons-material/Business';
+import RefreshIcon from '@mui/icons-material/Refresh';
+
 import api, { getUserData } from '../utils/api';
-
-// Import the new ContractExtensionDialog component
+import ApartmentCard from './ApartmentCard';
+import ApartmentDetailsDialog from './ApartmentDetailsDialog';
 import ContractExtensionDialog from './ContractExtensionDialog';
-
-// Function to fetch landlord data
-const fetchLandlordData = async (landlordId) => {
-  try {
-    const response = await api.get(`/landlords/${landlordId}`);
-    return response.data;
-  } catch (error) {
-    console.error('Error fetching landlord data:', error);
-    return null;
-  }
-};
+import ContractManagementDialog from './ContractManagementDialog';
+import { APARTMENT_STATUS, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../utils/constants';
 
 function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
-  const [apartments, setApartments] = useState([]);
-  const [filteredApartments, setFilteredApartments] = useState([]);
+  // Core state
+  const [displayedApartments, setDisplayedApartments] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // UI state
   const [selectedApartment, setSelectedApartment] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+
+  // Filter and search state
   const [searchTerm, setSearchTerm] = useState('');
-  const [landlordData, setLandlordData] = useState({});
-  const [sortBy, setSortBy] = useState('expiry'); // 'expiry' or 'alphabetical'
+  const [sortBy, setSortBy] = useState('expiry');
   const [filterMenuAnchor, setFilterMenuAnchor] = useState(null);
 
-  // Contract extension state
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [totalCount, setTotalCount] = useState(0);
+
+  // Contract dialogs state
+  const [contractDialogOpen, setContractDialogOpen] = useState(false);
   const [extendContractOpen, setExtendContractOpen] = useState(false);
   const [selectedApartmentForExtension, setSelectedApartmentForExtension] = useState(null);
   const [isExtendingContract, setIsExtendingContract] = useState(false);
@@ -85,7 +90,111 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   const userData = getUserData();
   const isAdmin = userData && userData.role === 'admin';
 
-  // Helper function to check if contract is expired or expiring soon
+  // Fetch apartments with pagination
+  const fetchApartments = useCallback(async (page = 1, size = pageSize, search = '', sort = sortBy, refresh = false) => {
+    if (refresh) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
+    }
+
+    const token = localStorage.getItem('token');
+    if (!token) {
+      console.error('No authentication token found');
+      showNotification('Authentication required. Please log in again.', 'error');
+      setIsLoading(false);
+      setIsRefreshing(false);
+      return;
+    }
+
+    try {
+      // Build query parameters
+      const params = new URLSearchParams({
+        page: (page - 1).toString(), // Backend uses 0-based indexing
+        limit: size.toString(),
+        sort: sort,
+        ...(search && { search: search.trim() })
+      });
+
+      const response = await api.get(`/list?${params}`);
+
+      if (response.data && response.data.apartments) {
+        const processedApartments = response.data.apartments.map(apartment => ({
+          ...apartment,
+          // Normalize status
+          status: normalizeStatus(apartment.status),
+          displayStatus: apartment.status,
+          // Get contract end date from current contract or fallback
+          contractEndDate: getContractEndDate(apartment),
+          // Get move in date from current contract or fallback
+          moveInDate: getMoveInDate(apartment),
+          // Get current tenants from contract periods
+          tenants: getCurrentTenants(apartment),
+          // Calculate expiry status
+          expiryStatus: getExpiryStatus(getContractEndDate(apartment))
+        }));
+
+        setDisplayedApartments(processedApartments);
+        setTotalCount(response.data.pagination?.totalItems || response.data.total || processedApartments.length);
+      } else {
+        console.error('Invalid response structure:', response.data);
+        setDisplayedApartments([]);
+        setTotalCount(0);
+      }
+
+    } catch (error) {
+      console.error('Error fetching apartments:', error);
+      if (error.response && error.response.status === 401) {
+        showNotification('Your session has expired. Please log in again.', 'error');
+      } else {
+        showNotification('Error loading apartment list', 'error');
+      }
+      setDisplayedApartments([]);
+      setTotalCount(0);
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, [pageSize, sortBy, showNotification]);
+
+  // Helper functions
+  const normalizeStatus = (status) => {
+    if (!status) return 'vacant';
+    const statusLower = status.toLowerCase();
+    if (statusLower.includes('occupied') || statusLower.includes('rented')) return 'occupied';
+    if (statusLower.includes('vacant') || statusLower.includes('available')) return 'vacant';
+    if (statusLower.includes('contract') && statusLower.includes('sent')) return 'contract_sent';
+    return status;
+  };
+
+  const getContractEndDate = (apartment) => {
+    if (apartment.current_contract?.end_date) {
+      return apartment.current_contract.end_date;
+    }
+    return apartment.contractEndDate;
+  };
+
+  const getMoveInDate = (apartment) => {
+    if (apartment.current_contract?.start_date) {
+      return apartment.current_contract.start_date;
+    }
+    return apartment.moveInDate;
+  };
+
+  const getCurrentTenants = (apartment) => {
+    // Try to get tenants from current contract first
+    if (apartment.current_contract?.tenants) {
+      return apartment.current_contract.tenants.map(ct => ct.tenant).filter(Boolean);
+    }
+
+    // Fallback to legacy tenants array
+    if (apartment.tenants && Array.isArray(apartment.tenants)) {
+      return apartment.tenants;
+    }
+
+    return [];
+  };
+
   const getExpiryStatus = (contractEndDate) => {
     if (!contractEndDate) return { status: 'no_date', daysUntilExpiry: null };
 
@@ -103,83 +212,47 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     }
   };
 
-  // Enhanced status chip with expiry colors
-  const getStatusChip = (status, contractEndDate) => {
-    const expiryStatus = getExpiryStatus(contractEndDate);
+  // Debounced search effect
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setCurrentPage(1);
+      fetchApartments(1, pageSize, searchTerm, sortBy);
+    }, 300);
 
-    let color = 'default';
-    let displayStatus = status;
-    let icon = null;
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm, fetchApartments, pageSize, sortBy]);
 
-    // First handle the basic status
-    switch (status) {
-      case 'occupied':
-        color = 'success';
-        displayStatus = 'Occupied';
-        break;
-      case 'vacant':
-        color = 'primary';
-        displayStatus = 'Vacant';
-        break;
-      case 'contract_sent':
-        color = 'warning';
-        displayStatus = 'Contract Sent';
-        break;
-      case 'מושכר':
-      case 'Rented':
-        color = 'success';
-        displayStatus = 'Occupied';
-        break;
-      case 'פנוי':
-      case 'Available':
-        color = 'primary';
-        displayStatus = 'Vacant';
-        break;
-      case 'חוזה נשלח':
-        color = 'warning';
-        displayStatus = 'Contract Sent';
-        break;
-      default:
-        displayStatus = status || 'Unknown';
-    }
+  // Handle page changes
+  const handlePageChange = useCallback((event, newPage) => {
+    setCurrentPage(newPage);
+    fetchApartments(newPage, pageSize, searchTerm, sortBy);
+  }, [fetchApartments, pageSize, searchTerm, sortBy]);
 
-    // Override color based on expiry status for occupied properties
-    if (status === 'occupied' || status === 'מושכר' || status === 'Rented') {
-      if (expiryStatus.status === 'expired') {
-        color = 'error';
-        displayStatus = 'Expired';
-        icon = <ErrorIcon sx={{ fontSize: '0.8rem' }} />;
-      } else if (expiryStatus.status === 'expiring_soon') {
-        color = 'warning';
-        displayStatus = `Expires in ${expiryStatus.daysUntilExpiry} days`;
-        icon = <WarningIcon sx={{ fontSize: '0.8rem' }} />;
-      }
-    }
+  // Handle page size changes
+  const handlePageSizeChange = useCallback((event) => {
+    const newPageSize = event.target.value;
+    setPageSize(newPageSize);
+    setCurrentPage(1);
+    fetchApartments(1, newPageSize, searchTerm, sortBy);
+  }, [fetchApartments, searchTerm, sortBy]);
 
-    return (
-      <Chip
-        label={displayStatus}
-        color={color}
-        size="small"
-        icon={icon}
-        sx={{
-          fontWeight: '500',
-          borderRadius: '8px',
-          fontSize: '0.75rem',
-          height: '24px',
-          '& .MuiChip-icon': {
-            fontSize: '0.8rem'
-          }
-        }}
-      />
-    );
-  };
+  // Handle sort changes
+  const handleSortChange = useCallback((newSortBy) => {
+    setSortBy(newSortBy);
+    setCurrentPage(1);
+    setFilterMenuAnchor(null);
+    fetchApartments(1, pageSize, searchTerm, newSortBy);
+  }, [fetchApartments, pageSize, searchTerm]);
+
+  // Handle search input changes
+  const handleSearchChange = useCallback((event) => {
+    setSearchTerm(event.target.value);
+  }, []);
 
   // Handle contract extension
   const handleExtendContract = async (apartmentId, newEndDate) => {
     setIsExtendingContract(true);
     try {
-      // Format the date for the API
       const formattedDate = newEndDate.toISOString().split('T')[0];
 
       await api.put(`/apartments/${apartmentId}/extend-contract`, {
@@ -187,15 +260,9 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
       });
 
       showNotification('Contract extended successfully', 'success');
-
-      // Refresh the apartment list to show updated data
-      await fetchApartments();
-
-      // Close the extension dialog
+      await fetchApartments(currentPage, pageSize, searchTerm, sortBy, true);
       setExtendContractOpen(false);
       setSelectedApartmentForExtension(null);
-
-      // Also close the details dialog if it's open
       setDetailsOpen(false);
 
     } catch (error) {
@@ -206,132 +273,8 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     }
   };
 
-  // Open the extension dialog
-  const openExtendContractDialog = (apartment, e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    setSelectedApartmentForExtension(apartment);
-    setExtendContractOpen(true);
-  };
-
-  const fetchApartments = async () => {
-    setIsLoading(true);
-    const token = localStorage.getItem('token');
-    if (!token) {
-      console.error('No authentication token found');
-      showNotification('Authentication required. Please log in again.', 'error');
-      setIsLoading(false);
-      return;
-    }
-    try {
-      const response = await api.get('/list');
-      const normalizedApartments = await Promise.all(
-        response.data.map(async (apartment) => {
-          let normalizedStatus = apartment.status;
-          if (apartment.status === 'מושכר' || apartment.status === 'Rented') {
-            normalizedStatus = 'occupied';
-          } else if (apartment.status === 'פנוי' || apartment.status === 'Available') {
-            normalizedStatus = 'vacant';
-          } else if (apartment.status === 'חוזה נשלח' || apartment.status === 'Contract Sent') {
-            normalizedStatus = 'contract_sent';
-          }
-
-          // Fetch landlord data if only landlord_id is provided
-          let landlordInfo = {};
-          if (apartment.landlord_id && !apartment.landlord) {
-            const landlord = await fetchLandlordData(apartment.landlord_id);
-            landlordInfo = landlord || {};
-            setLandlordData(prev => ({
-              ...prev,
-              [apartment.landlord_id]: landlordInfo
-            }));
-          }
-
-          return {
-            ...apartment,
-            status: normalizedStatus,
-            displayStatus: apartment.status,
-            landlord: apartment.landlord || landlordInfo,
-            expiryStatus: getExpiryStatus(apartment.contractEndDate)
-          };
-        })
-      );
-      setApartments(normalizedApartments);
-    } catch (error) {
-      console.error(error);
-      if (error.response && error.response.status === 401) {
-        showNotification('Your session has expired. Please log in again.', 'error');
-      } else {
-        showNotification('Error loading apartment list', 'error');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Sort and filter apartments
-  const sortAndFilterApartments = () => {
-    let filtered = apartments;
-
-    // Apply search filter
-    if (searchTerm.trim() !== '') {
-      filtered = filtered.filter(apartment =>
-        apartment.address.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-
-    // Apply sorting
-    if (sortBy === 'alphabetical') {
-      filtered = [...filtered].sort((a, b) =>
-        a.address.localeCompare(b.address)
-      );
-    } else if (sortBy === 'expiry') {
-      filtered = [...filtered].sort((a, b) => {
-        // First, sort by expiry status priority
-        const statusPriority = {
-          'expired': 1,
-          'expiring_soon': 2,
-          'valid': 3,
-          'no_date': 4
-        };
-
-        const aPriority = statusPriority[a.expiryStatus.status] || 5;
-        const bPriority = statusPriority[b.expiryStatus.status] || 5;
-
-        if (aPriority !== bPriority) {
-          return aPriority - bPriority;
-        }
-
-        // If same status, sort by days until expiry (ascending for expired/expiring, descending for valid)
-        if (a.expiryStatus.daysUntilExpiry !== null && b.expiryStatus.daysUntilExpiry !== null) {
-          if (a.expiryStatus.status === 'expired' || a.expiryStatus.status === 'expiring_soon') {
-            return a.expiryStatus.daysUntilExpiry - b.expiryStatus.daysUntilExpiry;
-          } else {
-            return b.expiryStatus.daysUntilExpiry - a.expiryStatus.daysUntilExpiry;
-          }
-        }
-
-        // Finally, sort alphabetically
-        return a.address.localeCompare(b.address);
-      });
-    }
-
-    setFilteredApartments(filtered);
-  };
-
-  const handleGenerateContract = (apartmentId, e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-
-    setDetailsOpen(false);
-    generateContract(apartmentId);
-  };
-
-  const generateContract = async (apartmentId) => {
+  // Handle contract generation
+  const handleGenerateContract = useCallback(async (apartmentId) => {
     try {
       const response = await api.post('/documents/createContract', {
         apartmentId: apartmentId
@@ -345,34 +288,29 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
 
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
-      const apartment = apartments.find(apt => apt.id === apartmentId);
-      const fileName = `Rental_Contract_${apartment ? (apartment.address || 'Apartment') : 'Apartment'}.docx`;
+      const apartment = displayedApartments.find(apt => apt.id === apartmentId);
+      const fileName = `Rental_Contract_${apartment ? apartment.address.replace(/[^a-zA-Z0-9]/g, '_') : 'Apartment'}.docx`;
 
       link.href = url;
       link.setAttribute('download', fileName);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
 
       showNotification('Contract generated successfully', 'success');
     } catch (error) {
       console.error('Error generating contract:', error);
       showNotification('Failed to generate contract', 'error');
     }
-  };
+  }, [displayedApartments, showNotification]);
 
+  // Initial load
   useEffect(() => {
-    fetchApartments();
+    fetchApartments(1, pageSize, '', sortBy);
   }, []);
 
-  useEffect(() => {
-    sortAndFilterApartments();
-  }, [searchTerm, apartments, sortBy]);
-
-  const handleSearchChange = (event) => {
-    setSearchTerm(event.target.value);
-  };
-
+  // Utility functions
   const handleFilterClick = (event) => {
     setFilterMenuAnchor(event.currentTarget);
   };
@@ -381,27 +319,8 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     setFilterMenuAnchor(null);
   };
 
-  const handleSortChange = (newSortBy) => {
-    setSortBy(newSortBy);
-    handleFilterClose();
-  };
-
-  const handleExport = async () => {
-    try {
-      const response = await api.get('/export', {
-        responseType: 'blob'
-      });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'apartments.xlsx');
-      document.body.appendChild(link);
-      link.click();
-      showNotification('File exported successfully');
-    } catch (error) {
-      console.error(error);
-      showNotification('Error exporting file', 'error');
-    }
+  const handleRefresh = () => {
+    fetchApartments(currentPage, pageSize, searchTerm, sortBy, true);
   };
 
   const openDetails = (apartment) => {
@@ -409,138 +328,25 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     setDetailsOpen(true);
   };
 
-  const getAddressInitial = (address) => {
-    return address && address.charAt(0).toUpperCase();
+  const openExtendContractDialog = (apartment) => {
+    setSelectedApartmentForExtension(apartment);
+    setExtendContractOpen(true);
   };
 
-  const handleEditClick = (apartment, e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    onEdit(apartment);
-  };
+  // Calculate pagination info
+  const totalPages = Math.ceil(totalCount / pageSize);
+  const startIndex = (currentPage - 1) * pageSize + 1;
+  const endIndex = Math.min(currentPage * pageSize, totalCount);
 
-  const handlePaymentClick = (apartmentId, e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    onGoToPayments(apartmentId);
-  };
-
-  const handleDetailsClick = (apartment, e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    openDetails(apartment);
-  };
-
-  const formatCurrency = (amount) => {
-    if (amount === undefined || amount === null) return '';
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2
-    }).format(amount);
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return 'Not provided';
-    try {
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) {
-        return dateString;
-      }
-      return date.toLocaleDateString();
-    } catch (error) {
-      return dateString;
-    }
-  };
-
-  const getLandlordInfo = (apartment) => {
-    if (apartment.landlord) {
-      return {
-        name: apartment.landlord.name || 'Not specified',
-        email: apartment.landlord.email || '',
-        phone: apartment.landlord.phone || ''
-      };
-    }
-
-    if (apartment.landlord_id && landlordData[apartment.landlord_id]) {
-      return {
-        name: landlordData[apartment.landlord_id].name || 'Not specified',
-        email: landlordData[apartment.landlord_id].email || '',
-        phone: landlordData[apartment.landlord_id].phone || ''
-      };
-    }
-
-    return {
-      name: apartment.landlordName || 'Not specified',
-      email: apartment.landlordEmail || '',
-      phone: apartment.landlordPhone || ''
-    };
-  };
-
-  const LandlordSection = ({ apartment }) => {
-    const landlordInfo = getLandlordInfo(apartment);
-
-    return (
-      <Grid item xs={12} sx={{ mt: 2 }}>
-        <Typography
-          variant="subtitle1"
-          sx={{
-            fontWeight: 600,
-            mb: 2,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1
-          }}
-        >
-          <PersonIcon color="primary" fontSize="small" />
-          Landlord Information
-        </Typography>
-        <Grid container spacing={2}>
-          <Grid item xs={12} sm={4}>
-            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                Name
-              </Typography>
-              <Typography variant="body2" fontWeight={500}>
-                {landlordInfo.name}
-              </Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                Email
-              </Typography>
-              <Typography variant="body2" fontWeight={500}>
-                {landlordInfo.email || 'Not provided'}
-              </Typography>
-            </Box>
-          </Grid>
-          <Grid item xs={12} sm={4}>
-            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                Phone
-              </Typography>
-              <Typography variant="body2" fontWeight={500}>
-                {landlordInfo.phone || 'Not provided'}
-              </Typography>
-            </Box>
-          </Grid>
-        </Grid>
-      </Grid>
-    );
-  };
-
-  if (isLoading) {
+  if (isLoading && !isRefreshing) {
     return (
       <Container maxWidth="xl" sx={{ py: 4 }}>
         <Box sx={{ mb: 4 }}>
           <Skeleton variant="rectangular" width="100%" height={60} sx={{ borderRadius: 1 }} />
         </Box>
         <Grid container spacing={3}>
-          {[1, 2, 3, 4, 5, 6].map((item) => (
-            <Grid item xs={12} sm={6} md={4} lg={3} key={item}>
+          {Array.from({ length: pageSize }, (_, index) => (
+            <Grid item xs={12} sm={6} md={4} lg={3} key={index}>
               <Skeleton variant="rectangular" width="100%" height={200} sx={{ borderRadius: 2 }} />
             </Grid>
           ))}
@@ -551,6 +357,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
+      {/* Header */}
       <Box
         sx={{
           display: 'flex',
@@ -569,7 +376,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             letterSpacing: '-0.5px'
           }}
         >
-          Properties
+          Properties {isRefreshing && <RefreshIcon sx={{ ml: 1, fontSize: '1.5rem', animation: 'spin 1s linear infinite' }} />}
         </Typography>
 
         <Box
@@ -580,6 +387,21 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             width: { xs: '100%', md: 'auto' }
           }}
         >
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            sx={{
+              borderRadius: 1,
+              textTransform: 'none',
+              fontWeight: 500,
+              height: '48px',
+              borderColor: 'divider'
+            }}
+          >
+            Refresh
+          </Button>
           <Button
             variant="contained"
             startIcon={<ApartmentIcon />}
@@ -599,6 +421,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         </Box>
       </Box>
 
+      {/* Search and Filters */}
       <Box
         sx={{
           display: 'flex',
@@ -640,11 +463,11 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             textTransform: 'none',
             fontWeight: 500,
             height: '48px',
-            minWidth: '120px',
+            minWidth: '140px',
             borderColor: 'divider'
           }}
         >
-          Sort: {sortBy === 'expiry' ? 'Expiry Date' : 'A-Z'}
+          Sort: {sortBy === 'expiry' ? 'Expiry' : 'A-Z'}
         </Button>
 
         <Menu
@@ -686,6 +509,52 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         </Menu>
       </Box>
 
+      {/* Results Summary and Page Size Control */}
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          mb: 3,
+          flexDirection: { xs: 'column', sm: 'row' },
+          gap: 2
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="body2" color="text.secondary">
+            Showing {startIndex}-{endIndex} of {totalCount} properties
+          </Typography>
+          {searchTerm && (
+            <Chip
+              label={`Search: "${searchTerm}"`}
+              size="small"
+              onDelete={() => setSearchTerm('')}
+              color="primary"
+              variant="outlined"
+            />
+          )}
+        </Box>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="body2" color="text.secondary">
+            Show:
+          </Typography>
+          <FormControl size="small">
+            <Select
+              value={pageSize}
+              onChange={handlePageSizeChange}
+              sx={{ minWidth: 80 }}
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <MenuItem key={size} value={size}>
+                  {size}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Box>
+      </Box>
+
       {/* Expiry Status Summary */}
       {sortBy === 'expiry' && (
         <Box sx={{ mb: 3 }}>
@@ -698,7 +567,8 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         </Box>
       )}
 
-      {filteredApartments.length === 0 ? (
+      {/* Apartments Grid */}
+      {displayedApartments.length === 0 ? (
         <Box
           sx={{
             py: 10,
@@ -734,544 +604,62 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
           )}
         </Box>
       ) : (
-        <Grid container spacing={3}>
-          {filteredApartments.map((apartment) => (
-            <Grid item xs={12} sm={6} md={4} lg={3} key={apartment.id}>
-              <Card
-                elevation={0}
-                onClick={() => openDetails(apartment)}
-                sx={{
-                  borderRadius: 2,
-                  height: '100%',
-                  overflow: 'hidden',
-                  transition: 'all 0.2s ease',
-                  border: '1px solid',
-                  borderColor: apartment.expiryStatus.status === 'expired'
-                    ? 'error.main'
-                    : apartment.expiryStatus.status === 'expiring_soon'
-                      ? 'warning.main'
-                      : 'divider',
-                  '&:hover': {
-                    boxShadow: 3,
-                    transform: 'translateY(-4px)',
-                    borderColor: apartment.expiryStatus.status === 'expired'
-                      ? 'error.main'
-                      : apartment.expiryStatus.status === 'expiring_soon'
-                        ? 'warning.main'
-                        : 'primary.main'
-                  },
-                  cursor: 'pointer'
-                }}
-              >
-                <Box
+        <>
+          <Grid container spacing={3}>
+            {displayedApartments.map((apartment) => (
+              <Grid item xs={12} sm={6} md={4} lg={3} key={apartment.id}>
+                <ApartmentCard
+                  apartment={apartment}
+                  onEdit={onEdit}
+                  onGoToPayments={onGoToPayments}
+                  onGenerateContract={handleGenerateContract}
+                  onOpenDetails={openDetails}
+                  isAdmin={isAdmin}
+                />
+              </Grid>
+            ))}
+          </Grid>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <Box sx={{ mt: 4, display: 'flex', justifyContent: 'center' }}>
+              <Stack spacing={2} alignItems="center">
+                <Pagination
+                  count={totalPages}
+                  page={currentPage}
+                  onChange={handlePageChange}
+                  color="primary"
+                  size="large"
+                  showFirstButton
+                  showLastButton
                   sx={{
-                    p: 2,
-                    background: apartment.expiryStatus.status === 'expired'
-                      ? 'linear-gradient(to right, rgba(211, 47, 47, 0.05), rgba(211, 47, 47, 0))'
-                      : apartment.expiryStatus.status === 'expiring_soon'
-                        ? 'linear-gradient(to right, rgba(237, 108, 2, 0.05), rgba(237, 108, 2, 0))'
-                        : 'linear-gradient(to right, rgba(0,0,0,0.02), rgba(0,0,0,0))',
-                    borderBottom: '1px solid',
-                    borderColor: 'divider',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'flex-start'
+                    '& .MuiPaginationItem-root': {
+                      borderRadius: 1,
+                      fontWeight: 500
+                    }
                   }}
-                >
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, maxWidth: '80%' }}>
-                    <Avatar
-                      sx={{
-                        backgroundColor: apartment.expiryStatus.status === 'expired'
-                          ? 'error.main'
-                          : apartment.expiryStatus.status === 'expiring_soon'
-                            ? 'warning.main'
-                            : 'primary.main',
-                        width: 36,
-                        height: 36
-                      }}
-                    >
-                      {getAddressInitial(apartment.address)}
-                    </Avatar>
-                    <Typography
-                      variant="subtitle1"
-                      sx={{
-                        fontWeight: 600,
-                        fontSize: '0.95rem',
-                        lineHeight: 1.2,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical'
-                      }}
-                    >
-                      {apartment.address}
-                    </Typography>
-                  </Box>
-                  {getStatusChip(apartment.status, apartment.contractEndDate)}
-                </Box>
-
-                <CardContent sx={{ p: 2 }}>
-                  <Box sx={{ mb: 2 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5, gap: 1 }}>
-                      <BedIcon fontSize="small" sx={{ color: 'text.secondary', fontSize: '1rem' }} />
-                      <Typography variant="body2" color="text.secondary">
-                        {apartment.rooms} rooms
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5, gap: 1 }}>
-                      <SquareFootIcon fontSize="small" sx={{ color: 'text.secondary', fontSize: '1rem' }} />
-                      <Typography variant="body2" color="text.secondary">
-                        {apartment.size} m²
-                      </Typography>
-                    </Box>
-                    {apartment.moveInDate && (
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5, gap: 1 }}>
-                        <EventIcon fontSize="small" sx={{ color: 'text.secondary', fontSize: '1rem' }} />
-                        <Typography variant="body2" color="text.secondary">
-                          {new Date(apartment.moveInDate).toLocaleDateString()}
-                        </Typography>
-                      </Box>
-                    )}
-                    {apartment.contractEndDate && (
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5, gap: 1 }}>
-                        <AccessTimeIcon
-                          fontSize="small"
-                          sx={{
-                            color: apartment.expiryStatus.status === 'expired'
-                              ? 'error.main'
-                              : apartment.expiryStatus.status === 'expiring_soon'
-                                ? 'warning.main'
-                                : 'text.secondary',
-                            fontSize: '1rem'
-                          }}
-                        />
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            color: apartment.expiryStatus.status === 'expired'
-                              ? 'error.main'
-                              : apartment.expiryStatus.status === 'expiring_soon'
-                                ? 'warning.main'
-                                : 'text.secondary'
-                          }}
-                        >
-                          Expires: {new Date(apartment.contractEndDate).toLocaleDateString()}
-                        </Typography>
-                      </Box>
-                    )}
-                    {apartment.tenants && (
-                      <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-                        <PersonIcon fontSize="small" sx={{ color: 'text.secondary', fontSize: '1rem', mt: 0.5 }} />
-                        <Typography
-                          variant="body2"
-                          color="text.secondary"
-                          sx={{
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            display: '-webkit-box',
-                            WebkitLineClamp: 1,
-                            WebkitBoxOrient: 'vertical'
-                          }}
-                        >
-                          {Array.isArray(apartment.tenants)
-                            ? apartment.tenants.map(t => t.firstName && t.lastName ? `${t.firstName} ${t.lastName}` : t.name).join(', ')
-                            : apartment.tenants}
-                        </Typography>
-                      </Box>
-                    )}
-                  </Box>
-                  <Divider sx={{ my: 2 }} />
-
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      mt: 1
-                    }}
-                  >
-                    <Box
-                      onClick={(e) => handlePaymentClick(apartment.id, e)}
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 0.5,
-                        cursor: 'pointer',
-                        borderRadius: 1,
-                        py: 0.5,
-                        px: 1,
-                        '&:hover': { bgcolor: 'action.hover' }
-                      }}
-                    >
-                      <PaymentIcon fontSize="small" color="primary" />
-                      <Typography
-                        variant="body2"
-                        color="primary"
-                        sx={{
-                          fontWeight: 500,
-                          fontSize: '0.8rem',
-                          userSelect: 'none'
-                        }}
-                      >
-                        Payments
-                      </Typography>
-                    </Box>
-
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <Tooltip title="Generate Contract">
-                        <IconButton
-                          size="small"
-                          onClick={(e) => handleGenerateContract(apartment.id, e)}
-                          sx={{ color: 'success.main' }}
-                        >
-                          <DescriptionIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-
-                      <Tooltip title="Edit Property">
-                        <IconButton
-                          size="small"
-                          onClick={(e) => handleEditClick(apartment, e)}
-                          sx={{ color: 'primary.main' }}
-                        >
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        onClick={(e) => handleDetailsClick(apartment, e)}
-                        sx={{
-                          borderRadius: 1,
-                          textTransform: 'none',
-                          fontWeight: 500,
-                          fontSize: '0.8rem',
-                          minWidth: 0,
-                          borderColor: 'divider'
-                        }}
-                      >
-                        Details
-                      </Button>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))}
-        </Grid>
+                />
+                <Typography variant="body2" color="text.secondary">
+                  Page {currentPage} of {totalPages}
+                </Typography>
+              </Stack>
+            </Box>
+          )}
+        </>
       )}
 
-      <Dialog
+      {/* Details Dialog */}
+      <ApartmentDetailsDialog
         open={detailsOpen}
         onClose={() => setDetailsOpen(false)}
-        maxWidth="md"
-        fullWidth
-        PaperProps={{
-          sx: {
-            borderRadius: 2,
-            overflow: 'hidden'
-          }
-        }}
-      >
-        {selectedApartment && (
-          <>
-            <DialogTitle
-              sx={{
-                p: 3,
-                bgcolor: 'primary.main',
-                color: 'primary.contrastText',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
-            >
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-                <LocationOnIcon />
-                <Typography variant="h6" sx={{ fontWeight: 600 }}>
-                  {selectedApartment.address}
-                </Typography>
-              </Box>
-              <IconButton
-                edge="end"
-                color="inherit"
-                onClick={() => setDetailsOpen(false)}
-                aria-label="close"
-                size="small"
-              >
-                <CloseIcon />
-              </IconButton>
-            </DialogTitle>
-
-            <DialogContent dividers sx={{ p: 0 }}>
-              <Box
-                sx={{
-                  p: 2,
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  bgcolor: 'background.default',
-                  borderBottom: '1px solid',
-                  borderColor: 'divider'
-                }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Typography variant="body2" color="text.secondary">
-                    Status:
-                  </Typography>
-                  {getStatusChip(selectedApartment.status, selectedApartment.contractEndDate)}
-                </Box>
-                <Box sx={{ display: 'flex', gap: 2 }}>
-                  {isAdmin && (
-                    <Button
-                      size="small"
-                      startIcon={<EditIcon />}
-                      variant="outlined"
-                      onClick={() => {
-                        setDetailsOpen(false);
-                        onEdit(selectedApartment);
-                      }}
-                      sx={{
-                        borderRadius: 1,
-                        textTransform: 'none'
-                      }}
-                    >
-                      Edit
-                    </Button>
-                  )}
-                  <Button
-                    size="small"
-                    startIcon={<PaymentIcon />}
-                    variant="contained"
-                    onClick={() => {
-                      setDetailsOpen(false);
-                      onGoToPayments(selectedApartment.id);
-                    }}
-                    sx={{
-                      borderRadius: 1,
-                      textTransform: 'none'
-                    }}
-                  >
-                    Payments
-                  </Button>
-                </Box>
-              </Box>
-
-              <Box sx={{ p: 3 }}>
-                <Grid container spacing={3}>
-                  {/* Property Details Section */}
-                  <Grid item xs={12}>
-                    <Typography
-                      variant="subtitle1"
-                      sx={{
-                        fontWeight: 600,
-                        mb: 2,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 1
-                      }}
-                    >
-                      <HomeIcon color="primary" fontSize="small" />
-                      Property Details
-                    </Typography>
-                    <Grid container spacing={2}>
-                      <Grid item xs={12} sm={6} md={3}>
-                        <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                          <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                            Property Size
-                          </Typography>
-                          <Typography variant="body2" fontWeight={500}>
-                            {selectedApartment.size} m²
-                          </Typography>
-                        </Box>
-                      </Grid>
-                      <Grid item xs={12} sm={6} md={3}>
-                        <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                          <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                            Rooms
-                          </Typography>
-                          <Typography variant="body2" fontWeight={500}>
-                            {selectedApartment.rooms}
-                          </Typography>
-                        </Box>
-                      </Grid>
-                      {isAdmin && (
-                        <Grid item xs={12} sm={6} md={3}>
-                          <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                            <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                              Property Model
-                            </Typography>
-                            <Typography variant="body2" fontWeight={500}>
-                              {selectedApartment.model === 'management'
-                                ? 'Property Management'
-                                : selectedApartment.model === 'rental'
-                                  ? 'Rental Property'
-                                  : selectedApartment.model || 'Not specified'}
-                            </Typography>
-                          </Box>
-                        </Grid>
-                      )}
-                      <Grid item xs={12} sm={6} md={3}>
-                        <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                          <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                            Monthly Rent
-                          </Typography>
-                          <Typography variant="body2" fontWeight={500}>
-                            {formatCurrency(selectedApartment.rent)}
-                          </Typography>
-                        </Box>
-                      </Grid>
-                    </Grid>
-                  </Grid>
-
-                  {/* Contract Details Section */}
-                  <Grid item xs={12} sx={{ mt: 2 }}>
-                    <Typography
-                      variant="subtitle1"
-                      sx={{
-                        fontWeight: 600,
-                        mb: 2,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 1
-                      }}
-                    >
-                      <AccessTimeIcon color="primary" fontSize="small" />
-                      Contract Timeline
-                    </Typography>
-                    <Grid container spacing={2}>
-                      <Grid item xs={12} sm={6}>
-                        <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                          <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                            Move-In Date
-                          </Typography>
-                          <Typography variant="body2" fontWeight={500}>
-                            {formatDate(selectedApartment.moveInDate)}
-                          </Typography>
-                        </Box>
-                      </Grid>
-                      <Grid item xs={12} sm={6}>
-                        <Box sx={{
-                          p: 2,
-                          border: '1px solid',
-                          borderColor: selectedApartment.expiryStatus.status === 'expired'
-                            ? 'error.main'
-                            : selectedApartment.expiryStatus.status === 'expiring_soon'
-                              ? 'warning.main'
-                              : 'divider',
-                          borderRadius: 1,
-                          bgcolor: selectedApartment.expiryStatus.status === 'expired'
-                            ? 'error.50'
-                            : selectedApartment.expiryStatus.status === 'expiring_soon'
-                              ? 'warning.50'
-                              : 'inherit'
-                        }}>
-                          <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                            Contract End Date
-                          </Typography>
-                          <Typography
-                            variant="body2"
-                            fontWeight={500}
-                            sx={{
-                              color: selectedApartment.expiryStatus.status === 'expired'
-                                ? 'error.main'
-                                : selectedApartment.expiryStatus.status === 'expiring_soon'
-                                  ? 'warning.main'
-                                  : 'inherit'
-                            }}
-                          >
-                            {formatDate(selectedApartment.contractEndDate)}
-                            {selectedApartment.expiryStatus.status === 'expired' && (
-                              <Typography variant="caption" display="block" color="error.main">
-                                Expired {Math.abs(selectedApartment.expiryStatus.daysUntilExpiry)} days ago
-                              </Typography>
-                            )}
-                            {selectedApartment.expiryStatus.status === 'expiring_soon' && (
-                              <Typography variant="caption" display="block" color="warning.main">
-                                Expires in {selectedApartment.expiryStatus.daysUntilExpiry} days
-                              </Typography>
-                            )}
-                          </Typography>
-                        </Box>
-                      </Grid>
-                    </Grid>
-                  </Grid>
-
-                  {/* Tenant Information */}
-                  {selectedApartment.tenants && (
-                    <Grid item xs={12} sx={{ mt: 2 }}>
-                      <Typography
-                        variant="subtitle1"
-                        sx={{
-                          fontWeight: 600,
-                          mb: 2,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 1
-                        }}
-                      >
-                        <PersonIcon color="primary" fontSize="small" />
-                        Tenant Information
-                      </Typography>
-                      <Grid container spacing={2}>
-                        <Grid item xs={12}>
-                          <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                            <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                              Tenants
-                            </Typography>
-                            <Typography variant="body2" fontWeight={500}>
-                              {Array.isArray(selectedApartment.tenants)
-                                ? selectedApartment.tenants.map(t => t.firstName && t.lastName ? `${t.firstName} ${t.lastName}` : t.name).join(', ')
-                                : selectedApartment.tenants}
-                            </Typography>
-                          </Box>
-                        </Grid>
-                      </Grid>
-                    </Grid>
-                  )}
-
-                  {/* Landlord Information */}
-                  {isAdmin && <LandlordSection apartment={selectedApartment} />}
-                </Grid>
-              </Box>
-            </DialogContent>
-
-            <DialogActions sx={{ p: 2 }}>
-              <Button
-                onClick={() => setDetailsOpen(false)}
-                variant="outlined"
-                sx={{ borderRadius: 1, textTransform: 'none' }}
-              >
-                Close
-              </Button>
-
-              {/* Add the Extend Contract button */}
-              {selectedApartment?.contractEndDate && (
-                <Button
-                  onClick={() => openExtendContractDialog(selectedApartment)}
-                  variant="outlined"
-                  color="secondary"
-                  startIcon={<AccessTimeIcon />}
-                  sx={{ borderRadius: 1, textTransform: 'none' }}
-                >
-                  Extend Contract
-                </Button>
-              )}
-
-              {isAdmin && (
-                <Button
-                  onClick={() => handleGenerateContract(selectedApartment.id)}
-                  variant="contained"
-                  startIcon={<DescriptionIcon />}
-                  sx={{ borderRadius: 1, textTransform: 'none' }}
-                >
-                  Generate Contract
-                </Button>
-              )}
-            </DialogActions>
-          </>
-        )}
-      </Dialog>
+        apartment={selectedApartment}
+        onEdit={onEdit}
+        onGoToPayments={onGoToPayments}
+        onGenerateContract={handleGenerateContract}
+        onExtendContract={openExtendContractDialog}
+        onOpenContractManagement={() => setContractDialogOpen(true)}
+        isAdmin={isAdmin}
+      />
 
       {/* Contract Extension Dialog */}
       <ContractExtensionDialog
@@ -1284,6 +672,28 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         onExtend={handleExtendContract}
         isSubmitting={isExtendingContract}
       />
+
+      {/* Contract Management Dialog */}
+      <ContractManagementDialog
+        open={contractDialogOpen}
+        onClose={() => setContractDialogOpen(false)}
+        apartment={selectedApartment}
+        showNotification={showNotification}
+        onContractChange={() => fetchApartments(currentPage, pageSize, searchTerm, sortBy, true)}
+      />
+
+      <style>
+        {`
+          @keyframes spin {
+            from {
+              transform: rotate(0deg);
+            }
+            to {
+              transform: rotate(360deg);
+            }
+          }
+        `}
+      </style>
     </Container>
   );
 }

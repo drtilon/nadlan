@@ -1,126 +1,103 @@
 #!/usr/bin/env python3
 import os
-import shutil
 import re
 from pathlib import Path
 
-# Where each component should go
-MAPPING = {
-    "ApartmentCard.jsx": "apartment",
-    "ApartmentDetailsDialog.jsx": "apartment",
-    "ApartmentDetailsForm.jsx": "apartment",
-    "ApartmentForm.jsx": "apartment",
-    "ApartmentList.jsx": "apartment",
-    "TenantDetails.jsx": "tenant",
-    "TenantFormDialog.jsx": "tenant",
-    "TenantSelector.jsx": "tenant",
-    "TenantsPanel.jsx": "tenant",
-    "EnhancedTenantForm.jsx": "tenant",
-    "LandlordDetails.jsx": "landlord",
-    "LandlordsPanel.jsx": "landlord",
-    "EnhancedLandlordForm.jsx": "landlord",
-    "ContractExtensionDialog.jsx": "contract",
-    "ContractGeneratorDialog.jsx": "contract",
-    "ContractGenerator.jsx": "contract",
-    "ContractManager.jsx": "contract",
-    "ContractManagementDialog.jsx": "contract",
-    "ContractTemplatesManager.jsx": "contract",
-    "PaymentScreen.jsx": "payment",
-    "NetEarningsSection.jsx": "payment",
-    "AdminPanel.jsx": "admin",
-    "UsersList.jsx": "admin",
-    "UserAnalyticsPanel.jsx": "admin",
-    "PasswordChangeDialog.jsx": "admin",
-    "LoginPage.jsx": "auth",
-    "RegisterPage.jsx": "auth",
-    "MainLayout.jsx": "layout",
-    "ModelSelection.jsx": "layout",
-    "AnalyticsPanel.jsx": "analytics",
-    "LogsViewer.jsx": "analytics",
-}
 
-
-def organize():
+def fix_actual_imports():
     src = Path("frontend/src")
     components = src / "components"
 
-    print("🚀 Organizing components...")
+    print("🔧 Fixing imports based on actual file locations...")
 
-    # Create backup
-    if components.exists():
-        shutil.copytree(components, "backup-components", dirs_exist_ok=True)
-        print("✅ Backup created")
+    # First, scan all components and their actual locations
+    component_locations = {}
 
-    # Create folders
-    folders = set(MAPPING.values())
-    for folder in folders:
-        (components / folder).mkdir(exist_ok=True)
+    for folder in components.iterdir():
+        if folder.is_dir():
+            for jsx_file in folder.glob("*.jsx"):
+                component_name = jsx_file.stem  # filename without extension
+                component_locations[component_name] = folder.name
+                print(f"📍 {component_name} is in {folder.name}/")
 
-    # Move files
-    moved = {}
-    for file, folder in MAPPING.items():
-        src_file = components / file
-        if src_file.exists():
-            dst_file = components / folder / file
-            shutil.move(str(src_file), str(dst_file))
-            moved[file] = folder
-            print(f"📦 {file} → {folder}/")
+    print(f"\n🔧 Found {len(component_locations)} components")
 
-    # Move remaining files to common
-    for jsx_file in components.glob("*.jsx"):
-        dst = components / "common" / jsx_file.name
-        shutil.move(str(jsx_file), str(dst))
-        moved[jsx_file.name] = "common"
-        print(f"📦 {jsx_file.name} → common/")
+    # Now fix imports in all files
+    for folder in components.iterdir():
+        if folder.is_dir():
+            for jsx_file in folder.glob("*.jsx"):
+                fix_imports_in_file(jsx_file, component_locations, folder.name)
 
-    # Fix imports
-    print("\n🔧 Fixing imports...")
-    for file_path in src.rglob("*.js*"):
-        if "node_modules" in str(file_path) or "backup" in str(file_path):
-            continue
+    print("✅ All imports fixed based on actual locations!")
 
-        try:
-            with open(file_path, "r") as f:
-                content = f.read()
 
-            original = content
+def fix_imports_in_file(file_path, component_locations, current_folder):
+    try:
+        with open(file_path, "r") as f:
+            content = f.read()
 
-            for filename, folder in moved.items():
-                component_name = filename.replace(".jsx", "")
+        original = content
 
-                # Calculate relative path
-                rel_path = (
-                    os.path.relpath(
-                        components / folder / component_name, file_path.parent
+        # Find all import statements that import React components
+        import_pattern = r"import\s+([^{}\s]+)\s+from\s+['\"]([^'\"]+)['\"]"
+        matches = re.finditer(import_pattern, content)
+
+        for match in matches:
+            imported_component = match.group(1)
+            import_path = match.group(2)
+
+            # Skip non-component imports (utils, etc.)
+            if not imported_component[0].isupper() or imported_component in [
+                "React",
+                "Component",
+            ]:
+                continue
+
+            # Skip if already correct or is external library
+            if import_path.startswith("react") or import_path.startswith("@"):
+                continue
+
+            # Find where this component actually is
+            if imported_component in component_locations:
+                actual_folder = component_locations[imported_component]
+
+                # Calculate correct relative path
+                if actual_folder == current_folder:
+                    # Same folder
+                    correct_path = f"./{imported_component}"
+                else:
+                    # Different folder
+                    correct_path = f"../{actual_folder}/{imported_component}"
+
+                # Replace the import if it's wrong
+                if import_path != correct_path:
+                    old_import = f"import {imported_component} from '{import_path}'"
+                    new_import = f"import {imported_component} from '{correct_path}'"
+                    content = content.replace(old_import, new_import)
+                    print(
+                        f"  🔄 {file_path.name}: {imported_component} {import_path} → {correct_path}"
                     )
-                    .replace("\\", "/")
-                    .replace(".jsx", "")
-                )
 
-                if not rel_path.startswith("."):
-                    rel_path = "./" + rel_path
+        # Also fix utils imports
+        content = re.sub(
+            r"from\s+['\"]\.\.\/\.\.\/\.\.\/utils\/([^'\"]+)['\"]",
+            r"from '../../utils/\1'",
+            content,
+        )
+        content = re.sub(
+            r"from\s+['\"]\.\.\/utils\/([^'\"]+)['\"]",
+            r"from '../../utils/\1'",
+            content,
+        )
 
-                # Fix various import patterns
-                patterns = [
-                    rf"from\s+['\"]\./{component_name}['\"]",
-                    rf"from\s+['\"]\./{filename}['\"]",
-                    rf"from\s+['\"][^'\"]*{component_name}['\"]",
-                ]
+        if content != original:
+            with open(file_path, "w") as f:
+                f.write(content)
+            print(f"  ✅ Updated {file_path.name}")
 
-                for pattern in patterns:
-                    content = re.sub(pattern, f"from '{rel_path}'", content)
-
-            if content != original:
-                with open(file_path, "w") as f:
-                    f.write(content)
-                print(f"🔄 Fixed {file_path}")
-
-        except Exception as e:
-            print(f"❌ Error with {file_path}: {e}")
-
-    print(f"\n✅ Done! Moved {len(moved)} files")
-    print("💾 Backup saved to backup-components/")
+    except Exception as e:
+        print(f"  ❌ Error fixing {file_path}: {e}")
 
 
 if __name__ == "__main__":
-    organize()
+    fix_actual_imports()

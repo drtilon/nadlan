@@ -2,7 +2,7 @@
 from flask import Blueprint, request, jsonify, current_app, g
 from .auth import token_required, role_required
 from extentions import db
-from models.models import Apartment, Tenant
+from models.models import Apartment, Tenant, ContractPeriod, ContractTenant  # Added missing imports
 from sqlalchemy import text, and_, or_
 from datetime import datetime, date
 from activity_logger import ActivityLogger
@@ -217,7 +217,7 @@ def delete_contract_period(contract_id):
             return jsonify({"message": "Contract not found"}), 404
 
         # Check if there are payments associated with this contract
-        payments_count = len(contract.payments)
+        payments_count = len(contract.payments) if hasattr(contract, 'payments') else 0
         if payments_count > 0:
             return jsonify({
                 "message": f"Cannot delete contract with {payments_count} associated payments. Please reassign or delete payments first."
@@ -365,7 +365,7 @@ def get_contract_payments(contract_id):
             return jsonify({"message": "Contract not found"}), 404
 
         # Get payments directly associated with this contract
-        payments = contract.payments
+        payments = getattr(contract, 'payments', [])
 
         # Also get payments within the contract date range if no direct association
         if not payments:
@@ -428,3 +428,48 @@ def add_tenants_to_contract(contract_id, tenant_ids):
             rent_share_percentage=100.0 / len(tenant_ids)  # Equal split by default
         )
         db.session.add(contract_tenant)
+
+def check_overlapping_contracts(apartment_id, start_date, end_date):
+    """Check if the new contract period overlaps with existing ones"""
+    try:
+        start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+        end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else None
+
+        # Query for overlapping contracts
+        query = ContractPeriod.query.filter_by(apartment_id=apartment_id)
+
+        if end_date_obj:
+            # Contract has an end date - check for any overlap
+            query = query.filter(
+                or_(
+                    # Existing contract starts before new contract ends and has no end date
+                    and_(
+                        ContractPeriod.start_date <= end_date_obj,
+                        ContractPeriod.end_date.is_(None)
+                    ),
+                    # Existing contract overlaps with new contract period
+                    and_(
+                        ContractPeriod.start_date <= end_date_obj,
+                        ContractPeriod.end_date >= start_date_obj
+                    )
+                )
+            )
+        else:
+            # New contract has no end date - check if any existing contract starts after new start date
+            query = query.filter(ContractPeriod.start_date >= start_date_obj)
+
+        overlapping = query.first()
+
+        if overlapping:
+            return {
+                "id": overlapping.id,
+                "contract_number": overlapping.contract_number,
+                "start_date": overlapping.start_date.isoformat(),
+                "end_date": overlapping.end_date.isoformat() if overlapping.end_date else None
+            }
+
+        return None
+
+    except Exception as e:
+        current_app.logger.error(f"Error checking overlapping contracts: {e}")
+        return None

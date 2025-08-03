@@ -4,86 +4,71 @@ import {
   DialogTitle,
   DialogContent,
   DialogActions,
-  Box,
-  Typography,
   Button,
+  Typography,
+  Box,
   Grid,
-  IconButton
+  Chip,
+  Avatar,
+  IconButton,
+  Card,
+  CardContent,
+  Divider,
+  Stack,
+  Tooltip
 } from '@mui/material';
 import {
   Close as CloseIcon,
-  LocationOn as LocationOnIcon,
   Edit as EditIcon,
   Payment as PaymentIcon,
-  Description as DescriptionIcon,
-  AccessTime as AccessTimeIcon,
-  Business as BusinessIcon,
   Home as HomeIcon,
-  Person as PersonIcon
+  AccessTime as AccessTimeIcon,
+  Person as PersonIcon,
+  Email as EmailIcon,
+  Phone as PhoneIcon,
+  CreditCard as IbanIcon,
+  Cake as BirthdayIcon,
+  Visibility as ViewIcon,
+  Business as BusinessIcon,
+  Description as DescriptionIcon
 } from '@mui/icons-material';
-// Import utility functions locally since apartmentUtils might not exist yet
-const getStatusChip = (status, contractEndDate) => {
-  const getExpiryStatus = (contractEndDate) => {
-    if (!contractEndDate) return { status: 'no_date', daysUntilExpiry: null };
 
-    const endDate = new Date(contractEndDate);
-    const today = new Date();
-    const timeDiff = endDate.getTime() - today.getTime();
-    const daysUntilExpiry = Math.ceil(timeDiff / (1000 * 3600 * 24));
+// Status Chip Component
+const StatusChip = ({ status, expiryStatus }) => {
+  const getStatusConfig = (status, expiryStatus) => {
+    const statusLower = status?.toLowerCase() || '';
 
-    if (daysUntilExpiry < 0) {
-      return { status: 'expired', daysUntilExpiry };
-    } else if (daysUntilExpiry <= 30) {
-      return { status: 'expiring_soon', daysUntilExpiry };
-    } else {
-      return { status: 'valid', daysUntilExpiry };
+    if (expiryStatus?.status === 'expired') {
+      return { color: 'error', icon: '🚫', displayStatus: 'Contract Expired' };
     }
+    if (expiryStatus?.status === 'expiring_soon') {
+      return { color: 'warning', icon: '⚠️', displayStatus: 'Expiring Soon' };
+    }
+    if (statusLower.includes('occupied') || statusLower.includes('rented')) {
+      return { color: 'success', icon: '🏠', displayStatus: 'Occupied' };
+    }
+    if (statusLower.includes('vacant') || statusLower.includes('available')) {
+      return { color: 'default', icon: '🔓', displayStatus: 'Vacant' };
+    }
+    if (statusLower.includes('contract') && statusLower.includes('sent')) {
+      return { color: 'warning', icon: '📄', displayStatus: 'Contract Sent' };
+    }
+    return { color: 'default', icon: '❓', displayStatus: status || 'Unknown' };
   };
 
-  const expiryStatus = getExpiryStatus(contractEndDate);
-
-  let color = 'default';
-  let displayStatus = status;
-  let icon = null;
-
-  switch (status) {
-    case 'occupied':
-      color = 'success';
-      displayStatus = 'Occupied';
-      break;
-    case 'vacant':
-      color = 'primary';
-      displayStatus = 'Vacant';
-      break;
-    case 'contract_sent':
-      color = 'warning';
-      displayStatus = 'Contract Sent';
-      break;
-    default:
-      displayStatus = status || 'Unknown';
-  }
-
-  if (status === 'occupied') {
-    if (expiryStatus.status === 'expired') {
-      color = 'error';
-      displayStatus = 'Expired';
-    } else if (expiryStatus.status === 'expiring_soon') {
-      color = 'warning';
-      displayStatus = `Expires in ${expiryStatus.daysUntilExpiry} days`;
-    }
-  }
+  const { color, icon, displayStatus } = getStatusConfig(status, expiryStatus);
 
   return (
     <Box
-      component="span"
       sx={{
         display: 'inline-flex',
         alignItems: 'center',
-        px: 1,
-        py: 0.5,
-        borderRadius: 1,
-        fontSize: '0.75rem',
-        fontWeight: 500,
+        gap: 1,
+        px: 2,
+        py: 1,
+        borderRadius: 2,
+        fontSize: '0.875rem',
+        fontWeight: 600,
         bgcolor: color === 'error' ? 'error.main' :
                 color === 'warning' ? 'warning.main' :
                 color === 'success' ? 'success.main' :
@@ -91,6 +76,7 @@ const getStatusChip = (status, contractEndDate) => {
         color: color === 'default' ? 'text.primary' : 'white'
       }}
     >
+      {icon}
       {displayStatus}
     </Box>
   );
@@ -128,21 +114,48 @@ function ApartmentDetailsDialog({
   onGenerateContract,
   onExtendContract,
   onOpenContractManagement,
+  onGoToTenant,
   isAdmin
 }) {
   if (!apartment) return null;
 
-  const formatTenantNames = (tenants) => {
-    if (!tenants || !Array.isArray(tenants) || tenants.length === 0) {
-      return 'No tenants assigned';
+  // Get current tenants (handle both old and new data structures)
+  const getCurrentTenants = () => {
+    // Try to get tenants from current contract first
+    if (apartment.current_contract?.tenants) {
+      return apartment.current_contract.tenants.map(ct => ct.tenant).filter(Boolean);
     }
 
-    return tenants.map(tenant => {
-      if (tenant.firstName && tenant.lastName) {
-        return `${tenant.firstName} ${tenant.lastName}`;
-      }
-      return tenant.name || 'Unnamed Tenant';
-    }).join(', ');
+    // Fallback to legacy tenants array
+    if (apartment.tenants && Array.isArray(apartment.tenants)) {
+      return apartment.tenants;
+    }
+
+    return [];
+  };
+
+  const tenants = getCurrentTenants();
+
+  // Get tenant display name
+  const getTenantDisplayName = (tenant) => {
+    if (tenant.firstName && tenant.lastName) {
+      return `${tenant.firstName} ${tenant.lastName}`;
+    }
+    return tenant.name || 'Unnamed Tenant';
+  };
+
+  // Get tenant initials for avatar
+  const getTenantInitials = (tenant) => {
+    const name = getTenantDisplayName(tenant);
+    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+  };
+
+  // Handle tenant click
+  const handleTenantClick = (tenant) => {
+    if (onGoToTenant) {
+      onClose(); // Close the dialog first
+      onGoToTenant(tenant.id);
+    }
   };
 
   const getLandlordInfo = (apartment) => {
@@ -170,56 +183,51 @@ function ApartmentDetailsDialog({
       maxWidth="md"
       fullWidth
       PaperProps={{
-        sx: {
-          borderRadius: 2,
-          overflow: 'hidden'
-        }
+        sx: { borderRadius: 2, maxHeight: '90vh' }
       }}
     >
       <DialogTitle
         sx={{
-          p: 3,
-          bgcolor: 'primary.main',
-          color: 'primary.contrastText',
           display: 'flex',
+          justifyContent: 'space-between',
           alignItems: 'center',
-          justifyContent: 'space-between'
+          pb: 1
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <LocationOnIcon />
-          <Typography variant="h6" sx={{ fontWeight: 600 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <HomeIcon color="primary" />
+          <Typography variant="h6" component="span">
             {apartment.address}
           </Typography>
         </Box>
-        <IconButton
-          edge="end"
-          color="inherit"
-          onClick={onClose}
-          aria-label="close"
-          size="small"
-        >
+        <IconButton onClick={onClose} size="small">
           <CloseIcon />
         </IconButton>
       </DialogTitle>
 
-      <DialogContent dividers sx={{ p: 0 }}>
-        <Box
-          sx={{
-            p: 2,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            bgcolor: 'background.default',
-            borderBottom: '1px solid',
-            borderColor: 'divider'
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Typography variant="body2" color="text.secondary">
-              Status:
-            </Typography>
-            {getStatusChip(apartment.status, apartment.contractEndDate)}
+      <DialogContent sx={{ p: 0 }}>
+        {/* Status and Quick Actions */}
+        <Box sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          p: 3,
+          bgcolor: 'grey.50',
+          borderBottom: '1px solid',
+          borderColor: 'divider'
+        }}>
+          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+            <StatusChip status={apartment.status} expiryStatus={apartment.expiryStatus} />
+            {apartment.expiryStatus && (
+              <Chip
+                label={apartment.expiryStatus.daysRemaining >= 0
+                  ? `${apartment.expiryStatus.daysRemaining} days left`
+                  : `Expired ${Math.abs(apartment.expiryStatus.daysRemaining)} days ago`
+                }
+                color={apartment.expiryStatus.status === 'expired' ? 'error' : 'warning'}
+                size="small"
+              />
+            )}
           </Box>
           <Box sx={{ display: 'flex', gap: 2 }}>
             {isAdmin && (
@@ -278,16 +286,6 @@ function ApartmentDetailsDialog({
                 <Grid item xs={12} sm={6} md={3}>
                   <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                     <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                      Property Size
-                    </Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {apartment.size} m²
-                    </Typography>
-                  </Box>
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
                       Rooms
                     </Typography>
                     <Typography variant="body2" fontWeight={500}>
@@ -295,14 +293,24 @@ function ApartmentDetailsDialog({
                     </Typography>
                   </Box>
                 </Grid>
-                {isAdmin && apartment.model && (
+                <Grid item xs={12} sm={6} md={3}>
+                  <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                      Size (m²)
+                    </Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {apartment.size}
+                    </Typography>
+                  </Box>
+                </Grid>
+                {apartment.model && (
                   <Grid item xs={12} sm={6} md={3}>
                     <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                       <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                        Property Model
+                        Model
                       </Typography>
                       <Typography variant="body2" fontWeight={500}>
-                        {apartment.model === 'management'
+                        {apartment.model === 'pm'
                           ? 'Property Management'
                           : apartment.model === 'rental'
                             ? 'Rental Property'
@@ -364,73 +372,157 @@ function ApartmentDetailsDialog({
                       ? 'error.50'
                       : apartment.expiryStatus?.status === 'expiring_soon'
                         ? 'warning.50'
-                        : 'inherit'
+                        : 'background.paper'
                   }}>
                     <Typography variant="caption" color="text.secondary" gutterBottom display="block">
                       Contract End Date
                     </Typography>
-                    <Typography
-                      variant="body2"
-                      fontWeight={500}
-                      sx={{
-                        color: apartment.expiryStatus?.status === 'expired'
-                          ? 'error.main'
-                          : apartment.expiryStatus?.status === 'expiring_soon'
-                            ? 'warning.main'
-                            : 'inherit'
-                      }}
-                    >
+                    <Typography variant="body2" fontWeight={500}>
                       {formatDate(apartment.contractEndDate)}
-                      {apartment.expiryStatus?.status === 'expired' && (
-                        <Typography variant="caption" display="block" color="error.main">
-                          Expired {Math.abs(apartment.expiryStatus.daysUntilExpiry)} days ago
-                        </Typography>
-                      )}
-                      {apartment.expiryStatus?.status === 'expiring_soon' && (
-                        <Typography variant="caption" display="block" color="warning.main">
-                          Expires in {apartment.expiryStatus.daysUntilExpiry} days
-                        </Typography>
-                      )}
                     </Typography>
                   </Box>
                 </Grid>
               </Grid>
             </Grid>
 
-            {/* Tenant Information */}
-            {apartment.tenants && apartment.tenants.length > 0 && (
-              <Grid item xs={12} sx={{ mt: 2 }}>
-                <Typography
-                  variant="subtitle1"
-                  sx={{
-                    fontWeight: 600,
-                    mb: 2,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1
-                  }}
-                >
-                  <PersonIcon color="primary" fontSize="small" />
-                  Tenant Information
-                </Typography>
+            {/* Current Tenants Section */}
+            <Grid item xs={12}>
+              <Typography
+                variant="subtitle1"
+                sx={{
+                  fontWeight: 600,
+                  mb: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1
+                }}
+              >
+                <PersonIcon color="primary" fontSize="small" />
+                Current Tenants ({tenants.length})
+              </Typography>
+
+              {tenants.length === 0 ? (
+                <Box sx={{
+                  p: 3,
+                  textAlign: 'center',
+                  border: '1px dashed',
+                  borderColor: 'divider',
+                  borderRadius: 1,
+                  bgcolor: 'grey.50'
+                }}>
+                  <Typography variant="body2" color="text.secondary">
+                    No tenants currently assigned to this property
+                  </Typography>
+                </Box>
+              ) : (
                 <Grid container spacing={2}>
-                  <Grid item xs={12}>
-                    <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                      <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                        Tenants
-                      </Typography>
-                      <Typography variant="body2" fontWeight={500}>
-                        {formatTenantNames(apartment.tenants)}
-                      </Typography>
-                    </Box>
-                  </Grid>
+                  {tenants.map((tenant, index) => (
+                    <Grid item xs={12} sm={6} key={tenant.id || index}>
+                      <Card
+                        variant="outlined"
+                        sx={{
+                          cursor: onGoToTenant ? 'pointer' : 'default',
+                          transition: 'all 0.2s ease',
+                          '&:hover': onGoToTenant ? {
+                            boxShadow: 2,
+                            borderColor: 'primary.main',
+                            transform: 'translateY(-2px)'
+                          } : {}
+                        }}
+                        onClick={() => handleTenantClick(tenant)}
+                      >
+                        <CardContent sx={{ p: 2 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, mb: 2 }}>
+                            <Avatar
+                              sx={{
+                                bgcolor: 'primary.main',
+                                width: 48,
+                                height: 48,
+                                fontSize: '1.1rem'
+                              }}
+                            >
+                              {getTenantInitials(tenant)}
+                            </Avatar>
+                            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                                <Typography variant="subtitle1" fontWeight={600} sx={{ wordBreak: 'break-word' }}>
+                                  {getTenantDisplayName(tenant)}
+                                </Typography>
+                                {onGoToTenant && (
+                                  <Tooltip title="View tenant details">
+                                    <IconButton size="small" color="primary">
+                                      <ViewIcon fontSize="small" />
+                                    </IconButton>
+                                  </Tooltip>
+                                )}
+                              </Box>
+                              {tenant.isPrimary && (
+                                <Chip
+                                  label="Primary Tenant"
+                                  size="small"
+                                  color="primary"
+                                  variant="outlined"
+                                  sx={{ mb: 1 }}
+                                />
+                              )}
+                            </Box>
+                          </Box>
+
+                          <Divider sx={{ my: 1 }} />
+
+                          <Stack spacing={1}>
+                            {tenant.email && (
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <EmailIcon fontSize="small" color="action" />
+                                <Typography variant="body2" sx={{ wordBreak: 'break-all' }}>
+                                  {tenant.email}
+                                </Typography>
+                              </Box>
+                            )}
+                            {tenant.phone && (
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <PhoneIcon fontSize="small" color="action" />
+                                <Typography variant="body2">
+                                  {tenant.phone}
+                                </Typography>
+                              </Box>
+                            )}
+                            {tenant.bornOn && (
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <BirthdayIcon fontSize="small" color="action" />
+                                <Typography variant="body2">
+                                  Born: {formatDate(tenant.bornOn)}
+                                </Typography>
+                              </Box>
+                            )}
+                            {tenant.refundIban && (
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                <IbanIcon fontSize="small" color="action" />
+                                <Typography variant="body2" sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                                  {tenant.refundIban}
+                                </Typography>
+                              </Box>
+                            )}
+                          </Stack>
+
+                          {onGoToTenant && (
+                            <Box sx={{ mt: 2, pt: 1, borderTop: '1px solid', borderColor: 'divider' }}>
+                              <Typography variant="caption" color="primary.main">
+                                Click to view full tenant details →
+                              </Typography>
+                            </Box>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  ))}
                 </Grid>
-              </Grid>
-            )}
+              )}
+            </Grid>
 
             {/* Landlord Information */}
-            {isAdmin && (
-              <Grid item xs={12} sx={{ mt: 2 }}>
+            {(landlordInfo.name !== 'Not specified' || landlordInfo.email || landlordInfo.phone) && (
+              <Grid item xs={12}>
                 <Typography
                   variant="subtitle1"
                   sx={{
@@ -451,7 +543,7 @@ function ApartmentDetailsDialog({
                         Name
                       </Typography>
                       <Typography variant="body2" fontWeight={500}>
-                        {landlordInfo.name}
+                        {landlordInfo.name || 'Not provided'}
                       </Typography>
                     </Box>
                   </Grid>
@@ -476,6 +568,20 @@ function ApartmentDetailsDialog({
                     </Box>
                   </Grid>
                 </Grid>
+              </Grid>
+            )}
+
+            {/* Additional Notes */}
+            {apartment.notes && (
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom>
+                  Notes
+                </Typography>
+                <Box sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 1, border: '1px solid', borderColor: 'divider' }}>
+                  <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                    {apartment.notes}
+                  </Typography>
+                </Box>
               </Grid>
             )}
           </Grid>

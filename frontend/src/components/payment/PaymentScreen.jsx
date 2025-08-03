@@ -1,4 +1,4 @@
-// Updated PaymentScreen.jsx with Contract Management
+// Fixed PaymentScreen.jsx with Contract Management and History
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import {
@@ -36,7 +36,9 @@ import {
   Tabs,
   Tab,
   Divider,
-  Tooltip
+  Tooltip,
+  Badge,
+  LinearProgress
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -48,7 +50,10 @@ import {
   Person as PersonIcon,
   History as HistoryIcon,
   Business as BusinessIcon,
-  Event as EventIcon
+  Event as EventIcon,
+  Schedule as ScheduleIcon,
+  CheckCircle as CheckCircleIcon,
+  Error as ErrorIcon
 } from '@mui/icons-material';
 import api from '../../utils/api';
 import ContractManagementDialog from '../contract/ContractManagementDialog';
@@ -77,16 +82,17 @@ function PaymentScreen({ showNotification }) {
 
   // State management
   const [selectedApartment, setSelectedApartment] = useState(apartmentId || '');
-  const [apartments, setApartments] = useState([]);
+  const [apartments, setApartments] = useState([]); // Initialize as empty array
   const [apartmentDetails, setApartmentDetails] = useState(null);
   const [payments, setPayments] = useState([]);
   const [contracts, setContracts] = useState([]);
-  const [selectedContract, setSelectedContract] = useState('current');
+  const [selectedContract, setSelectedContract] = useState('current'); // Default to current
   const [loading, setLoading] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [contractDialogOpen, setContractDialogOpen] = useState(false);
   const [editingPayment, setEditingPayment] = useState(null);
   const [paymentMode, setPaymentMode] = useState(1); // Default to individual mode
+  const [contractsStats, setContractsStats] = useState({});
 
   // Form state for individual payment
   const [individualPaymentForm, setIndividualPaymentForm] = useState({
@@ -135,9 +141,11 @@ function PaymentScreen({ showNotification }) {
     try {
       setLoading(true);
       const response = await api.get('/list');
-      setApartments(response.data || []);
+      const apartmentsData = response.data?.apartments || response.data || [];
+      setApartments(Array.isArray(apartmentsData) ? apartmentsData : []);
     } catch (error) {
       console.error('Error fetching apartments:', error);
+      setApartments([]); // Ensure it's always an array
       showNotification?.('Error fetching apartments', 'error');
     } finally {
       setLoading(false);
@@ -152,16 +160,43 @@ function PaymentScreen({ showNotification }) {
       const contractsData = response.data || [];
       setContracts(contractsData);
 
-      // Auto-select current contract if available
+      // Calculate stats for each contract
+      const stats = {};
+      for (const contract of contractsData) {
+        try {
+          const paymentsResponse = await api.get(`/contracts/${contract.id}/payments`);
+          const contractPayments = paymentsResponse.data?.payments || [];
+          const totalPaid = contractPayments.reduce((sum, p) => sum + (parseFloat(p.amountPaid) || 0), 0);
+
+          stats[contract.id] = {
+            totalPaid,
+            paymentsCount: contractPayments.length,
+            lastPayment: contractPayments.length > 0 ? contractPayments[contractPayments.length - 1] : null
+          };
+        } catch (error) {
+          console.error(`Error loading stats for contract ${contract.id}:`, error);
+          stats[contract.id] = { totalPaid: 0, paymentsCount: 0, lastPayment: null };
+        }
+      }
+      setContractsStats(stats);
+
+      // Auto-select current contract if available, otherwise keep 'current'
       const currentContract = contractsData.find(c => c.is_current);
       if (currentContract) {
         setSelectedContract(currentContract.id.toString());
-      } else if (contractsData.length > 0) {
-        setSelectedContract(contractsData[0].id.toString());
+      } else {
+        // If no current contract, select the most recent one or keep 'current'
+        if (contractsData.length > 0) {
+          const mostRecent = contractsData.sort((a, b) =>
+            new Date(b.start_date) - new Date(a.start_date)
+          )[0];
+          setSelectedContract(mostRecent.id.toString());
+        }
       }
     } catch (error) {
       console.error('Error loading contracts:', error);
       setContracts([]);
+      setContractsStats({});
     }
   };
 
@@ -272,8 +307,11 @@ function PaymentScreen({ showNotification }) {
   };
 
   const getCurrentContractData = () => {
-    if (selectedContract === 'current' || selectedContract === 'all') {
+    if (selectedContract === 'current') {
       return contracts.find(c => c.is_current);
+    }
+    if (selectedContract === 'all') {
+      return null; // No specific contract when viewing all
     }
     return contracts.find(c => c.id.toString() === selectedContract);
   };
@@ -281,9 +319,11 @@ function PaymentScreen({ showNotification }) {
   const getContractInfo = () => {
     const targetContract = getCurrentContractData();
     if (!targetContract) {
+      // For 'all' view or no contract, calculate totals across all payments
+      const totalPaid = payments.reduce((sum, p) => sum + (parseFloat(p.amountPaid) || 0), 0);
       return {
         totalDue: 0,
-        totalPaid: 0,
+        totalPaid,
         remaining: 0,
         monthsTotal: 0,
         isActive: false,
@@ -430,6 +470,7 @@ function PaymentScreen({ showNotification }) {
         setDialogOpen(false);
         setEditingPayment(null);
         await loadPaymentHistory();
+        await loadContracts(); // Refresh stats
       } catch (error) {
         console.error('Error saving individual payment:', error);
         const errorMessage = error.response?.data?.message || 'Error saving payment';
@@ -483,6 +524,7 @@ function PaymentScreen({ showNotification }) {
         setDialogOpen(false);
         setEditingPayment(null);
         await loadPaymentHistory();
+        await loadContracts(); // Refresh stats
 
       } catch (error) {
         console.error('Error saving batch payment:', error);
@@ -502,6 +544,7 @@ function PaymentScreen({ showNotification }) {
       await api.delete(`/payment/${paymentId}`);
       showNotification?.('Payment deleted successfully', 'success');
       await loadPaymentHistory();
+      await loadContracts(); // Refresh stats
     } catch (error) {
       console.error('Error deleting payment:', error);
       showNotification?.('Error deleting payment', 'error');
@@ -527,6 +570,26 @@ function PaymentScreen({ showNotification }) {
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString();
+  };
+
+  const getContractStatusColor = (contract) => {
+    if (contract.is_current) return 'success';
+    const now = new Date();
+    const endDate = contract.end_date ? new Date(contract.end_date) : null;
+    if (endDate && now > endDate) return 'default';
+    return 'info';
+  };
+
+  const getContractProgress = (contract) => {
+    if (!contract.end_date) return 100;
+    const start = new Date(contract.start_date);
+    const end = new Date(contract.end_date);
+    const now = new Date();
+
+    const total = end - start;
+    const elapsed = now - start;
+
+    return Math.min(100, Math.max(0, (elapsed / total) * 100));
   };
 
   // Get contract info for display
@@ -585,24 +648,62 @@ function PaymentScreen({ showNotification }) {
                     label="Contract Period"
                     onChange={(e) => setSelectedContract(e.target.value)}
                   >
-                    <MenuItem value="current">Current Contract</MenuItem>
-                    <MenuItem value="all">All Contracts</MenuItem>
+                    <MenuItem value="current">
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <CheckCircleIcon fontSize="small" color="success" />
+                        Current Contract
+                      </Box>
+                    </MenuItem>
+                    <MenuItem value="all">
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <HistoryIcon fontSize="small" />
+                        All Payments
+                      </Box>
+                    </MenuItem>
                     <Divider />
-                    {contracts.map((contract) => (
-                      <MenuItem key={contract.id} value={contract.id.toString()}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
-                          <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                            {contract.contract_number}
-                          </Typography>
-                          {contract.is_current && (
-                            <Chip label="CURRENT" size="small" color="success" />
-                          )}
-                          <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
-                            {formatDate(contract.start_date)} - {formatDate(contract.end_date) || 'Ongoing'}
-                          </Typography>
-                        </Box>
-                      </MenuItem>
-                    ))}
+                    {contracts.map((contract) => {
+                      const stats = contractsStats[contract.id] || {};
+                      const progress = getContractProgress(contract);
+                      return (
+                        <MenuItem key={contract.id} value={contract.id.toString()}>
+                          <Box sx={{ width: '100%' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                {contract.contract_number}
+                              </Typography>
+                              <Chip
+                                label={contract.is_current ? 'CURRENT' : contract.end_date && new Date(contract.end_date) < new Date() ? 'ENDED' : 'ACTIVE'}
+                                size="small"
+                                color={getContractStatusColor(contract)}
+                              />
+                              <Badge
+                                badgeContent={stats.paymentsCount || 0}
+                                color="primary"
+                                sx={{ ml: 'auto' }}
+                              >
+                                <PaymentIcon fontSize="small" />
+                              </Badge>
+                            </Box>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                              <Typography variant="caption" color="text.secondary">
+                                {formatDate(contract.start_date)} - {formatDate(contract.end_date) || 'Ongoing'}
+                              </Typography>
+                              <Typography variant="caption" color="primary" sx={{ ml: 'auto' }}>
+                                {formatCurrency(stats.totalPaid || 0)}
+                              </Typography>
+                            </Box>
+                            {contract.end_date && (
+                              <LinearProgress
+                                variant="determinate"
+                                value={progress}
+                                sx={{ height: 2, borderRadius: 1 }}
+                                color={progress >= 100 ? 'success' : 'primary'}
+                              />
+                            )}
+                          </Box>
+                        </MenuItem>
+                      );
+                    })}
                   </Select>
                 </FormControl>
               </Grid>
@@ -624,6 +725,7 @@ function PaymentScreen({ showNotification }) {
                     startIcon={<AddIcon />}
                     onClick={handleAddPayment}
                     size="medium"
+                    disabled={selectedContract === 'all'}
                   >
                     Add Payment
                   </Button>
@@ -658,10 +760,10 @@ function PaymentScreen({ showNotification }) {
                   </Stack>
 
                   {/* Contract Details */}
-                  {currentContract && (
+                  {currentContract && selectedContract !== 'all' && (
                     <Box sx={{ bgcolor: 'grey.50', p: 2, borderRadius: 1, mb: 2 }}>
                       <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 600 }}>
-                        Current Contract: {currentContract.contract_number}
+                        {selectedContract === 'current' ? 'Current Contract' : 'Selected Contract'}: {currentContract.contract_number}
                       </Typography>
                       <Grid container spacing={2}>
                         <Grid item xs={12} sm={6}>
@@ -694,23 +796,35 @@ function PaymentScreen({ showNotification }) {
                   <Box sx={{ textAlign: { xs: 'left', md: 'right' } }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: { xs: 'flex-start', md: 'flex-end' }, gap: 1, mb: 1 }}>
                       <Typography variant="body2" color="text.secondary">
-                        Contract Progress
+                        {selectedContract === 'all' ? 'Total Progress' : 'Contract Progress'}
                       </Typography>
                       <Chip
-                        label={contractInfo.isExpired ? 'Expired' : contractInfo.isActive ? 'Active' : 'Inactive'}
-                        color={contractInfo.isExpired ? 'error' : contractInfo.isActive ? 'success' : 'default'}
+                        label={
+                          selectedContract === 'all' ? 'All Contracts' :
+                          contractInfo.isExpired ? 'Expired' :
+                          contractInfo.isActive ? 'Active' : 'Inactive'
+                        }
+                        color={
+                          selectedContract === 'all' ? 'info' :
+                          contractInfo.isExpired ? 'error' :
+                          contractInfo.isActive ? 'success' : 'default'
+                        }
                         size="small"
                       />
                     </Box>
                     <Typography variant="h6" color="primary" sx={{ fontWeight: 600 }}>
-                      {formatCurrency(contractInfo.totalPaid)} / {formatCurrency(contractInfo.totalDue)}
+                      {formatCurrency(contractInfo.totalPaid)} {contractInfo.totalDue > 0 && `/ ${formatCurrency(contractInfo.totalDue)}`}
                     </Typography>
-                    <Typography variant="body2" color="error.main" sx={{ fontWeight: 500 }}>
-                      Remaining: {formatCurrency(contractInfo.remaining)}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" display="block">
-                      {contractInfo.monthsTotal} months total
-                    </Typography>
+                    {contractInfo.remaining > 0 && (
+                      <Typography variant="body2" color="error.main" sx={{ fontWeight: 500 }}>
+                        Remaining: {formatCurrency(contractInfo.remaining)}
+                      </Typography>
+                    )}
+                    {contractInfo.monthsTotal > 0 && (
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        {contractInfo.monthsTotal} months total
+                      </Typography>
+                    )}
                   </Box>
                 </Grid>
               </Grid>
@@ -733,9 +847,17 @@ function PaymentScreen({ showNotification }) {
                   <ReceiptIcon sx={{ mr: 1 }} />
                   <Typography variant="h6">
                     Payment History
-                    {currentContract && selectedContract !== 'all' && (
+                    {selectedContract === 'all' ? (
                       <Typography variant="caption" color="text.secondary" display="block">
-                        Contract: {currentContract.contract_number}
+                        All Contracts ({payments.length} payments)
+                      </Typography>
+                    ) : currentContract ? (
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        Contract: {currentContract.contract_number} ({payments.length} payments)
+                      </Typography>
+                    ) : (
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        Current Contract ({payments.length} payments)
                       </Typography>
                     )}
                   </Typography>
@@ -767,6 +889,12 @@ function PaymentScreen({ showNotification }) {
                             color={contractInfo.isExpired ? 'error' : contractInfo.isActive ? 'success' : 'default'}
                             size="small"
                           />
+                          <Chip
+                            label={`${payments.length} payments`}
+                            variant="outlined"
+                            size="small"
+                            icon={<PaymentIcon />}
+                          />
                         </Stack>
                       </Grid>
                       <Grid item xs={12} md={4}>
@@ -780,8 +908,67 @@ function PaymentScreen({ showNotification }) {
                           <Typography variant="body2" color="error.main" sx={{ fontWeight: 500 }}>
                             Remaining: {formatCurrency(contractInfo.remaining)}
                           </Typography>
+                          {contractInfo.contract.end_date && (
+                            <Box sx={{ mt: 1 }}>
+                              <LinearProgress
+                                variant="determinate"
+                                value={Math.min(100, (contractInfo.totalPaid / contractInfo.totalDue) * 100)}
+                                sx={{ height: 6, borderRadius: 3 }}
+                                color={contractInfo.totalPaid >= contractInfo.totalDue ? 'success' : 'primary'}
+                              />
+                              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                                {Math.round((contractInfo.totalPaid / contractInfo.totalDue) * 100)}% collected
+                              </Typography>
+                            </Box>
+                          )}
                         </Box>
                       </Grid>
+                    </Grid>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* All Contracts Overview for 'all' view */}
+              {selectedContract === 'all' && contracts.length > 1 && (
+                <Card sx={{ mb: 3, bgcolor: 'grey.50' }}>
+                  <CardContent sx={{ py: 2 }}>
+                    <Typography variant="subtitle2" gutterBottom>
+                      All Contracts Overview
+                    </Typography>
+                    <Grid container spacing={2}>
+                      {contracts.map((contract) => {
+                        const stats = contractsStats[contract.id] || {};
+                        const contractPayments = payments.filter(p => p.contract_period_id === contract.id);
+                        return (
+                          <Grid item xs={12} sm={6} md={4} key={contract.id}>
+                            <Card variant="outlined" sx={{ p: 2 }}>
+                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
+                                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                  {contract.contract_number}
+                                </Typography>
+                                <Chip
+                                  label={contract.is_current ? 'CURRENT' : 'PAST'}
+                                  size="small"
+                                  color={contract.is_current ? 'success' : 'default'}
+                                />
+                              </Box>
+                              <Typography variant="caption" color="text.secondary" display="block">
+                                {formatDate(contract.start_date)} - {formatDate(contract.end_date) || 'Ongoing'}
+                              </Typography>
+                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 1 }}>
+                                <Typography variant="body2" color="primary" sx={{ fontWeight: 500 }}>
+                                  {formatCurrency(stats.totalPaid || 0)}
+                                </Typography>
+                                <Chip
+                                  label={`${contractPayments.length} payments`}
+                                  size="small"
+                                  variant="outlined"
+                                />
+                              </Box>
+                            </Card>
+                          </Grid>
+                        );
+                      })}
                     </Grid>
                   </CardContent>
                 </Card>
@@ -791,16 +978,18 @@ function PaymentScreen({ showNotification }) {
               {filteredPayments.length === 0 ? (
                 <Box sx={{ textAlign: 'center', py: 6 }}>
                   <Typography variant="h6" color="text.secondary">
-                    No payments recorded
+                    {selectedContract === 'all' ? 'No payments recorded across all contracts' : 'No payments recorded for this contract'}
                   </Typography>
-                  <Button
-                    variant="outlined"
-                    startIcon={<AddIcon />}
-                    onClick={handleAddPayment}
-                    sx={{ mt: 2 }}
-                  >
-                    Add First Payment
-                  </Button>
+                  {selectedContract !== 'all' && (
+                    <Button
+                      variant="outlined"
+                      startIcon={<AddIcon />}
+                      onClick={handleAddPayment}
+                      sx={{ mt: 2 }}
+                    >
+                      Add First Payment
+                    </Button>
+                  )}
                 </Box>
               ) : (
                 <TableContainer>
@@ -820,7 +1009,9 @@ function PaymentScreen({ showNotification }) {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {filteredPayments.map((payment) => (
+                      {filteredPayments
+                        .sort((a, b) => new Date(b.paymentDate || 0) - new Date(a.paymentDate || 0)) // Sort by date descending
+                        .map((payment) => (
                         <TableRow key={payment.id} hover>
                           <TableCell>{formatDate(payment.paymentDate)}</TableCell>
                           <TableCell>{payment.month} {payment.year}</TableCell>
@@ -880,6 +1071,7 @@ function PaymentScreen({ showNotification }) {
                             <IconButton
                               size="small"
                               onClick={() => handleEditPayment(payment)}
+                              disabled={selectedContract === 'all'}
                             >
                               <EditIcon />
                             </IconButton>
@@ -887,6 +1079,7 @@ function PaymentScreen({ showNotification }) {
                               size="small"
                               onClick={() => handleDeletePayment(payment.id)}
                               color="error"
+                              disabled={selectedContract === 'all'}
                             >
                               <DeleteIcon />
                             </IconButton>
@@ -921,7 +1114,7 @@ function PaymentScreen({ showNotification }) {
           </Box>
 
           {/* Contract Selection for Payment */}
-          {contracts.length > 0 && (
+          {contracts.length > 0 && currentContract && (
             <Grid container spacing={3} sx={{ mb: 3 }}>
               <Grid item xs={12}>
                 <Alert severity="info">
@@ -1129,7 +1322,17 @@ function PaymentScreen({ showNotification }) {
                 </FormControl>
               </Grid>
               <Grid item xs={12} md={6}>
-                <Grid container spacing={2}>
+                <TextField
+                  fullWidth
+                  label="Payment Date"
+                  type="date"
+                  value={paymentForm.paymentDate}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Grid container spacing={1}>
                   <Grid item xs={8}>
                     <FormControl fullWidth>
                       <InputLabel>Month</InputLabel>

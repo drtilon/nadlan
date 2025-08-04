@@ -1,14 +1,9 @@
-version: '3.8'
-
 services:
   mysql:
     image: mysql:8.0
-    container_name: mysql_db
     restart: always
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
+    ports: ["3306:3306"]
+    volumes: [mysql_data:/var/lib/mysql]
     environment:
       MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: mydatabase
@@ -19,47 +14,49 @@ services:
       interval: 10s
       retries: 5
       start_period: 20s
-    networks:
-      - app_network
+    networks: [app_network]
+
+  nginx:
+    image: nginx:latest
+    restart: always
+    ports: ["80:80", "443:443"]  # Expose both HTTP and HTTPS
+    volumes:
+      - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro  # Mount SSL certificates
+      # Remove default config that interferes
+      - /dev/null:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+      - frontend
+    networks: [app_network]
 
   backend:
     build: ./backend
-    container_name: flask_backend
-    ports:
-      - "5001:5001"
-    volumes:
-      - ./backend:/app
+    ports: ["5001:5001"]
+    volumes: ["./backend:/app"]
     depends_on:
       mysql:
         condition: service_healthy
     environment:
-      - FLASK_ENV=development
-      - DB_USER=myuser
-      - DB_PASSWORD=mypassword
-      - DB_HOST=mysql
-      - DB_NAME=mydatabase
-      - SECRET_KEY=mysecret
-      - CORS_ALLOWED_ORIGINS=http://localhost:3001,http://207.154.221.54:3001,http://frontend:3001
-    networks:
-      - app_network
+      FLASK_ENV: production
+      DB_USER: myuser
+      DB_PASSWORD: mypassword
+      DB_HOST: mysql
+      DB_NAME: mydatabase
+      SECRET_KEY: mysecret
+    networks: [app_network]
 
   frontend:
-    build: ./frontend
-    container_name: vite_frontend
-    ports:
-      - "3001:3001"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    environment:
-      - CHOKIDAR_USEPOLLING=true
-    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3001"]
-    networks:
-      - app_network
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile       # static build
+    ports: ["3001:80"]             # host 3001 → container 80
+    networks: [app_network]
+
+volumes:
+  mysql_data:
+  frontend_node_modules:
 
 networks:
   app_network:
     driver: bridge
-
-volumes:
-  mysql_data:

@@ -1,4 +1,4 @@
-// components/AdminPanel.jsx
+// Updated components/AdminPanel.jsx with password change functionality
 import React, { useEffect, useState } from 'react';
 import {
   Container,
@@ -46,10 +46,12 @@ import {
   AdminPanelSettings as AdminIcon,
   Person as UserIcon,
   PersonAdd as PendingIcon,
-  FilterList as FilterIcon
+  FilterList as FilterIcon,
+  Lock as LockIcon
 } from '@mui/icons-material';
 import api from '../utils/api';
-
+import PasswordChangeDialog from './PasswordChangeDialog';
+// TODO do thsi or handleTabChange
 function AdminPanel({ showNotification }) {
   const [users, setUsers] = useState([]);
   const [filteredUsers, setFilteredUsers] = useState([]);
@@ -66,6 +68,9 @@ function AdminPanel({ showNotification }) {
     admins: 0,
     pendingApproval: 0,
   });
+  // Password change state
+  const [passwordChangeOpen, setPasswordChangeOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState(null);
 
   // Fetch all users from the backend
   const fetchUsers = async () => {
@@ -92,10 +97,9 @@ function AdminPanel({ showNotification }) {
       });
       setRoleUpdates(initialRoles);
 
-      // Set filtered users initially to all users
       setFilteredUsers(response.data);
     } catch (error) {
-      console.error(error);
+      console.error('Fetch users error:', error);
       showNotification('Error fetching users', 'error');
     } finally {
       setLoading(false);
@@ -110,7 +114,6 @@ function AdminPanel({ showNotification }) {
   useEffect(() => {
     let result = [...users];
 
-    // Apply search filter
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
       result = result.filter(
@@ -119,38 +122,34 @@ function AdminPanel({ showNotification }) {
       );
     }
 
-    // Apply tab filter
-    if (currentTab === 1) { // Pending Approval
+    if (currentTab === 1) {
       result = result.filter(user => !user.is_approved);
-    } else if (currentTab === 2) { // Admins
+    } else if (currentTab === 2) {
       result = result.filter(user => user.role === 'admin');
-    } else if (currentTab === 3) { // Users
+    } else if (currentTab === 3) {
       result = result.filter(user => user.role === 'user');
     }
 
     setFilteredUsers(result);
   }, [users, searchQuery, currentTab]);
 
-  // Approve a user (for pending users)
+  // Approve a user
   const handleApprove = async (userId) => {
     setApprovingUserId(userId);
     try {
       await api.put(`/adminPanel/approve_user/${userId}`);
       showNotification('User approved successfully', 'success');
-      // Update the local state for the approved user
       setUsers((prevUsers) =>
         prevUsers.map((user) =>
           user.id === userId ? { ...user, is_approved: true } : user
         )
       );
-
-      // Update stats
       setStats(prev => ({
         ...prev,
         pendingApproval: prev.pendingApproval - 1
       }));
     } catch (error) {
-      console.error(error);
+      console.error('Approve error:', error);
       showNotification('Error approving user', 'error');
     } finally {
       setApprovingUserId(null);
@@ -165,23 +164,29 @@ function AdminPanel({ showNotification }) {
   // Delete a user after confirmation
   const handleDelete = async () => {
     const userId = confirmDelete;
-    setDeletingUserId(userId);
-    try {
-      await api.delete(`/auth/users/${userId}`);
-      showNotification('User deleted successfully', 'success');
-      const deletedUser = users.find(user => user.id === userId);
+    if (!userId) {
+      showNotification('No user selected for deletion', 'error');
+      setConfirmDelete(null);
+      return;
+    }
 
+    setDeletingUserId(userId);
+
+    try {
+      await api.delete(`/adminPanel/users/${userId}`);
+      showNotification('User deleted successfully', 'success');
+
+      const deletedUser = users.find(user => user.id === userId);
       setUsers((prev) => prev.filter((user) => user.id !== userId));
 
-      // Update stats
       setStats(prev => ({
         total: prev.total - 1,
         admins: deletedUser?.role === 'admin' ? prev.admins - 1 : prev.admins,
         pendingApproval: !deletedUser?.is_approved ? prev.pendingApproval - 1 : prev.pendingApproval
       }));
     } catch (error) {
-      console.error(error);
-      showNotification('Error deleting user', 'error');
+      console.error('Delete error:', error);
+      showNotification(`Error deleting user: ${error.response?.data?.message || error.message}`, 'error');
     } finally {
       setDeletingUserId(null);
       setConfirmDelete(null);
@@ -204,18 +209,13 @@ function AdminPanel({ showNotification }) {
     try {
       const newRole = roleUpdates[userId];
       const oldRole = users.find(user => user.id === userId)?.role;
-
-      await api.put(`/auth/users/${userId}`, { role: newRole });
+      await api.put(`/adminPanel/users/${userId}`, { role: newRole });
       showNotification('User role updated successfully', 'success');
-
-      // Update the local users state with the new role
       setUsers((prev) =>
         prev.map((user) =>
           user.id === userId ? { ...user, role: newRole } : user
         )
       );
-
-      // Update stats if changing to/from admin
       if (oldRole !== newRole) {
         if (newRole === 'admin') {
           setStats(prev => ({ ...prev, admins: prev.admins + 1 }));
@@ -224,11 +224,23 @@ function AdminPanel({ showNotification }) {
         }
       }
     } catch (error) {
-      console.error(error);
+      console.error('Update role error:', error);
       showNotification('Error updating user role', 'error');
     } finally {
       setUpdatingUserId(null);
     }
+  };
+
+  // Open password change dialog
+  const handleOpenPasswordChange = (user) => {
+    setSelectedUser(user);
+    setPasswordChangeOpen(true);
+  };
+
+  // Close password change dialog
+  const handleClosePasswordChange = () => {
+    setPasswordChangeOpen(false);
+    setSelectedUser(null);
   };
 
   // Handle tab change
@@ -249,12 +261,7 @@ function AdminPanel({ showNotification }) {
   // Get status chip for user
   const getUserStatusChip = (user) => {
     if (!user.is_approved) {
-      return <Chip
-        label="Pending Approval"
-        color="warning"
-        size="small"
-        variant="outlined"
-      />;
+      return <Chip label="Pending Approval" color="warning" size="small" variant="outlined" />;
     }
     return user.role === 'admin'
       ? <Chip label="Admin" color="primary" size="small" />
@@ -274,36 +281,24 @@ function AdminPanel({ showNotification }) {
             <Grid item xs={12} md={4}>
               <Card variant="outlined" sx={{ bgcolor: 'primary.light', color: 'primary.contrastText' }}>
                 <CardContent>
-                  <Typography variant="h6" component="div">
-                    Total Users
-                  </Typography>
-                  <Typography variant="h3" component="div">
-                    {stats.total}
-                  </Typography>
+                  <Typography variant="h6" component="div">Total Users</Typography>
+                  <Typography variant="h3" component="div">{stats.total}</Typography>
                 </CardContent>
               </Card>
             </Grid>
             <Grid item xs={12} md={4}>
               <Card variant="outlined" sx={{ bgcolor: 'success.light', color: 'success.contrastText' }}>
                 <CardContent>
-                  <Typography variant="h6" component="div">
-                    Administrators
-                  </Typography>
-                  <Typography variant="h3" component="div">
-                    {stats.admins}
-                  </Typography>
+                  <Typography variant="h6" component="div">Administrators</Typography>
+                  <Typography variant="h3" component="div">{stats.admins}</Typography>
                 </CardContent>
               </Card>
             </Grid>
             <Grid item xs={12} md={4}>
               <Card variant="outlined" sx={{ bgcolor: 'warning.light', color: 'warning.contrastText' }}>
                 <CardContent>
-                  <Typography variant="h6" component="div">
-                    Pending Approval
-                  </Typography>
-                  <Typography variant="h3" component="div">
-                    {stats.pendingApproval}
-                  </Typography>
+                  <Typography variant="h6" component="div">Pending Approval</Typography>
+                  <Typography variant="h3" component="div">{stats.pendingApproval}</Typography>
                 </CardContent>
               </Card>
             </Grid>
@@ -394,17 +389,13 @@ function AdminPanel({ showNotification }) {
                           <TableCell>
                             <Stack direction="row" spacing={1} alignItems="center">
                               <FormControl sx={{ minWidth: 120 }} size="small">
-                                <InputLabel id={`role-select-label-${user.id}`}>
-                                  Role
-                                </InputLabel>
+                                <InputLabel id={`role-select-label-${user.id}`}>Role</InputLabel>
                                 <Select
                                   labelId={`role-select-label-${user.id}`}
                                   id={`role-select-${user.id}`}
                                   value={roleUpdates[user.id] || user.role}
                                   label="Role"
-                                  onChange={(e) =>
-                                    handleRoleChange(user.id, e.target.value)
-                                  }
+                                  onChange={(e) => handleRoleChange(user.id, e.target.value)}
                                 >
                                   <MenuItem value="user">User</MenuItem>
                                   <MenuItem value="admin">Admin</MenuItem>
@@ -448,6 +439,19 @@ function AdminPanel({ showNotification }) {
                                   </span>
                                 </Tooltip>
                               )}
+
+                              <Tooltip title="Change password" arrow>
+                                <span>
+                                  <IconButton
+                                    color="primary"
+                                    onClick={() => handleOpenPasswordChange(user)}
+                                    size="small"
+                                  >
+                                    <LockIcon />
+                                  </IconButton>
+                                </span>
+                              </Tooltip>
+
                               <Tooltip title="Delete user" arrow>
                                 <span>
                                   <IconButton
@@ -456,7 +460,11 @@ function AdminPanel({ showNotification }) {
                                     disabled={deletingUserId === user.id}
                                     size="small"
                                   >
-                                    <DeleteIcon />
+                                    {deletingUserId === user.id ? (
+                                      <CircularProgress size={20} />
+                                    ) : (
+                                      <DeleteIcon />
+                                    )}
                                   </IconButton>
                                 </span>
                               </Tooltip>
@@ -497,6 +505,17 @@ function AdminPanel({ showNotification }) {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Password Change Dialog */}
+      {selectedUser && (
+        <PasswordChangeDialog
+          open={passwordChangeOpen}
+          onClose={handleClosePasswordChange}
+          userId={selectedUser.id}
+          username={selectedUser.username}
+          showNotification={showNotification}
+        />
+      )}
     </Container>
   );
 }

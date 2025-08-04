@@ -3,12 +3,13 @@ import json
 from datetime import datetime, timedelta
 from calendar import monthrange
 from flask import Blueprint, jsonify, current_app
-from models.models import Apartment, Payment
+from models.models import Apartment, Payment,Tenant
 from .auth import token_required, role_required
 from sqlalchemy import func, extract, desc
 from itertools import groupby
 from operator import itemgetter
 from extentions import db
+from decimal import Decimal
 
 analytics_bp = Blueprint("analytics_bp", __name__)
 
@@ -192,7 +193,7 @@ def get_payment_trends():
 def get_apartment_metrics():
     """
     Returns metrics for individual apartments including occupancy status,
-    rent collection, and tenant information.
+    rent collection, and net profit calculations based on model type.
     """
     try:
         apartments = Apartment.query.all()
@@ -240,12 +241,36 @@ def get_apartment_metrics():
                     apt.contractEndDate - datetime.now().date()
                 ).days
 
+            # Calculate price per square meter
+            price_per_meter = 0
+            if apt.size and apt.size > 0 and apt.rent:
+                price_per_meter = float(apt.rent) / float(apt.size)
+
+            # Calculate net profit based on the apartment model
+            net_profit = 0
+            rent = float(apt.rent) if apt.rent else 0
+
+            if apt.model == "rental":
+                # For rental model: Net Profit = Rent - Rental Cost
+                rent_cost = float(apt.rentCost) if apt.rentCost else 0
+                net_profit = rent - rent_cost
+            elif apt.model == "management":
+                # For management model: Net Profit = Management Fee % of Rent
+                management_fee = float(apt.managementFee) if apt.managementFee else 0
+                net_profit = rent * (management_fee / 100)
+
             apartment_metrics.append(
                 {
                     "id": apt.id,
                     "address": apt.address,
                     "status": apt.status,
-                    "rent": float(apt.rent) if apt.rent else 0,
+                    "rent": rent,
+                    "rentCost": float(apt.rentCost) if apt.rentCost else 0,
+                    "managementFee": float(apt.managementFee)
+                    if apt.managementFee
+                    else 0,
+                    "model": apt.model
+                    or "management",  # Default to management if not specified
                     "collected": collected_amount,
                     "payment_status": payment_status,
                     "tenant_count": tenant_count,
@@ -253,6 +278,8 @@ def get_apartment_metrics():
                     "contract_end_date": contract_end_date,
                     "days_until_expiration": days_until_expiration,
                     "size": apt.size,
+                    "pricePerMeter": round(price_per_meter, 2),
+                    "netProfit": round(net_profit, 2),  # Add net profit calculation
                 }
             )
 
@@ -268,93 +295,101 @@ def get_apartment_metrics():
 @analytics_bp.route("/analytics/tenant-payments", methods=["GET"])
 @token_required
 def get_tenant_payment_analytics():
-    """
-    Returns analytics about tenant payment behaviors.
-    """
     try:
-        # Get all payments for processing
-        all_payments = Payment.query.all()
-
-        tenant_data = {}
-
-        # Process each payment record
-        for payment in all_payments:
-            if not payment.tenants:
-                continue
-
-            tenants = json.loads(payment.tenants)
-            for tenant in tenants:
-                tenant_name = tenant.get("name", "Unknown")
-
-                if tenant_name not in tenant_data:
-                    tenant_data[tenant_name] = {
-                        "months_paid": 0,
-                        "months_partial": 0,
-                        "months_unpaid": 0,
-                        "total_due": 0,
-                        "total_paid": 0,
-                        "payment_history": [],
-                    }
-
-                # Update tenant statistics
-                amount_due = float(tenant.get("amountDue", 0))
-                amount_paid = float(tenant.get("amountPaid", 0))
-                is_paid = tenant.get("paid", False)
-
-                tenant_data[tenant_name]["total_due"] += amount_due
-                tenant_data[tenant_name]["total_paid"] += amount_paid
-
-                # Record payment status
-                if is_paid or amount_paid >= amount_due:
-                    tenant_data[tenant_name]["months_paid"] += 1
-                elif amount_paid > 0:
-                    tenant_data[tenant_name]["months_partial"] += 1
-                else:
-                    tenant_data[tenant_name]["months_unpaid"] += 1
-
-                # Add to payment history
-                tenant_data[tenant_name]["payment_history"].append(
-                    {
-                        "month": payment.month,
-                        "due": amount_due,
-                        "paid": amount_paid,
-                        "status": "paid"
-                        if (is_paid or amount_paid >= amount_due)
-                        else "partial"
-                        if amount_paid > 0
-                        else "unpaid",
-                    }
-                )
-
-        # Convert to list format for response
-        result = []
-        for name, data in tenant_data.items():
-            payment_ratio = (
-                data["total_paid"] / data["total_due"] if data["total_due"] > 0 else 0
-            )
-
-            result.append(
-                {
-                    "name": name,
-                    "months_paid": data["months_paid"],
-                    "months_partial": data["months_partial"],
-                    "months_unpaid": data["months_unpaid"],
-                    "total_due": data["total_due"],
-                    "total_paid": data["total_paid"],
-                    "payment_ratio": round(payment_ratio * 100, 2),
-                    "payment_history": sorted(
-                        data["payment_history"], key=lambda x: months.index(x["month"])
-                    ),
-                }
-            )
-
-        return jsonify(result), 200
-
+        # Define months
+        months = ["January", "February", "March", "April", "May", "June", 
+                 "July", "August", "September", "October", "November", "December"]
+        
+        # Get all tenants
+        tenants = db.session.query(Tenant).all()
+        
+        # Get all apartments
+        apartments = db.session.query(Apartment).all()
+        
+        # Get all payments
+        payments = db.session.query(Payment).all()
+        
+        # Prepare the response data
+        response_data = []
+        
+        for tenant in tenants:
+            # Find tenant's apartment
+            apartment = next((apt for apt in apartments if apt.id == tenant.apartment_id), None)
+            
+            # Get payment history for this tenant
+            payment_history = []
+            tenant_total_due = 0
+            tenant_total_paid = 0
+            
+            # For each month, check payment status
+            for month in months:
+                # Get the apartment payment for this month
+                apt_payment = next((
+                    p for p in payments 
+                    if p.apartment_id == tenant.apartment_id and p.month == month
+                ), None)
+                
+                if apt_payment and apt_payment.tenants:
+                    # Parse the tenants JSON
+                    try:
+                        payment_tenants = json.loads(apt_payment.tenants)
+                        
+                        # Find this tenant's payment
+                        tenant_payment = next((
+                            t for t in payment_tenants 
+                            if t.get('name') == tenant.name
+                        ), None)
+                        
+                        if tenant_payment:
+                            amount_due = float(tenant_payment.get('amountDue', 0))
+                            amount_paid = float(tenant_payment.get('amountPaid', 0))
+                            status = "paid" if amount_paid >= amount_due else "partial" if amount_paid > 0 else "not_paid"
+                            
+                            tenant_total_due += amount_due
+                            tenant_total_paid += amount_paid
+                            
+                            payment_history.append({
+                                "month": month,
+                                "due": amount_due,
+                                "paid": amount_paid,
+                                "status": status
+                            })
+                            continue
+                    except Exception as e:
+                        current_app.logger.error(f"Error parsing payment tenants: {str(e)}")
+                
+                # Default entry if no payment record exists or tenant not found in payment
+                default_amount = float(apartment.rent)/2 if apartment and apartment.rent else 0
+                payment_history.append({
+                    "month": month,
+                    "due": default_amount,
+                    "paid": 0,
+                    "status": "not_paid"
+                })
+            
+            # Calculate payment ratio
+            payment_ratio = (tenant_total_paid / tenant_total_due * 100) if tenant_total_due > 0 else 0
+            
+            tenant_data = {
+                "id": tenant.id,
+                "name": tenant.name,
+                "apartment_id": tenant.apartment_id,
+                "apartment_address": apartment.address if apartment else None,
+                "total_due": tenant_total_due,
+                "total_paid": tenant_total_paid,
+                "payment_ratio": round(payment_ratio, 2),
+                "payment_history": payment_history
+            }
+            
+            response_data.append(tenant_data)
+            
+        return jsonify(response_data)
+        
     except Exception as e:
-        current_app.logger.error(f"Error getting tenant payment analytics: {e}")
-        return jsonify(
-            {"message": "Error getting tenant payment analytics", "error": str(e)}
-        ), 500
+        # Log the specific error
+        current_app.logger.error(f"Error getting tenant payment analytics: {str(e)}")
+        return jsonify({"error": str(e), "message": "Error getting tenant payment analytics"}), 500
+
 
 
 @analytics_bp.route("/analytics/expenses", methods=["GET"])

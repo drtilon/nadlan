@@ -1,801 +1,828 @@
-// components/PaymentScreen.jsx
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import {
   Paper,
   Typography,
+  Autocomplete,
   Grid,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
   Button,
-  Checkbox,
-  FormControlLabel,
   TextField,
-  Divider,
   Box,
-  Alert,
-  Tab,
-  Tabs,
-  Chip,
   Card,
   CardContent,
-  CardHeader,
   IconButton,
-  Tooltip,
-  LinearProgress,
-  Collapse,
-  Stack,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   CircularProgress,
-  useTheme,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Switch,
-  Badge
+  Chip,
+  Stack,
+  Checkbox,
+  ListItemText,
+  OutlinedInput,
+  Alert,
+  Tabs,
+  Tab,
+  Divider
 } from '@mui/material';
 import {
-  KeyboardArrowUp as ExpandLessIcon,
-  KeyboardArrowDown as ExpandMoreIcon,
-  RefreshOutlined as RefreshIcon,
-  PaymentOutlined as PaymentIcon,
-  AccountBalanceWalletOutlined as WalletIcon,
-  SaveOutlined as SaveIcon,
-  ReceiptOutlined as ReceiptIcon,
   Add as AddIcon,
-  Visibility as ViewIcon,
-  CalendarMonth as CalendarIcon,
-  CheckCircleOutline as CheckIcon,
-  HistoryOutlined as HistoryIcon,
-  Close as CloseIcon,
-  EditOutlined as EditIcon,
-  CheckCircle as PaidIcon,
-  Cancel as UnpaidIcon,
-  Error as PartialIcon
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  Receipt as ReceiptIcon,
+  Payment as PaymentIcon,
+  Description as DescriptionIcon,
+  Person as PersonIcon
 } from '@mui/icons-material';
 import api from '../utils/api';
 
-// Define the months for payment management
-const MONTH_LIST = [
+const MONTHS = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-// Colors for payment status
-const STATUS_COLORS = {
-  paid: '#4caf50',
-  partial: '#ff9800',
-  not_paid: '#f44336'
-};
+const PAYMENT_TYPES = [
+  { value: 'rent', label: 'Rent' },
+  { value: 'deposit', label: 'Deposit' },
+  { value: 'utilities', label: 'Utilities' },
+  { value: 'other', label: 'Other' }
+];
 
-function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
-  const {apartmentId} = useParams();
-  const theme = useTheme();
-  // Use the initialApartment prop (if provided) as the default selection
+const PAYMENT_METHODS = [
+  { value: 'bank_transfer', label: 'Bank Transfer' },
+  { value: 'cash', label: 'Cash' },
+  { value: 'card', label: 'Card' }
+];
+
+function PaymentScreen({ showNotification }) {
+  const { apartmentId } = useParams();
+  const currentYear = new Date().getFullYear();
+
+  // State management
   const [selectedApartment, setSelectedApartment] = useState(apartmentId || '');
   const [apartments, setApartments] = useState([]);
-  const [paymentData, setPaymentData] = useState({});
   const [apartmentDetails, setApartmentDetails] = useState(null);
-  const [totalRent, setTotalRent] = useState(0);
+  const [payments, setPayments] = useState([]);
+  const [contracts, setContracts] = useState([]);
+  const [selectedContract, setSelectedContract] = useState('current');
   const [loading, setLoading] = useState(false);
-  const [currentMonth, setCurrentMonth] = useState('');
-  const [expandedMonths, setExpandedMonths] = useState({});
-  const [isSaving, setIsSaving] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
-  const [paymentHistory, setPaymentHistory] = useState([]);
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
-  const [paymentMethod, setPaymentMethod] = useState('bank_transfer');
-  const [receiptsDialogOpen, setReceiptsDialogOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [periodDialogOpen, setPeriodDialogOpen] = useState(false);
+  const [editingPayment, setEditingPayment] = useState(null);
+  const [paymentMode, setPaymentMode] = useState(1); // Default to individual mode
 
-  // Get the current year and month
-  const currentYear = new Date().getFullYear();
-  const currentMonthIndex = new Date().getMonth(); // 0-indexed (January = 0)
+  // Form state for individual payment
+  const [individualPaymentForm, setIndividualPaymentForm] = useState({
+    amount: '',
+    tenant_name: '',
+    payment_method: 'bank_transfer',
+    payment_date: new Date().toISOString().split('T')[0],
+    payment_type: 'rent',
+    month: MONTHS[new Date().getMonth()],
+    year: currentYear,
+    notes: ''
+  });
 
-  // When component mounts, set the current month
+  // Form state for batch payment (legacy)
+  const [paymentForm, setPaymentForm] = useState({
+    amount: '',
+    paidBy: '',
+    paidFor: [],
+    paymentMethod: 'bank_transfer',
+    paymentDate: new Date().toISOString().split('T')[0],
+    paymentType: 'rent',
+    month: MONTHS[new Date().getMonth()],
+    year: currentYear,
+    notes: ''
+  });
+
+  // Form state for new payment period dialog
+  const [periodForm, setPeriodForm] = useState({
+    startDate: new Date().toISOString().split('T')[0],
+    endDate: '',
+    rent: '',
+    tenants: []
+  });
+
+  // Initialize data on component mount
   useEffect(() => {
-    setCurrentMonth(MONTH_LIST[currentMonthIndex]);
-  }, [currentMonthIndex]);
-
-  // Fetch the list of apartments once on component mount
-  useEffect(() => {
-    const fetchApartments = async () => {
-      try {
-        setLoading(true);
-        const response = await api.get('/list');
-        setApartments(response.data);
-        setLoading(false);
-      } catch (error) {
-        console.error(error);
-        showNotification('Error fetching apartments', 'error');
-        setLoading(false);
-      }
-    };
     fetchApartments();
-  }, [showNotification]);
+  }, []);
 
-  // Parse tenant names from apartment details
-  const parseTenantNames = (apartmentData) => {
-    if (!apartmentData?.tenants) return [];
-
-    // Handle both string and array formats for tenant names
-    if (typeof apartmentData.tenants === 'string') {
-      return apartmentData.tenants
-        .split(',')
-        .map((name) => name.trim())
-        .filter((name) => name);
-    } else if (Array.isArray(apartmentData.tenants)) {
-      return apartmentData.tenants.map(tenant => {
-        // If tenant is an object, extract the name properly
-        if (typeof tenant === 'object' && tenant !== null) {
-          return tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim() || '';
-        }
-        // If tenant is a string, use it directly
-        return typeof tenant === 'string' ? tenant : '';
-      }).filter(name => name);
+  // Load apartment data when selection changes
+  useEffect(() => {
+    if (selectedApartment) {
+      loadApartmentData();
     }
+  }, [selectedApartment]);
 
+  // API calls
+  const fetchApartments = async () => {
+    try {
+      setLoading(true);
+      const response = await api.get('/list');
+      setApartments(response.data || []);
+    } catch (error) {
+      console.error('Error fetching apartments:', error);
+      showNotification?.('Error fetching apartments', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadApartmentData = async () => {
+    try {
+      setLoading(true);
+
+      // Fetch apartment details
+      const apartmentResponse = await api.get(`/apartment/${selectedApartment}`);
+      setApartmentDetails(apartmentResponse.data);
+
+      // Fetch payment history from the payment-history endpoint
+      const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
+      const historyPayments = historyResponse.data || [];
+
+      // Transform payment data for display
+      const paymentsList = historyPayments.map(payment => ({
+        id: payment.id,
+        month: payment.month,
+        year: payment.year,
+        amountPaid: payment.amountPaid,
+        paymentDate: payment.paymentDate,
+        paymentMethod: payment.paymentMethod || 'bank_transfer',
+        paymentType: payment.paymentType || 'rent',
+        paidBy: payment.tenant_name || '',
+        paidFor: payment.tenant_names || (payment.tenant_name ? [payment.tenant_name] : []),
+        notes: payment.notes || '',
+        status: payment.status,
+        isIndividual: payment.isIndividual || false
+      }));
+
+      // Sort payments by date (newest first)
+      paymentsList.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
+      setPayments(paymentsList);
+
+      // Fetch contracts/payment periods
+      try {
+        const contractsResponse = await api.get(`/apartment/${selectedApartment}/contracts`);
+        setContracts(contractsResponse.data || []);
+      } catch (contractError) {
+        console.log('Contracts endpoint not available, using fallback');
+        if (apartmentResponse.data?.moveInDate) {
+          const fallbackContract = {
+            id: 'current',
+            startDate: apartmentResponse.data.moveInDate,
+            endDate: apartmentResponse.data.contractEndDate || null,
+            rent: apartmentResponse.data.rent
+          };
+          setContracts([fallbackContract]);
+        } else {
+          setContracts([]);
+        }
+      }
+
+    } catch (error) {
+      console.error('Error loading apartment data:', error);
+      showNotification?.('Error loading apartment data', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Helper functions
+  const getCurrentTenants = () => {
+    if (!apartmentDetails?.tenants) return [];
+    if (Array.isArray(apartmentDetails.tenants)) {
+      return apartmentDetails.tenants.map(t => t.name || t);
+    }
+    if (typeof apartmentDetails.tenants === 'string') {
+      return apartmentDetails.tenants.split(',').map(t => t.trim()).filter(t => t);
+    }
     return [];
   };
 
-  // Automatically load tenants for all months based on apartment details
-  const autoLoadTenantsForAllMonths = (apartmentData, currentPaymentData, rentAmount) => {
-    const tenantNames = parseTenantNames(apartmentData);
-    if (tenantNames.length === 0) {
-      showNotification('No tenants found for this apartment. Please add tenants first.', 'warning');
-      return currentPaymentData;
-    }
+  const getCurrentContract = () => {
+    if (!contracts || contracts.length === 0) return null;
 
-    const updatedPaymentData = { ...currentPaymentData };
+    const now = new Date();
+    const activeContract = contracts.find(contract => {
+      const startDate = new Date(contract.startDate);
+      const endDate = contract.endDate ? new Date(contract.endDate) : null;
+      return now >= startDate && (!endDate || now <= endDate);
+    });
 
-    // Calculate default amount due per tenant
-    const amountPerTenant = tenantNames.length > 0 ? rentAmount / tenantNames.length : 0;
-
-    // Update all months with tenant data
-    for (const month of MONTH_LIST) {
-      const existingMonthData = updatedPaymentData[month] || {
-        status: 'not_paid',
-        extraPayments: {
-          internet: 0,
-          electricity: 0,
-          other: 0
-        }
-      };
-
-      // Get existing tenants for this month
-      const existingTenants = existingMonthData.tenants || [];
-
-      // Create or update tenant entries
-      const updatedTenants = tenantNames.map((name) => {
-        const foundTenant = existingTenants.find((t) => t.name === name);
-        return foundTenant || {
-          name,
-          paid: false,
-          amountDue: amountPerTenant,
-          amountPaid: 0
-        };
-      });
-
-      // Update the month data with the new tenant information
-      updatedPaymentData[month] = {
-        ...existingMonthData,
-        tenants: updatedTenants,
-        status: determinePaymentStatus(updatedTenants)
-      };
-    }
-
-    return updatedPaymentData;
+    return activeContract || contracts[contracts.length - 1]; // Latest if none active
   };
 
-  // When an apartment is selected, fetch its details and payment data
-  useEffect(() => {
-    if (!selectedApartment) return;
+  const getContractPayments = (contract) => {
+    if (!contract || !payments) return [];
 
-    const fetchApartmentData = async () => {
+    const startDate = new Date(contract.startDate);
+    const endDate = contract.endDate ? new Date(contract.endDate) : new Date();
+
+    return payments.filter(payment => {
+      if (!payment.paymentDate) return false;
+      const paymentDate = new Date(payment.paymentDate);
+      return paymentDate >= startDate && paymentDate <= endDate;
+    });
+  };
+
+  const getFilteredPayments = () => {
+    if (!payments) return [];
+    if (selectedContract === 'all') return payments;
+    if (selectedContract === 'current') {
+      const currentContract = getCurrentContract();
+      return currentContract ? getContractPayments(currentContract) : [];
+    }
+
+    const contract = contracts.find(c => c.id === selectedContract);
+    return contract ? getContractPayments(contract) : [];
+  };
+
+  const getContractInfo = () => {
+    const targetContract = getCurrentContract();
+    if (!targetContract || !apartmentDetails) {
+      return {
+        totalDue: 0,
+        totalPaid: 0,
+        remaining: 0,
+        monthsTotal: 0,
+        isActive: false,
+        isExpired: false,
+        contract: null
+      };
+    }
+
+    const contractStartDate = new Date(targetContract.startDate);
+    const contractEndDate = targetContract.endDate ? new Date(targetContract.endDate) : null;
+    const monthlyRent = targetContract.rent || apartmentDetails?.rent || 0;
+    const now = new Date();
+
+    const isActive = now >= contractStartDate && (!contractEndDate || now <= contractEndDate);
+    const isExpired = contractEndDate && now > contractEndDate;
+
+    const effectiveEndDate = contractEndDate || now;
+    const monthsDiff = Math.max(0,
+      (effectiveEndDate.getFullYear() - contractStartDate.getFullYear()) * 12 +
+      (effectiveEndDate.getMonth() - contractStartDate.getMonth()) + 1
+    );
+
+    const totalDue = monthlyRent * monthsDiff;
+    const contractPayments = getContractPayments(targetContract);
+    const totalPaid = contractPayments.reduce((sum, p) => sum + (parseFloat(p.amountPaid) || 0), 0);
+    const remaining = Math.max(0, totalDue - totalPaid);
+
+    return {
+      totalDue,
+      totalPaid,
+      remaining,
+      monthsTotal: monthsDiff,
+      isActive,
+      isExpired,
+      contract: targetContract
+    };
+  };
+  const [searchQuery, setSearchQuery] = useState("");
+  // Form handlers
+  const resetIndividualPaymentForm = () => {
+    const tenants = getCurrentTenants();
+    setIndividualPaymentForm({
+      amount: '',
+      tenant_name: tenants[0] || '',
+      payment_method: 'bank_transfer',
+      payment_date: new Date().toISOString().split('T')[0],
+      payment_type: 'rent',
+      month: MONTHS[new Date().getMonth()],
+      year: currentYear,
+      notes: ''
+    });
+  };
+
+  const resetPaymentForm = () => {
+    const tenants = getCurrentTenants();
+    setPaymentForm({
+      amount: '',
+      paidBy: tenants[0] || '',
+      paidFor: [],
+      paymentMethod: 'bank_transfer',
+      paymentDate: new Date().toISOString().split('T')[0],
+      paymentType: 'rent',
+      month: MONTHS[new Date().getMonth()],
+      year: currentYear,
+      notes: ''
+    });
+  };
+
+  const handleAddPayment = () => {
+    resetIndividualPaymentForm();
+    resetPaymentForm();
+    setEditingPayment(null);
+    setPaymentMode(1); // Default to individual mode
+    setDialogOpen(true);
+  };
+
+  const handleEditPayment = (payment) => {
+    if (payment.isIndividual) {
+      // Edit individual payment
+      setIndividualPaymentForm({
+        amount: payment.amountPaid?.toString() || '',
+        tenant_name: payment.paidBy || '',
+        payment_method: payment.paymentMethod || 'bank_transfer',
+        payment_date: payment.paymentDate?.split('T')[0] || '',
+        payment_type: payment.paymentType || 'rent',
+        month: payment.month || MONTHS[new Date().getMonth()],
+        year: payment.year || currentYear,
+        notes: payment.notes || ''
+      });
+      setPaymentMode(1);
+    } else {
+      // Edit batch payment
+      setPaymentForm({
+        amount: payment.amountPaid?.toString() || '',
+        paidBy: payment.paidBy || '',
+        paidFor: payment.paidFor || [],
+        paymentMethod: payment.paymentMethod || 'bank_transfer',
+        paymentDate: payment.paymentDate?.split('T')[0] || '',
+        paymentType: payment.paymentType || 'rent',
+        month: payment.month || MONTHS[new Date().getMonth()],
+        year: payment.year || currentYear,
+        notes: payment.notes || ''
+      });
+      setPaymentMode(0);
+    }
+    setEditingPayment(payment);
+    setDialogOpen(true);
+  };
+
+  const handleSubmitPayment = async () => {
+    if (paymentMode === 1) {
+      // Individual payment submission
+      if (!individualPaymentForm.amount || !individualPaymentForm.tenant_name || !individualPaymentForm.month) {
+        showNotification?.('Please fill in all required fields', 'error');
+        return;
+      }
+
       try {
         setLoading(true);
-        // Get apartment details
-        const apartmentResponse = await api.get(`/apartment/${selectedApartment}`);
-        setApartmentDetails(apartmentResponse.data);
+        const paymentData = {
+          apartment_id: parseInt(selectedApartment),
+          amount: parseFloat(individualPaymentForm.amount),
+          tenant_name: individualPaymentForm.tenant_name,
+          payment_method: individualPaymentForm.payment_method,
+          payment_date: individualPaymentForm.payment_date,
+          payment_type: individualPaymentForm.payment_type,
+          month: individualPaymentForm.month,
+          year: individualPaymentForm.year,
+          notes: individualPaymentForm.notes
+        };
 
-        // Determine the rent value based on the model
-        const rentValue = apartmentResponse.data.model === 'rental'
-          ? parseFloat(apartmentResponse.data.rent_cost) || 0
-          : parseFloat(apartmentResponse.data.rent) || 0;
-        setTotalRent(rentValue);
-
-        // Get payment data
-        const paymentResponse = await api.get(`/payments/${selectedApartment}`);
-        const processedData = {};
-        for (const month of MONTH_LIST) {
-          const monthData = paymentResponse.data[month];
-          if (monthData.tenants) {
-            // Ensure tenant data is properly structured
-            monthData.tenants = monthData.tenants.map((tenant) => ({
-              ...tenant,
-              name: tenant.name || '',
-              paid: tenant.paid || false,
-              amountDue: parseFloat(tenant.amountDue) || 0,
-              amountPaid: parseFloat(tenant.amountPaid) || 0,
-            }));
-          } else {
-            monthData.tenants = [];
-          }
-
-          // Handle both nested and flat structures for extra payments
-          if (!monthData.extraPayments) {
-            monthData.extraPayments = {
-              internet: parseFloat(monthData.internet) || 0,
-              electricity: parseFloat(monthData.electricity) || 0,
-              other: parseFloat(monthData.other) || 0,
-            };
-          } else {
-            // Ensure values are numbers
-            monthData.extraPayments = {
-              internet: parseFloat(monthData.extraPayments.internet) || 0,
-              electricity: parseFloat(monthData.extraPayments.electricity) || 0,
-              other: parseFloat(monthData.extraPayments.other) || 0,
-            };
-          }
-          processedData[month] = monthData;
+        if (editingPayment && editingPayment.isIndividual) {
+          await api.put(`/payment/${editingPayment.id}`, paymentData);
+          showNotification?.('Payment updated successfully', 'success');
+        } else {
+          await api.post('/payment', paymentData);
+          showNotification?.('Payment added successfully', 'success');
         }
 
-        // Automatically load tenants for all months
-        const updatedData = autoLoadTenantsForAllMonths(
-          apartmentResponse.data,
-          processedData,
-          rentValue
-        );
-
-        setPaymentData(updatedData);
-        
-        // Fetch payment history
-        try {
-          const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
-          setPaymentHistory(historyResponse.data || []);
-        } catch (error) {
-          console.error('Error fetching payment history:', error);
-          setPaymentHistory([]);
-        }
-        
-        setLoading(false);
+        setDialogOpen(false);
+        setEditingPayment(null);
+        await loadApartmentData();
       } catch (error) {
-        console.error('Error fetching data:', error);
-        // Initialize default data if an error occurs
-        const defaultData = {};
-        MONTH_LIST.forEach((month) => {
-          defaultData[month] = {
-            status: 'not_paid',
-            tenants: [],
+        console.error('Error saving individual payment:', error);
+        const errorMessage = error.response?.data?.message || 'Error saving payment';
+        showNotification?.(errorMessage, 'error');
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // Batch payment submission (legacy)
+      if (!paymentForm.amount || !paymentForm.paidBy || paymentForm.paidFor.length === 0) {
+        showNotification?.('Please fill in all required fields', 'error');
+        return;
+      }
+
+      try {
+        setLoading(true);
+
+        // Get current payments for the year
+        const currentPaymentsResponse = await api.get(`/payments/${selectedApartment}?year=${paymentForm.year}`);
+        const currentPayments = currentPaymentsResponse.data?.payments || {};
+
+        const totalAmount = parseFloat(paymentForm.amount);
+        const amountPerTenant = totalAmount / paymentForm.paidFor.length;
+
+        const tenantData = paymentForm.paidFor.map(tenantName => ({
+          name: tenantName,
+          amountDue: amountPerTenant,
+          amountPaid: amountPerTenant,
+          paid: true
+        }));
+
+        const updatedPayments = {
+          ...currentPayments,
+          [paymentForm.month]: {
+            ...currentPayments[paymentForm.month],
+            status: 'paid',
+            tenants: tenantData,
             extraPayments: {
               internet: 0,
               electricity: 0,
               other: 0
-            }
-          };
-        });
+            },
+            paymentDate: paymentForm.paymentDate,
+            paymentMethod: paymentForm.paymentMethod,
+            notes: paymentForm.notes || ''
+          }
+        };
 
-        // Still try to add tenants even for the default data
-        if (apartmentDetails) {
-          const updatedData = autoLoadTenantsForAllMonths(
-            apartmentDetails,
-            defaultData,
-            totalRent
-          );
-          setPaymentData(updatedData);
-        } else {
-          setPaymentData(defaultData);
-        }
+        const updateData = {
+          payments: updatedPayments,
+          year: parseInt(paymentForm.year)
+        };
 
-        showNotification('Error loading payment data. Using default configuration.', 'warning');
+        await api.post(`/payments/${selectedApartment}`, updateData);
+
+        showNotification?.('Batch payment saved successfully', 'success');
+        setDialogOpen(false);
+        setEditingPayment(null);
+        await loadApartmentData();
+
+      } catch (error) {
+        console.error('Error saving batch payment:', error);
+        const errorMessage = error.response?.data?.message || error.message || 'Error saving payment';
+        showNotification?.(errorMessage, 'error');
+      } finally {
         setLoading(false);
       }
-    };
-
-    fetchApartmentData();
-  }, [selectedApartment, showNotification]);
-
-  // Calculate the remaining amount for a given month
-  const calculateRemainingAmount = (month) => {
-    if (!paymentData[month]?.tenants) return totalRent.toFixed(2);
-    let totalPaid = 0;
-
-    // Sum up all tenant payments
-    if (paymentData[month].tenants && Array.isArray(paymentData[month].tenants)) {
-      totalPaid = paymentData[month].tenants.reduce(
-        (sum, tenant) => sum + (parseFloat(tenant.amountPaid) || 0),
-        0
-      );
     }
-
-    return Math.max(0, totalRent - totalPaid).toFixed(2);
   };
 
-  // Calculate payment percentage for progress bar
-  const calculatePaymentPercentage = (month) => {
-    if (!paymentData[month]?.tenants || totalRent === 0) return 0;
-    const totalPaid = paymentData[month].tenants.reduce(
-      (sum, tenant) => sum + (parseFloat(tenant.amountPaid) || 0),
-      0
-    );
-    return Math.min(100, Math.round((totalPaid / totalRent) * 100));
-  };
+  const handleDeletePayment = async (paymentId) => {
+    if (!window.confirm('Are you sure you want to delete this payment?')) return;
 
-  // Determine overall payment status from tenant statuses
-  const determinePaymentStatus = (tenants) => {
-    if (!tenants || !Array.isArray(tenants) || !tenants.length) return 'not_paid';
-
-    // Check if all tenants have paid fully
-    const allPaid = tenants.every((tenant) => {
-      return tenant.paid || (parseFloat(tenant.amountPaid) >= parseFloat(tenant.amountDue) && parseFloat(tenant.amountDue) > 0);
-    });
-
-    if (allPaid) return 'paid';
-
-    // Check if any tenant has made at least a partial payment
-    const anyPaid = tenants.some((tenant) => {
-      return tenant.paid || parseFloat(tenant.amountPaid) > 0;
-    });
-
-    return anyPaid ? 'partial' : 'not_paid';
-  };
-
-  // Format the tenant list for display
-  const formatTenantList = () => {
-    if (!apartmentDetails?.tenants) return 'None registered';
-
-    // If tenants is an array of objects, extract and join names
-    if (Array.isArray(apartmentDetails.tenants)) {
-      return apartmentDetails.tenants.map(tenant => {
-        if (typeof tenant === 'object' && tenant !== null) {
-          return tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim();
-        }
-        return typeof tenant === 'string' ? tenant : '';
-      }).filter(name => name).join(', ') || 'None registered';
-    }
-
-    // If tenants is a string, return it directly
-    return typeof apartmentDetails.tenants === 'string'
-      ? apartmentDetails.tenants
-      : 'None registered';
-  };
-
-  // Evenly split rent among the tenants for a month
-  const splitRentEvenly = (month) => {
-    const tenants = paymentData[month]?.tenants || [];
-    if (tenants.length === 0) {
-      showNotification('No tenants available for this month', 'warning');
-      return;
-    }
-    const amountPerTenant = totalRent / tenants.length;
-    setPaymentData((prev) => {
-      const updatedTenants = tenants.map((tenant) => ({
-        ...tenant,
-        amountDue: amountPerTenant,
-        amountPaid: tenant.paid ? amountPerTenant : tenant.amountPaid
-      }));
-      return {
-        ...prev,
-        [month]: {
-          ...prev[month],
-          tenants: updatedTenants
-        }
-      };
-    });
-    showNotification(`Rent split evenly: $${amountPerTenant.toFixed(2)} per tenant`, 'success');
-  };
-
-  // Mark all tenants as paid for a month
-  const markAllAsPaid = (month) => {
-    const tenants = paymentData[month]?.tenants || [];
-    if (tenants.length === 0) {
-      showNotification('No tenants available for this month', 'warning');
-      return;
-    }
-    
-    setPaymentData((prev) => {
-      const updatedTenants = tenants.map((tenant) => ({
-        ...tenant,
-        paid: true,
-        amountPaid: tenant.amountDue
-      }));
-      return {
-        ...prev,
-        [month]: {
-          ...prev[month],
-          tenants: updatedTenants,
-          status: 'paid'
-        }
-      };
-    });
-    
-    showNotification(`All tenants marked as paid for ${month}`, 'success');
-  };
-  
-  // Mark all tenants as unpaid for a month
-  const markAllAsUnpaid = (month) => {
-    const tenants = paymentData[month]?.tenants || [];
-    if (tenants.length === 0) {
-      showNotification('No tenants available for this month', 'warning');
-      return;
-    }
-    
-    setPaymentData((prev) => {
-      const updatedTenants = tenants.map((tenant) => ({
-        ...tenant,
-        paid: false,
-        amountPaid: 0
-      }));
-      return {
-        ...prev,
-        [month]: {
-          ...prev[month],
-          tenants: updatedTenants,
-          status: 'not_paid'
-        }
-      };
-    });
-    
-    showNotification(`All tenants marked as unpaid for ${month}`, 'success');
-  };
-
-  // Update payment status or other fields for a month
-  const handlePaymentChange = (month, field, value) => {
-    setPaymentData((prev) => ({
-      ...prev,
-      [month]: {
-        ...prev[month],
-        [field]: value
-      }
-    }));
-  };
-
-  // Update tenant paid status when checkbox changes
-  const handleTenantStatusChange = (month, tenantIndex, checked) => {
-    setPaymentData((prev) => {
-      const monthData = prev[month];
-      const updatedTenants = monthData.tenants.map((tenant, index) => {
-        if (index === tenantIndex) {
-          const updated = { ...tenant, paid: checked };
-          if (checked) {
-            updated.amountPaid = tenant.amountDue;
-          }
-          return updated;
-        }
-        return tenant;
-      });
-      return {
-        ...prev,
-        [month]: {
-          ...monthData,
-          tenants: updatedTenants,
-          status: determinePaymentStatus(updatedTenants)
-        }
-      };
-    });
-  };
-
-  // Update tenant amounts for due or paid fields
-  const handleTenantAmountChange = (month, tenantIndex, field, value) => {
-    const numValue = parseFloat(value) || 0;
-    setPaymentData((prev) => {
-      const monthData = prev[month];
-      const updatedTenants = monthData.tenants.map((tenant, index) => {
-        if (index === tenantIndex) {
-          const updatedTenant = { ...tenant, [field]: numValue };
-          if (field === 'amountPaid') {
-            updatedTenant.paid = numValue >= tenant.amountDue;
-          } else if (field === 'amountDue') {
-            updatedTenant.paid = tenant.amountPaid >= numValue;
-          }
-          return updatedTenant;
-        }
-        return tenant;
-      });
-      return {
-        ...prev,
-        [month]: {
-          ...monthData,
-          tenants: updatedTenants,
-          status: determinePaymentStatus(updatedTenants)
-        }
-      };
-    });
-  };
-
-  // Update extra payment fields (e.g., internet, electricity, other)
-  const handleExtraPaymentChange = (month, field, value) => {
-    const numValue = parseFloat(value) || 0;
-    setPaymentData((prev) => ({
-      ...prev,
-      [month]: {
-        ...prev[month],
-        extraPayments: {
-          ...prev[month].extraPayments,
-          [field]: numValue
-        }
-      }
-    }));
-  };
-
-  // Toggle expanded state for a month
-  const toggleMonthExpanded = (month) => {
-    setExpandedMonths(prev => ({
-      ...prev,
-      [month]: !prev[month]
-    }));
-  };
-
-  // Save the payment data to the backend
-  const handleSubmit = async () => {
     try {
-      setIsSaving(true);
-      const formattedData = {};
-      for (const month of MONTH_LIST) {
-        const monthObj = paymentData[month];
-        if (!monthObj) continue;
-
-        // Format tenant data to ensure proper structure
-        const formattedTenants = (monthObj.tenants || []).map(tenant => ({
-          name: tenant.name,
-          paid: Boolean(tenant.paid),
-          amountDue: parseFloat(tenant.amountDue) || 0,
-          amountPaid: parseFloat(tenant.amountPaid) || 0
-        }));
-
-        // Format according to the backend's expected structure
-        formattedData[month] = {
-          status: monthObj.status || 'not_paid',
-          tenants: formattedTenants,
-          extraPayments: {
-            internet: parseFloat(monthObj.extraPayments?.internet) || 0,
-            electricity: parseFloat(monthObj.extraPayments?.electricity) || 0,
-            other: parseFloat(monthObj.extraPayments?.other) || 0
-          },
-          // Include flat fields for backward compatibility
-          internet: parseFloat(monthObj.extraPayments?.internet) || 0,
-          electricity: parseFloat(monthObj.extraPayments?.electricity) || 0,
-          other: parseFloat(monthObj.extraPayments?.other) || 0,
-          // Add payment date and method
-          paymentDate: paymentDate,
-          paymentMethod: paymentMethod
-        };
-      }
-
-      await api.post(`/payments/${selectedApartment}`, formattedData);
-      showNotification('Payment data saved successfully!', 'success');
-      
-      // Refresh payment history after saving
-      try {
-        const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
-        setPaymentHistory(historyResponse.data || []);
-      } catch (error) {
-        console.error('Error fetching payment history:', error);
-      }
-      
-      setIsSaving(false);
+      setLoading(true);
+      await api.delete(`/payment/${paymentId}`);
+      showNotification?.('Payment deleted successfully', 'success');
+      await loadApartmentData();
     } catch (error) {
-      console.error(error);
-      showNotification(`Error saving payment data: ${error.message || 'Unknown error'}`, 'error');
-      setIsSaving(false);
+      console.error('Error deleting payment:', error);
+      showNotification?.('Error deleting payment', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Format currency
+  const handleNewPaymentPeriod = () => {
+    const currentTenants = getCurrentTenants();
+    setPeriodForm({
+      startDate: new Date().toISOString().split('T')[0],
+      endDate: '',
+      rent: apartmentDetails?.rent?.toString() || '',
+      tenants: currentTenants
+    });
+    setPeriodDialogOpen(true);
+  };
+
+  const handleCreatePaymentPeriod = async () => {
+    if (!periodForm.startDate || !periodForm.rent) {
+      showNotification?.('Please fill in all required fields', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await api.post(`/apartment/${selectedApartment}/new-payment-period`, {
+        start_date: periodForm.startDate,
+        end_date: periodForm.endDate || null,
+        rent: parseFloat(periodForm.rent),
+        tenants: periodForm.tenants
+      });
+
+      showNotification?.('New payment period created successfully', 'success');
+      setPeriodDialogOpen(false);
+      await loadApartmentData();
+    } catch (error) {
+      console.error('Error creating payment period:', error);
+      showNotification?.('Error creating new payment period', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Utility functions
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2
-    }).format(amount);
+      currency: 'EUR'
+    }).format(amount || 0);
   };
-  
-  // Format date
+
   const formatDate = (dateString) => {
-    if (!dateString) return '';
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString(undefined, { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric'
-      });
-    } catch (e) {
-      return dateString;
-    }
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleDateString();
   };
-  
-  // Get payment method display text
-  const getPaymentMethodText = (method) => {
-    const methodMap = {
-      cash: 'Cash',
-      bank_transfer: 'Bank Transfer',
-      credit_card: 'Credit Card',
-      check: 'Check',
-      other: 'Other'
-    };
-    return methodMap[method] || method;
-  };
-  
-  // Generate receipt for a payment
-  const generateReceipt = (month) => {
-    // In a real application, this would generate a PDF receipt
-    showNotification(`Receipt generation for ${month} is not implemented yet`, 'info');
-  };
-  
-  // Is this month current, past, or future?
-  const getMonthStatus = (month) => {
-    const monthIndex = MONTH_LIST.indexOf(month);
-    const currentMonthIndex = new Date().getMonth();
-    
-    if (monthIndex < currentMonthIndex) return 'past';
-    if (monthIndex === currentMonthIndex) return 'current';
-    return 'future';
-  };
+
+  // Get contract info for display
+  const contractInfo = getContractInfo();
+  const filteredPayments = getFilteredPayments().filter(p =>
+    (p.paidBy || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (Array.isArray(p.paidFor) && p.paidFor.some(name => name.toLowerCase().includes(searchQuery.toLowerCase())))
+  ); const tenants = getCurrentTenants();
 
   return (
-    <Paper sx={{ p: 4, mt: 2 }}>
-      <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
-        <WalletIcon sx={{ mr: 1 }} /> Payment Management
-      </Typography>
+    <Box sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
+      {/* Header */}
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4" gutterBottom sx={{ fontWeight: 600 }}>
+          Payment Management
+        </Typography>
+        <Typography variant="body1" color="text.secondary">
+          Track and manage apartment payments
+        </Typography>
+      </Box>
 
-      {/* Apartment selection */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} md={8}>
-          <FormControl fullWidth variant="outlined">
-            <InputLabel id="apartment-select-label">Select Apartment</InputLabel>
-            <Select
-              labelId="apartment-select-label"
-              value={selectedApartment}
-              label="Select Apartment"
-              onChange={(e) => setSelectedApartment(e.target.value)}
-              disabled={loading || isSaving}
-            >
-              {apartments.map((apartment) => (
-                <MenuItem key={apartment.id} value={apartment.id}>
-                  {apartment.address}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <Stack direction="row" spacing={2} justifyContent="flex-end" sx={{ height: '100%', alignItems: 'center' }}>
-            <Button
-              variant="outlined"
-              startIcon={<HistoryIcon />}
-              onClick={() => setShowHistory(!showHistory)}
-            >
-              {showHistory ? 'Hide History' : 'Payment History'}
-            </Button>
-            <Button
-              variant="outlined"
-              startIcon={<ReceiptIcon />}
-              onClick={() => setReceiptsDialogOpen(true)}
-              disabled={!selectedApartment}
-            >
-              Receipts
-            </Button>
-          </Stack>
-        </Grid>
-      </Grid>
+      {/* Apartment Selection */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} md={6}>
 
-      {loading && <LinearProgress sx={{ mb: 3 }} />}
+              <Autocomplete
+                options={apartments}
+                getOptionLabel={(option) => option.address}
+                value={apartments.find(a => a.id === selectedApartment) || null}
+                onChange={(event, newValue) => {
+                  if (newValue) {
+                    setSelectedApartment(newValue.id);
+                  }
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Select Apartment"
+                    variant="outlined"
+                    fullWidth
+                  />
+                )}
+                isOptionEqualToValue={(option, value) => option.id === value.id}
+              />
 
-      {selectedApartment && !loading && (
+            </Grid>
+            {selectedApartment && (
+              <Grid item xs={12} md={6}>
+                <Box sx={{ textAlign: { xs: 'left', md: 'right' } }}>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={handleAddPayment}
+                    size="large"
+                  >
+                    Add Payment
+                  </Button>
+                </Box>
+              </Grid>
+            )}
+          </Grid>
+        </CardContent>
+      </Card>
+
+      {selectedApartment && !loading && apartmentDetails && (
         <>
-          {totalRent === 0 && (
-            <Alert severity="warning" sx={{ mb: 3 }}>
-              Rent is not defined for this apartment. Please set the rent in the apartment details.
-            </Alert>
-          )}
-
-          {/* Apartment summary card */}
-          {apartmentDetails && (
-            <Card sx={{ mb: 4 }}>
-              <CardContent>
-                <Grid container spacing={2}>
-                  <Grid item xs={12} md={8}>
-                    <Typography variant="h6">{apartmentDetails.address}</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                      <strong>Model:</strong> {apartmentDetails.model || 'Not specified'}
-                    </Typography>
+          {/* Apartment Info Card */}
+          <Card sx={{ mb: 3 }}>
+            <CardContent>
+              <Grid container spacing={3}>
+                <Grid item xs={12} md={8}>
+                  <Typography variant="h6" gutterBottom>
+                    {apartmentDetails.address}
+                  </Typography>
+                  <Stack direction="row" spacing={2} flexWrap="wrap">
+                    <Chip label={`${tenants.length} tenants`} />
+                    <Chip label={`${formatCurrency(apartmentDetails.rent)}/month`} />
+                    <Chip label={`${apartmentDetails.rooms || 'N/A'} rooms`} />
+                  </Stack>
+                  <Box sx={{ mt: 2 }}>
                     <Typography variant="body2" color="text.secondary">
-                      <strong>Tenants:</strong> {formatTenantList()}
+                      Tenants: {tenants.join(', ') || 'No tenants'}
                     </Typography>
-                  </Grid>
-                  <Grid item xs={12} md={4}>
-                    <Box sx={{ textAlign: 'right' }}>
-                      <Typography variant="h6" sx={{ color: 'primary.main' }}>
-                        {formatCurrency(totalRent)}<Typography component="span" variant="body2">/month</Typography>
-                      </Typography>
-                      
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                        <strong>Contract:</strong> {apartmentDetails.contractEndDate ? 
-                          `Until ${formatDate(apartmentDetails.contractEndDate)}` : 
-                          'No end date specified'}
-                      </Typography>
-                    </Box>
-                  </Grid>
+                  </Box>
                 </Grid>
-              </CardContent>
-            </Card>
-          )}
-          
-          {/* Payment History Collapse */}
-          <Collapse in={showHistory}>
-            <Paper sx={{ p: 3, mb: 4 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6">
-                  Payment History
-                </Typography>
-                <Button 
-                  size="small" 
-                  startIcon={<RefreshIcon />} 
-                  onClick={async () => {
-                    try {
-                      setLoading(true);
-                      const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
-                      setPaymentHistory(historyResponse.data || []);
-                      setLoading(false);
-                    } catch (error) {
-                      console.error('Error fetching payment history:', error);
-                      setLoading(false);
-                    }
-                  }}
-                >
-                  Refresh
-                </Button>
+                <Grid item xs={12} md={4}>
+                  <Box sx={{ textAlign: { xs: 'left', md: 'right' } }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: { xs: 'flex-start', md: 'flex-end' }, gap: 1, mb: 1 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Current Period
+                      </Typography>
+                      <Chip
+                        label={contractInfo.isExpired ? 'Expired' : contractInfo.isActive ? 'Active' : 'Inactive'}
+                        color={contractInfo.isExpired ? 'error' : contractInfo.isActive ? 'success' : 'default'}
+                        size="small"
+                      />
+                    </Box>
+                    <Typography variant="h6" color="primary" sx={{ fontWeight: 600 }}>
+                      {formatCurrency(contractInfo.totalPaid)} / {formatCurrency(contractInfo.totalDue)}
+                    </Typography>
+                    <Typography variant="body2" color="error.main" sx={{ fontWeight: 500 }}>
+                      Remaining: {formatCurrency(contractInfo.remaining)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      {contractInfo.monthsTotal} months total
+                    </Typography>
+                    {(contractInfo.isExpired || contractInfo.remaining === 0) && (
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        onClick={handleNewPaymentPeriod}
+                        sx={{ mt: 1 }}
+                      >
+                        New Payment Period
+                      </Button>
+                    )}
+                  </Box>
+                </Grid>
+              </Grid>
+            </CardContent>
+          </Card>
+
+          {/* Payments Table */}
+          <Card>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <TextField
+                    size="small"
+                    label="Search by name"
+                    variant="outlined"
+                    sx={{ mr: 2 }}
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                  />
+                  <ReceiptIcon sx={{ mr: 1 }} />
+                  <Typography variant="h6">Payment History</Typography>
+                </Box>
+
+
+                {contracts.length > 0 && (
+                  <FormControl size="small" sx={{ minWidth: 200 }}>
+                    <InputLabel>Payment Period</InputLabel>
+                    <Select
+                      value={selectedContract}
+                      label="Payment Period"
+                      onChange={(e) => setSelectedContract(e.target.value)}
+                    >
+                      <MenuItem value="current">Current Period</MenuItem>
+                      <MenuItem value="all">All Periods</MenuItem>
+                      {contracts.map((contract, index) => (
+                        <MenuItem key={contract.id} value={contract.id}>
+                          Period {contracts.length - index}: {formatDate(contract.startDate)} - {contract.endDate ? formatDate(contract.endDate) : 'Ongoing'}
+                        </MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                )}
               </Box>
-              
-              {paymentHistory.length === 0 ? (
-                <Alert severity="info">No payment history available for this apartment.</Alert>
+
+              {/* Contract Summary */}
+              {selectedContract !== 'all' && contractInfo.contract && (
+                <Card sx={{ mb: 3, bgcolor: 'grey.50' }}>
+                  <CardContent sx={{ py: 2 }}>
+                    <Grid container spacing={2} alignItems="center">
+                      <Grid item xs={12} md={8}>
+                        <Typography variant="subtitle2" gutterBottom>
+                          {selectedContract === 'current' ? 'Current Payment Period' : 'Selected Payment Period'} Summary
+                        </Typography>
+                        <Stack direction="row" spacing={2} flexWrap="wrap">
+                          <Chip
+                            label={`${formatDate(contractInfo.contract.startDate)} - ${contractInfo.contract.endDate ? formatDate(contractInfo.contract.endDate) : 'Ongoing'}`}
+                            variant="outlined"
+                            size="small"
+                          />
+                          <Chip
+                            label={`${formatCurrency(contractInfo.contract.rent || 0)}/month`}
+                            variant="outlined"
+                            size="small"
+                          />
+                          <Chip
+                            label={contractInfo.isExpired ? 'Expired' : contractInfo.isActive ? 'Active' : 'Inactive'}
+                            color={contractInfo.isExpired ? 'error' : contractInfo.isActive ? 'success' : 'default'}
+                            size="small"
+                          />
+                        </Stack>
+                      </Grid>
+                      <Grid item xs={12} md={4}>
+                        <Box sx={{ textAlign: { xs: 'left', md: 'right' } }}>
+                          <Typography variant="body2" color="text.secondary">
+                            Period Progress
+                          </Typography>
+                          <Typography variant="h6" color="primary" sx={{ fontWeight: 600 }}>
+                            {formatCurrency(contractInfo.totalPaid)} / {formatCurrency(contractInfo.totalDue)}
+                          </Typography>
+                          <Typography variant="body2" color="error.main" sx={{ fontWeight: 500 }}>
+                            Remaining: {formatCurrency(contractInfo.remaining)}
+                          </Typography>
+                        </Box>
+                      </Grid>
+                    </Grid>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Payments Table */}
+              {filteredPayments.length === 0 ? (
+                <Box sx={{ textAlign: 'center', py: 6 }}>
+                  <Typography variant="h6" color="text.secondary">
+                    No payments recorded
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    startIcon={<AddIcon />}
+                    onClick={handleAddPayment}
+                    sx={{ mt: 2 }}
+                  >
+                    Add First Payment
+                  </Button>
+                </Box>
               ) : (
-                <TableContainer component={Paper} variant="outlined">
-                  <Table size="small">
+                <TableContainer>
+                  <Table>
                     <TableHead>
                       <TableRow>
                         <TableCell>Date</TableCell>
-                        <TableCell>Month</TableCell>
-                        <TableCell>Status</TableCell>
-                        <TableCell align="right">Amount Due</TableCell>
-                        <TableCell align="right">Amount Paid</TableCell>
+                        <TableCell>Period</TableCell>
+                        <TableCell>Paid By</TableCell>
+                        <TableCell>Paid For</TableCell>
+                        <TableCell>Type</TableCell>
+                        <TableCell align="right">Amount</TableCell>
                         <TableCell>Method</TableCell>
-                        <TableCell align="right">Actions</TableCell>
+                        <TableCell>Mode</TableCell>
+                        <TableCell align="center">Actions</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {paymentHistory.map((record, index) => (
-                        <TableRow key={index} hover>
-                          <TableCell>{formatDate(record.paymentDate)}</TableCell>
-                          <TableCell>{record.month} {record.year || currentYear}</TableCell>
+                      {filteredPayments.map((payment) => (
+                        <TableRow key={payment.id} hover>
+                          <TableCell>{formatDate(payment.paymentDate)}</TableCell>
+                          <TableCell>{payment.month} {payment.year}</TableCell>
+                          <TableCell>{payment.paidBy || 'N/A'}</TableCell>
                           <TableCell>
-                            <Chip 
-                              label={record.status === 'paid' ? 'Paid' : record.status === 'partial' ? 'Partial' : 'Not Paid'}
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                              {(payment.paidFor || []).map((tenant, idx) => (
+                                <Chip
+                                  key={idx}
+                                  label={tenant}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ fontSize: '0.75rem' }}
+                                />
+                              ))}
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={payment.paymentType || 'rent'}
                               size="small"
-                              sx={{ 
-                                bgcolor: STATUS_COLORS[record.status],
-                                color: 'white'
-                              }}
+                              variant="outlined"
                             />
                           </TableCell>
-                          <TableCell align="right">{formatCurrency(record.amountDue || 0)}</TableCell>
-                          <TableCell align="right">{formatCurrency(record.amountPaid || 0)}</TableCell>
-                          <TableCell>{getPaymentMethodText(record.paymentMethod)}</TableCell>
-                          <TableCell align="right">
-                            <Tooltip title="View Receipt">
-                              <IconButton size="small" onClick={() => generateReceipt(record.month)}>
-                                <ReceiptIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
+                          <TableCell align="right" sx={{ fontWeight: 600 }}>
+                            {formatCurrency(payment.amountPaid)}
+                          </TableCell>
+                          <TableCell>{payment.paymentMethod || 'bank_transfer'}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={payment.isIndividual ? 'Individual' : 'Batch'}
+                              size="small"
+                              color={payment.isIndividual ? 'primary' : 'default'}
+                              icon={payment.isIndividual ? <PersonIcon /> : <PaymentIcon />}
+                            />
+                          </TableCell>
+                          <TableCell align="center">
+                            <IconButton
+                              size="small"
+                              onClick={() => handleEditPayment(payment)}
+                            >
+                              <EditIcon />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleDeletePayment(payment.id)}
+                              color="error"
+                            >
+                              <DeleteIcon />
+                            </IconButton>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -803,449 +830,410 @@ function PaymentScreen({ showNotification, initialApartment, isAdmin = true }) {
                   </Table>
                 </TableContainer>
               )}
-            </Paper>
-          </Collapse>
-
-          {/* Current Month Payment Entry */}
-          <Card sx={{ mb: 4, borderLeft: 4, borderColor: 'primary.main' }}>
-            <CardHeader 
-              title={
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <CalendarIcon sx={{ mr: 1, color: 'primary.main' }} />
-                  <Typography variant="h6">
-                    {currentMonth} {currentYear} Payment Entry
-                  </Typography>
-                </Box>
-              }
-              action={
-                <Chip
-                  label={paymentData[currentMonth]?.status === 'paid' ? 'Paid' : 
-                         paymentData[currentMonth]?.status === 'partial' ? 'Partial' : 'Not Paid'}
-                  color={paymentData[currentMonth]?.status === 'paid' ? 'success' : 
-                         paymentData[currentMonth]?.status === 'partial' ? 'warning' : 'error'}
-                />
-              }
-            />
-            <CardContent>
-              <Grid container spacing={3}>
-                {/* Payment Progress */}
-                <Grid item xs={12}>
-                  <Box sx={{ mb: 2 }}>
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
-                      <Typography variant="body2">Payment Progress</Typography>
-                      <Typography variant="body2">
-                        {calculatePaymentPercentage(currentMonth)}% collected
-                      </Typography>
-                    </Box>
-                    <LinearProgress
-                      variant="determinate"
-                      value={calculatePaymentPercentage(currentMonth)}
-                      sx={{
-                        height: 8,
-                        borderRadius: 1,
-                        backgroundColor: 'rgba(0,0,0,0.1)',
-                        '& .MuiLinearProgress-bar': {
-                          backgroundColor: paymentData[currentMonth]?.status === 'paid' ? STATUS_COLORS.paid : 
-                                           paymentData[currentMonth]?.status === 'partial' ? STATUS_COLORS.partial : 
-                                           STATUS_COLORS.not_paid
-                        }
-                      }}
-                    />
-                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 1 }}>
-                      <Typography variant="body2" fontWeight="medium">
-                        Remaining: {formatCurrency(calculateRemainingAmount(currentMonth))}
-                      </Typography>
-                    </Box>
-                  </Box>
-                </Grid>
-                
-                {/* Tenant Payment Grid */}
-                <Grid item xs={12}>
-                  <Typography variant="subtitle1" gutterBottom>
-                    Tenant Payments
-                  </Typography>
-                  
-                  {!paymentData[currentMonth]?.tenants || paymentData[currentMonth]?.tenants.length === 0 ? (
-                    <Alert severity="info">
-                      No tenants available for this apartment. Please add tenants to the apartment first.
-                    </Alert>
-                  ) : (
-                    <TableContainer component={Paper} variant="outlined">
-                      <Table>
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Tenant</TableCell>
-                            <TableCell align="right">Amount Due</TableCell>
-                            <TableCell align="right">Amount Paid</TableCell>
-                            <TableCell>Status</TableCell>
-                            <TableCell align="right">Actions</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {paymentData[currentMonth]?.tenants.map((tenant, index) => (
-                            <TableRow key={index}>
-                              <TableCell>{tenant.name}</TableCell>
-                              <TableCell align="right">
-                                <TextField
-                                  size="small"
-                                  variant="outlined"
-                                  type="number"
-                                  value={tenant.amountDue || 0}
-                                  onChange={(e) => handleTenantAmountChange(currentMonth, index, 'amountDue', e.target.value)}
-                                  InputProps={{
-                                    startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
-                                  }}
-                                  sx={{ width: '120px' }}
-                                />
-                              </TableCell>
-                              <TableCell align="right">
-                                <TextField
-                                  size="small"
-                                  variant="outlined"
-                                  type="number"
-                                  value={tenant.amountPaid || 0}
-                                  onChange={(e) => handleTenantAmountChange(currentMonth, index, 'amountPaid', e.target.value)}
-                                  error={tenant.amountPaid < tenant.amountDue}
-                                  InputProps={{
-                                    startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
-                                  }}
-                                  sx={{ width: '120px' }}
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                                  <Switch
-                                    checked={tenant.paid}
-                                    onChange={(e) => handleTenantStatusChange(currentMonth, index, e.target.checked)}
-                                    color="success"
-                                  />
-                                  <Chip
-                                    label={tenant.paid ? 'Paid' : 
-                                           tenant.amountPaid > 0 ? 'Partial' : 'Unpaid'}
-                                    size="small"
-                                    sx={{
-                                      bgcolor: tenant.paid ? STATUS_COLORS.paid : 
-                                              tenant.amountPaid > 0 ? STATUS_COLORS.partial : STATUS_COLORS.not_paid,
-                                      color: 'white',
-                                      ml: 1
-                                    }}
-                                  />
-                                </Box>
-                              </TableCell>
-                              <TableCell align="right">
-                                <Tooltip title={tenant.paid ? 'Mark as Unpaid' : 'Mark as Paid'}>
-                                  <IconButton 
-                                    size="small" 
-                                    color={tenant.paid ? 'error' : 'success'}
-                                    onClick={() => handleTenantStatusChange(currentMonth, index, !tenant.paid)}
-                                  >
-                                    {tenant.paid ? <UnpaidIcon fontSize="small" /> : <PaidIcon fontSize="small" />}
-                                  </IconButton>
-                                </Tooltip>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  )}
-                </Grid>
-                
-                {/* Additional Payments */}
-                <Grid item xs={12}>
-                  <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
-                    Additional Costs
-                  </Typography>
-                  <Grid container spacing={3}>
-                    <Grid item xs={12} md={4}>
-                      <TextField
-                        fullWidth
-                        label="Internet"
-                        variant="outlined"
-                        type="number"
-                        value={paymentData[currentMonth]?.extraPayments?.internet || 0}
-                        onChange={(e) => handleExtraPaymentChange(currentMonth, 'internet', e.target.value)}
-                        InputProps={{
-                          startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
-                        }}
-                      />
-                    </Grid>
-                    <Grid item xs={12} md={4}>
-                      <TextField
-                        fullWidth
-                        label="Electricity"
-                        variant="outlined"
-                        type="number"
-                        value={paymentData[currentMonth]?.extraPayments?.electricity || 0}
-                        onChange={(e) => handleExtraPaymentChange(currentMonth, 'electricity', e.target.value)}
-                        InputProps={{
-                          startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
-                        }}
-                      />
-                    </Grid>
-                    <Grid item xs={12} md={4}>
-                      <TextField
-                        fullWidth
-                        label="Other Expenses"
-                        variant="outlined"
-                        type="number"
-                        value={paymentData[currentMonth]?.extraPayments?.other || 0}
-                        onChange={(e) => handleExtraPaymentChange(currentMonth, 'other', e.target.value)}
-                        InputProps={{
-                          startAdornment: <Typography variant="caption" sx={{ mr: 0.5 }}>$</Typography>,
-                        }}
-                      />
-                    </Grid>
-                  </Grid>
-                </Grid>
-                
-                {/* Payment Details */}
-                <Grid item xs={12}>
-                  <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
-                    Payment Details
-                  </Typography>
-                  <Grid container spacing={3}>
-                    <Grid item xs={12} md={6}>
-                      <TextField
-                        fullWidth
-                        label="Payment Date"
-                        type="date"
-                        value={paymentDate}
-                        onChange={(e) => setPaymentDate(e.target.value)}
-                        InputLabelProps={{ shrink: true }}
-                      />
-                    </Grid>
-                    <Grid item xs={12} md={6}>
-                      <FormControl fullWidth>
-                        <InputLabel id="payment-method-label">Payment Method</InputLabel>
-                        <Select
-                          labelId="payment-method-label"
-                          value={paymentMethod}
-                          label="Payment Method"
-                          onChange={(e) => setPaymentMethod(e.target.value)}
-                        >
-                          <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
-                          <MenuItem value="cash">Cash</MenuItem>
-                          <MenuItem value="credit_card">Credit Card</MenuItem>
-                          <MenuItem value="check">Check</MenuItem>
-                          <MenuItem value="other">Other</MenuItem>
-                        </Select>
-                      </FormControl>
-                    </Grid>
-                  </Grid>
-                </Grid>
-                
-                {/* Quick Actions */}
-                <Grid item xs={12}>
-                  <Typography variant="subtitle1" gutterBottom sx={{ mt: 2 }}>
-                    Quick Actions
-                  </Typography>
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
-                    <Button
-                      variant="outlined"
-                      startIcon={<PaymentIcon />}
-                      onClick={() => splitRentEvenly(currentMonth)}
-                      disabled={!paymentData[currentMonth]?.tenants?.length}
-                    >
-                      Split Rent Evenly
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      color="success"
-                      startIcon={<PaidIcon />}
-                      onClick={() => markAllAsPaid(currentMonth)}
-                      disabled={!paymentData[currentMonth]?.tenants?.length}
-                    >
-                      Mark All Paid
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      color="error"
-                      startIcon={<UnpaidIcon />}
-                      onClick={() => markAllAsUnpaid(currentMonth)}
-                      disabled={!paymentData[currentMonth]?.tenants?.length}
-                    >
-                      Mark All Unpaid
-                    </Button>
-                  </Box>
-                </Grid>
-              </Grid>
             </CardContent>
           </Card>
-          
-          {/* Save Button */}
-          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-            <Button
-              variant="contained"
-              color="primary"
-              size="large"
-              onClick={handleSubmit}
-              startIcon={isSaving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
-              disabled={loading || isSaving}
-            >
-              {isSaving ? 'Saving...' : 'Save Payment Data'}
-            </Button>
-          </Box>
-          
-          {/* All Months Overview */}
-          <Box sx={{ mt: 5 }}>
-            <Typography variant="h6" gutterBottom>
-              Payment Status Overview
-            </Typography>
-            <TableContainer component={Paper} variant="outlined">
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Month</TableCell>
-                    <TableCell align="right">Expected</TableCell>
-                    <TableCell align="right">Collected</TableCell>
-                    <TableCell align="right">Progress</TableCell>
-                    <TableCell>Status</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {MONTH_LIST.map((month) => {
-                    const monthStatus = getMonthStatus(month);
-                    const percentage = calculatePaymentPercentage(month);
-                    return (
-                      <TableRow 
-                        key={month} 
-                        sx={{ 
-                          bgcolor: monthStatus === 'current' ? 'rgba(25, 118, 210, 0.05)' : undefined,
-                          '&:hover': {
-                            bgcolor: 'rgba(0, 0, 0, 0.04)',
-                            cursor: 'pointer'
-                          }
-                        }}
-                        onClick={() => setCurrentMonth(month)}
-                      >
-                        <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                            {monthStatus === 'current' && (
-                              <Chip 
-                                label="Current"
-                                color="primary" 
-                                size="small"
-                                sx={{ mr: 1 }}
-                              />
-                            )}
-                            {month} {currentYear}
-                          </Box>
-                        </TableCell>
-                        <TableCell align="right">{formatCurrency(totalRent)}</TableCell>
-                        <TableCell align="right">
-                          {formatCurrency(totalRent - calculateRemainingAmount(month))}
-                        </TableCell>
-                        <TableCell align="right">
-                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                            <Box sx={{ width: '100%', mr: 1 }}>
-                              <LinearProgress 
-                                variant="determinate" 
-                                value={percentage} 
-                                sx={{
-                                  height: 6,
-                                  borderRadius: 1,
-                                  '& .MuiLinearProgress-bar': {
-                                    backgroundColor: percentage === 100 ? STATUS_COLORS.paid : 
-                                                    percentage > 0 ? STATUS_COLORS.partial : 
-                                                    STATUS_COLORS.not_paid
-                                  }
-                                }}
-                              />
-                            </Box>
-                            <Box sx={{ minWidth: 35 }}>
-                              <Typography variant="body2" color="text.secondary">
-                                {percentage}%
-                              </Typography>
-                            </Box>
-                          </Box>
-                        </TableCell>
-                        <TableCell>
-                          <Chip 
-                            label={paymentData[month]?.status === 'paid' ? 'Paid' : 
-                                 paymentData[month]?.status === 'partial' ? 'Partial' : 'Not Paid'}
-                            size="small"
-                            sx={{ 
-                              bgcolor: paymentData[month]?.status === 'paid' ? STATUS_COLORS.paid : 
-                                      paymentData[month]?.status === 'partial' ? STATUS_COLORS.partial : 
-                                      STATUS_COLORS.not_paid,
-                              color: 'white'
-                            }}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          </Box>
         </>
       )}
-      
-      {/* Receipts Dialog */}
+
+      {/* Add/Edit Payment Dialog */}
       <Dialog
-        open={receiptsDialogOpen}
-        onClose={() => setReceiptsDialogOpen(false)}
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
         maxWidth="md"
         fullWidth
       >
         <DialogTitle>
-          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="h6">
-              <ReceiptIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
-              Payment Receipts
-            </Typography>
-            <IconButton onClick={() => setReceiptsDialogOpen(false)}>
-              <CloseIcon />
-            </IconButton>
-          </Box>
+          {editingPayment ? 'Edit Payment' : 'Add Payment'}
         </DialogTitle>
         <DialogContent>
-          {paymentHistory.length === 0 ? (
-            <Alert severity="info">
-              No payment receipts available. Save payments to generate receipts.
-            </Alert>
+          <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+            <Tabs value={paymentMode} onChange={(e, newValue) => setPaymentMode(newValue)}>
+              <Tab label="Batch Payment" icon={<PaymentIcon />} />
+              <Tab label="Individual Payment" icon={<PersonIcon />} />
+            </Tabs>
+          </Box>
+
+          {paymentMode === 1 ? (
+            // Individual Payment Form
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Amount"
+                  type="number"
+                  value={individualPaymentForm.amount}
+                  onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, amount: e.target.value })}
+                  required
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth required>
+                  <InputLabel>Tenant</InputLabel>
+                  <Select
+                    value={individualPaymentForm.tenant_name}
+                    label="Tenant"
+                    onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, tenant_name: e.target.value })}
+                  >
+                    {tenants.map((tenant) => (
+                      <MenuItem key={tenant} value={tenant}>
+                        {tenant}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Payment Type</InputLabel>
+                  <Select
+                    value={individualPaymentForm.payment_type}
+                    label="Payment Type"
+                    onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, payment_type: e.target.value })}
+                  >
+                    {PAYMENT_TYPES.map((type) => (
+                      <MenuItem key={type.value} value={type.value}>
+                        {type.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Payment Method</InputLabel>
+                  <Select
+                    value={individualPaymentForm.payment_method}
+                    label="Payment Method"
+                    onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, payment_method: e.target.value })}
+                  >
+                    {PAYMENT_METHODS.map((method) => (
+                      <MenuItem key={method.value} value={method.value}>
+                        {method.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Payment Date"
+                  type="date"
+                  value={individualPaymentForm.payment_date}
+                  onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, payment_date: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Grid container spacing={1}>
+                  <Grid item xs={8}>
+                    <FormControl fullWidth>
+                      <InputLabel>Month</InputLabel>
+                      <Select
+                        value={individualPaymentForm.month}
+                        label="Month"
+                        onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, month: e.target.value })}
+                      >
+                        {MONTHS.map((month) => (
+                          <MenuItem key={month} value={month}>
+                            {month}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <TextField
+                      fullWidth
+                      label="Year"
+                      type="number"
+                      value={individualPaymentForm.year}
+                      onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, year: parseInt(e.target.value) })}
+                    />
+                  </Grid>
+                </Grid>
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Notes (optional)"
+                  multiline
+                  rows={3}
+                  value={individualPaymentForm.notes}
+                  onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, notes: e.target.value })}
+                />
+              </Grid>
+            </Grid>
           ) : (
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Date</TableCell>
-                    <TableCell>Month</TableCell>
-                    <TableCell align="right">Amount</TableCell>
-                    <TableCell>Method</TableCell>
-                    <TableCell align="right">Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {paymentHistory.map((record, index) => (
-                    <TableRow key={index}>
-                      <TableCell>{formatDate(record.paymentDate)}</TableCell>
-                      <TableCell>{record.month} {record.year || currentYear}</TableCell>
-                      <TableCell align="right">{formatCurrency(record.amountPaid || 0)}</TableCell>
-                      <TableCell>{getPaymentMethodText(record.paymentMethod)}</TableCell>
-                      <TableCell align="right">
-                        <Button
-                          size="small"
-                          startIcon={<ReceiptIcon />}
-                          onClick={() => generateReceipt(record.month)}
-                        >
-                          Receipt
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+            // Batch Payment Form
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={5}>
+                <TextField
+                  fullWidth
+                  label="Amount"
+                  type="number"
+                  value={paymentForm.amount}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
+                  required
+                />
+              </Grid>
+              <Grid item xs={12} md={7}>
+                <FormControl fullWidth>
+                  <InputLabel>Paid By</InputLabel>
+                  <Select
+                    value={paymentForm.paidBy}
+                    label="Paid By"
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paidBy: e.target.value })}
+                  >
+                    {tenants.map((tenant) => (
+                      <MenuItem key={tenant} value={tenant}>
+                        {tenant}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12}>
+                <FormControl fullWidth>
+                  <InputLabel>Paid For</InputLabel>
+                  <Select
+                    multiple
+                    value={paymentForm.paidFor}
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paidFor: e.target.value })}
+                    input={<OutlinedInput label="Paid For" />}
+                    renderValue={(selected) => (
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                        {selected.map((value) => (
+                          <Chip key={value} label={value} size="small" />
+                        ))}
+                      </Box>
+                    )}
+                  >
+                    {tenants.map((tenant) => (
+                      <MenuItem key={tenant} value={tenant}>
+                        <Checkbox checked={paymentForm.paidFor.indexOf(tenant) > -1} />
+                        <ListItemText primary={tenant} />
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Payment Type</InputLabel>
+                  <Select
+                    value={paymentForm.paymentType}
+                    label="Payment Type"
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentType: e.target.value })}
+                  >
+                    {PAYMENT_TYPES.map((type) => (
+                      <MenuItem key={type.value} value={type.value}>
+                        {type.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Payment Method</InputLabel>
+                  <Select
+                    value={paymentForm.paymentMethod}
+                    label="Payment Method"
+                    onChange={(e) => setPaymentForm({ ...paymentForm, paymentMethod: e.target.value })}
+                  >
+                    {PAYMENT_METHODS.map((method) => (
+                      <MenuItem key={method.value} value={method.value}>
+                        {method.label}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  fullWidth
+                  label="Payment Date"
+                  type="date"
+                  value={paymentForm.paymentDate}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, paymentDate: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Grid container spacing={2}>
+                  <Grid item xs={8}>
+                    <FormControl fullWidth>
+                      <InputLabel>Month</InputLabel>
+                      <Select
+                        value={paymentForm.month}
+                        label="Month"
+                        onChange={(e) => setPaymentForm({ ...paymentForm, month: e.target.value })}
+                      >
+                        {MONTHS.map((month) => (
+                          <MenuItem key={month} value={month}>
+                            {month}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={4}>
+                    <TextField
+                      fullWidth
+                      label="Year"
+                      type="number"
+                      value={paymentForm.year}
+                      onChange={(e) => setPaymentForm({ ...paymentForm, year: parseInt(e.target.value) })}
+                    />
+                  </Grid>
+                </Grid>
+              </Grid>
+              <Grid item xs={12}>
+                <TextField
+                  fullWidth
+                  label="Notes (optional)"
+                  multiline
+                  rows={3}
+                  value={paymentForm.notes}
+                  onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}
+                />
+              </Grid>
+            </Grid>
           )}
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setReceiptsDialogOpen(false)}>Close</Button>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleSubmitPayment}
+            disabled={loading ||
+              (paymentMode === 0 && (!paymentForm.amount || !paymentForm.paidBy || paymentForm.paidFor.length === 0)) ||
+              (paymentMode === 1 && (!individualPaymentForm.amount || !individualPaymentForm.tenant_name))
+            }
+          >
+            {editingPayment ? 'Update' : 'Add'} Payment
+          </Button>
         </DialogActions>
       </Dialog>
-    </Paper>
+
+      {/* New Payment Period Dialog */}
+      <Dialog
+        open={periodDialogOpen}
+        onClose={() => setPeriodDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Create New Payment Period</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Starting a new payment period will update the apartment's contract information with the current tenants.
+          </Typography>
+          <Grid container spacing={2}>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Period Start Date"
+                type="date"
+                value={periodForm.startDate}
+                onChange={(e) => setPeriodForm({ ...periodForm, startDate: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                required
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Period End Date"
+                type="date"
+                value={periodForm.endDate}
+                onChange={(e) => setPeriodForm({ ...periodForm, endDate: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                helperText="Leave empty for open-ended period"
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Monthly Rent"
+                type="number"
+                value={periodForm.rent}
+                onChange={(e) => setPeriodForm({ ...periodForm, rent: e.target.value })}
+                required
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>Tenants</InputLabel>
+                <Select
+                  multiple
+                  value={periodForm.tenants}
+                  onChange={(e) => setPeriodForm({ ...periodForm, tenants: e.target.value })}
+                  input={<OutlinedInput label="Tenants" />}
+                  renderValue={(selected) => (
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                      {selected.map((value) => (
+                        <Chip key={value} label={value} size="small" />
+                      ))}
+                    </Box>
+                  )}
+                >
+                  {tenants.map((tenant) => (
+                    <MenuItem key={tenant} value={tenant}>
+                      <Checkbox checked={periodForm.tenants.indexOf(tenant) > -1} />
+                      <ListItemText primary={tenant} />
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+          </Grid>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setPeriodDialogOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleCreatePaymentPeriod}
+            disabled={loading || !periodForm.startDate || !periodForm.rent}
+          >
+            Create Payment Period
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Loading indicator */}
+      {loading && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 3 }}>
+          <CircularProgress />
+        </Box>
+      )}
+
+      {/* No apartment selected state */}
+      {!selectedApartment && !loading && (
+        <Card>
+          <CardContent sx={{ textAlign: 'center', py: 6 }}>
+            <DescriptionIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+            <Typography variant="h6" color="text.secondary" gutterBottom>
+              Select an Apartment
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Choose an apartment from the dropdown above to manage its payments
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Error state */}
+      {selectedApartment && !loading && !apartmentDetails && (
+        <Alert severity="error" sx={{ mt: 3 }}>
+          Failed to load apartment data. Please try selecting the apartment again.
+        </Alert>
+      )}
+    </Box>
   );
 }
 

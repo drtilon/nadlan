@@ -16,10 +16,14 @@ __pycache__/
 .eggs/
 env/
 venv/
+.venv/
 ENV/
 *.env
 backend/logs/app.log
 claude.py
+backend.txt
+frontend.txt
+logs/
 
 # OS Generated Files
 .DS_Store

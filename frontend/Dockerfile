@@ -1,19 +1,33 @@
-FROM node:18-alpine
+# Build stage
+FROM node:20-alpine as build
 
 WORKDIR /app
 
-# Copy package files and install dependencies
-COPY package.json package-lock.json* ./
-RUN npm install
+# Copy package files
+COPY package*.json ./
 
-# Copy the application source code
+# Install ALL dependencies (including devDependencies for build)
+RUN npm ci --no-audit --no-fund --prefer-offline
+
+# Copy source code
 COPY . .
 
-# Expose Vite development server port
-EXPOSE 3001
+# Build with optimizations
+ENV NODE_ENV=production
+ENV NODE_OPTIONS="--max-old-space-size=4096"
+RUN npm run build
 
-# Don't switch to node user - run as root
-# No USER instruction
+# Production stage
+FROM nginx:alpine
 
-# Start the Vite development server
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "3001"]
+# Copy built files
+COPY --from=build /app/dist /usr/share/nginx/html
+
+# Copy nginx configuration
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Expose port
+EXPOSE 80
+
+# Start nginx
+CMD ["nginx", "-g", "daemon off;"]

@@ -1,62 +1,51 @@
-// components/AnalyticsPanel.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Container,
   Grid,
   Paper,
   Typography,
-  Card,
-  CardContent,
   Box,
   Tabs,
   Tab,
   CircularProgress,
-  Divider,
-  Chip,
   IconButton,
   Button,
+  Alert,
+  TextField,
+  InputAdornment,
+  Tooltip,
+  Chip,
+  Avatar,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Card,
+  CardContent,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
-  TableRow,
-  LinearProgress,
-  Alert,
-  Stack,
-  TextField,
-  InputAdornment,
-  Tooltip,
-  Badge
+  TableRow
 } from '@mui/material';
 import {
   Refresh as RefreshIcon,
   Apartment as ApartmentIcon,
-  Person as PersonIcon,
   AttachMoney as MoneyIcon,
-  AttachMoney as AttachMoney,
-  ShowChart as ChartIcon,
-  Lightbulb as UtilityIcon,
-  Receipt as ReceiptIcon,
-  CalendarToday as CalendarIcon,
-  Payments as PaymentsIcon,
+  TrendingUp as TrendingUpIcon,
   Search as SearchIcon,
+  Payments as PaymentsIcon,
+  SwapHoriz as SwapIcon,
+  DoneAll as DoneAllIcon,
   Warning as WarningIcon,
-  CheckCircle as CheckCircleIcon,
-  Cancel as CancelIcon,
-  ErrorOutline as ErrorOutlineIcon,
-  ArrowForward as ArrowForwardIcon,
-  HourglassEmpty as PendingIcon,
-  FilterList as FilterListIcon,
-  Description as DescriptionIcon,
-  ArrowDropDown as ArrowDropDownIcon,
-  ArrowDropUp as ArrowDropUpIcon
+  HourglassEmpty as PendingIcon
 } from '@mui/icons-material';
 import {
-  LineChart,
-  Line,
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -68,17 +57,17 @@ import {
   Cell
 } from 'recharts';
 import { useNavigate } from 'react-router-dom';
+import PropTypes from 'prop-types';
 import api from '../utils/api';
-import NetEarningsSection from './NetEarningsSection';
-// Colors for charts
+
 const COLORS = {
-  primary: '#1976d2',
-  secondary: '#dc004e',
-  success: '#4caf50',
-  warning: '#ff9800',
-  error: '#f44336',
-  info: '#03a9f4',
-  pie: ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#9C27B0', '#3F51B5']
+  primary: '#3b82f6',
+  secondary: '#ef4444',
+  success: '#22c55e',
+  warning: '#f97316',
+  info: '#8b5cf6',
+  muted: '#6b7280',
+  pie: ['#3b82f6', '#22c55e', '#f97316', '#ef4444', '#8b5cf6', '#10b981']
 };
 
 function AnalyticsPanel({ showNotification }) {
@@ -88,1151 +77,646 @@ function AnalyticsPanel({ showNotification }) {
   const [paymentTrends, setPaymentTrends] = useState([]);
   const [apartmentMetrics, setApartmentMetrics] = useState([]);
   const [tenantPayments, setTenantPayments] = useState([]);
-  const [expenseData, setExpenseData] = useState([]);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filteredData, setFilteredData] = useState({
-    overdueTenants: [],
-    upcomingPayments: [],
-    apartmentIssues: []
-  });
-  const [sortConfig, setSortConfig] = useState({
-    key: 'dueDate',
-    direction: 'asc'
-  });
-  
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortField, setSortField] = useState('address');
+  const [sortDirection, setSortDirection] = useState('asc');
+  const [paymentMonthFilter, setPaymentMonthFilter] = useState('all');
+  const [paymentFilter, setPaymentFilter] = useState('all');
   const navigate = useNavigate();
 
-  // Fetch all analytics data
-  const fetchAnalytics = async () => {
+  const handleGoToUserAnalytics = useCallback(() => {
+    navigate('/user-analytics');
+  }, [navigate]);
+
+  const fetchAnalytics = useCallback(async () => {
     setLoading(true);
     setError(null);
-
     try {
-      // Fetch summary data
-      const summaryResponse = await api.get('/analytics/summary');
+      const [summaryResponse, trendsResponse, apartmentResponse, tenantPaymentsResponse] = await Promise.all([
+        api.get('/analytics/summary'),
+        api.get('/analytics/payment-trends'),
+        api.get('/analytics/apartment-metrics'),
+        api.get('/analytics/tenant-payments')
+      ]);
+
       setSummaryData(summaryResponse.data);
-
-      // Fetch payment trends
-      const trendsResponse = await api.get('/analytics/payment-trends');
-      setPaymentTrends(trendsResponse.data);
-
-      // Fetch apartment metrics
-      const apartmentResponse = await api.get('/analytics/apartment-metrics');
-      setApartmentMetrics(apartmentResponse.data);
-
-      // Fetch tenant payment analytics
-      const tenantResponse = await api.get('/analytics/tenant-payments');
-      setTenantPayments(tenantResponse.data);
-
-      // Fetch expense analytics
-      const expenseResponse = await api.get('/analytics/expenses');
-      setExpenseData(expenseResponse.data);
-
-      // Process data for actionable insights
-      processActionableData(
-        summaryResponse.data,
-        apartmentResponse.data,
-        tenantResponse.data
-      );
-
-      setLoading(false);
+      setPaymentTrends(trendsResponse.data || []);
+      setApartmentMetrics(apartmentResponse.data || []);
+      setTenantPayments(tenantPaymentsResponse.data || []);
     } catch (err) {
       console.error('Error fetching analytics:', err);
-      setError('Failed to load analytics data. Please try again.');
+      setError('Failed to load analytics data.');
       showNotification('Error loading analytics data', 'error');
+    } finally {
       setLoading(false);
     }
-  };
+  }, [showNotification]);
 
-  // Process data to get actionable insights
-  const processActionableData = (summary, apartments, tenants) => {
-    // Extract tenants with overdue payments
-    const overdueTenants = [];
-    tenants.forEach(tenant => {
-      // Check payment history for unpaid amounts
-      const unpaidPayments = tenant.payment_history.filter(payment => 
-        payment.status === 'unpaid' || 
-        (payment.status === 'partial' && payment.due > payment.paid)
+  useEffect(() => {
+    fetchAnalytics();
+  }, [fetchAnalytics]);
+
+  const formatCurrency = (amount) =>
+    amount == null
+      ? '$0'
+      : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(amount);
+
+  const getPaymentStatusPieData = useMemo(() => {
+    if (!summaryData?.payment_status) return [];
+    return [
+      { name: 'Paid', value: summaryData.payment_status.paid || 0 },
+      { name: 'Partial', value: summaryData.payment_status.partial || 0 },
+      { name: 'Not Paid', value: summaryData.payment_status.not_paid || 0 }
+    ];
+  }, [summaryData]);
+
+  const calculateTotalNetProfit = useMemo(() => {
+    if (!apartmentMetrics?.length) return 0;
+    return apartmentMetrics.reduce((sum, apt) => sum + (apt.netProfit || 0), 0);
+  }, [apartmentMetrics]);
+
+  const getFilteredSortedApartments = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    let filtered = apartmentMetrics || [];
+
+    if (term) {
+      filtered = filtered.filter(apt =>
+        (apt.address || '').toLowerCase().includes(term) ||
+        String(apt.rent || '').includes(term) ||
+        String(apt.pricePerMeter || '').includes(term)
       );
-      
-      if (unpaidPayments.length > 0) {
-        // Add tenant with overdue details
-        overdueTenants.push({
-          tenantId: tenant.id || `tenant-${Math.random().toString(36).substr(2, 9)}`,
-          name: tenant.name,
-          totalOverdue: unpaidPayments.reduce((total, payment) => 
-            total + (payment.due - payment.paid), 0),
-          paymentRatio: tenant.payment_ratio,
-          lastPaymentDate: tenant.payment_history
-            .filter(payment => payment.status === 'paid' || payment.status === 'partial')
-            .sort((a, b) => new Date(b.date || '2023-01-01') - new Date(a.date || '2023-01-01'))
-            [0]?.date || 'Never',
-          unpaidMonths: unpaidPayments.map(payment => payment.month).join(', '),
-          apartment: apartments.find(apt => 
-            apt.tenants && apt.tenants.some(t => t.name === tenant.name)
-          )?.address || 'Unknown'
+    }
+
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(apt => apt.status === statusFilter);
+    }
+
+    return filtered.sort((a, b) => {
+      const aValue = a[sortField] ?? '';
+      const bValue = b[sortField] ?? '';
+
+      if (['rent', 'pricePerMeter', 'netProfit', 'size'].includes(sortField)) {
+        const aNum = parseFloat(aValue) || 0;
+        const bNum = parseFloat(bValue) || 0;
+        return sortDirection === 'asc' ? aNum - bNum : bNum - aNum;
+      }
+
+      return sortDirection === 'asc'
+        ? String(aValue).localeCompare(String(bValue))
+        : String(bValue).localeCompare(String(aValue));
+    });
+  }, [apartmentMetrics, searchTerm, statusFilter, sortField, sortDirection]);
+
+  const handleSort = useCallback((field) => {
+    setSortField(field);
+    setSortDirection(prev => sortField === field ? (prev === 'asc' ? 'desc' : 'asc') : 'asc');
+  }, [sortField]);
+
+  // Generate monthly payment chart data
+  const getMonthlyPaymentChartData = () => {
+    const monthNames = ["January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"];
+    
+    // Initialize data with zeros
+    const data = monthNames.map(month => ({
+      month,
+      paid: 0,
+      partial: 0,
+      unpaid: 0
+    }));
+    
+    // Populate with actual data
+    tenantPayments.forEach(tenant => {
+      if (tenant.payment_history) {
+        tenant.payment_history.forEach(payment => {
+          const monthIndex = monthNames.indexOf(payment.month);
+          if (monthIndex >= 0) {
+            if (payment.status === 'paid') {
+              data[monthIndex].paid += payment.paid || 0;
+            } else if (payment.status === 'partial') {
+              data[monthIndex].partial += payment.paid || 0;
+              data[monthIndex].unpaid += (payment.due - payment.paid) || 0;
+            } else {
+              data[monthIndex].unpaid += payment.due || 0;
+            }
+          }
         });
       }
     });
-
-    // Extract upcoming payments (next 30 days)
-    const today = new Date();
-    const thirtyDaysFromNow = new Date(today.getTime() + (30 * 24 * 60 * 60 * 1000));
     
-    const upcomingPayments = apartments.map(apt => {
-      // Calculate next payment date (assume 1st of next month)
-      const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-      const daysUntilPayment = Math.ceil((nextMonth - today) / (1000 * 60 * 60 * 24));
-      
-      return {
-        apartmentId: apt.id,
-        address: apt.address,
-        tenantCount: apt.tenant_count || 0,
-        rent: apt.rent || 0,
-        status: apt.payment_status || 'not_paid',
-        dueDate: nextMonth.toISOString().split('T')[0],
-        daysUntil: daysUntilPayment,
-        isPastDue: daysUntilPayment < 0
-      };
-    });
-
-    // Extract apartment issues (expiring contracts, maintenance needs)
-    const apartmentIssues = apartments
-      .filter(apt => 
-        (apt.days_until_expiration !== null && apt.days_until_expiration < 90) || // Contract expiring soon
-        apt.status === 'vacant' // Vacant apartment
-      )
-      .map(apt => ({
-        apartmentId: apt.id,
-        address: apt.address,
-        issue: apt.days_until_expiration !== null && apt.days_until_expiration < 90 
-          ? `Contract expires in ${apt.days_until_expiration} days` 
-          : 'Vacant property',
-        priority: apt.days_until_expiration !== null && apt.days_until_expiration < 30 
-          ? 'high' 
-          : apt.days_until_expiration !== null && apt.days_until_expiration < 60
-            ? 'medium'
-            : 'low',
-        daysUntil: apt.days_until_expiration,
-        status: apt.status
-      }));
-
-    // Set the processed data
-    setFilteredData({
-      overdueTenants,
-      upcomingPayments,
-      apartmentIssues
-    });
-  };
-
-  // Initial data fetch
-  useEffect(() => {
-    fetchAnalytics();
-  }, []);
-
-  // Filter data based on search term
-  useEffect(() => {
-    if (!summaryData || loading) return;
-
-    // Filter overdue tenants
-    const filteredOverdueTenants = filterData(filteredData.overdueTenants);
-    
-    // Filter upcoming payments
-    const filteredUpcomingPayments = filterData(filteredData.upcomingPayments);
-    
-    // Filter apartment issues
-    const filteredApartmentIssues = filterData(filteredData.apartmentIssues);
-
-    // Set filtered data
-    setFilteredData({
-      overdueTenants: filteredOverdueTenants,
-      upcomingPayments: filteredUpcomingPayments,
-      apartmentIssues: filteredApartmentIssues
-    });
-  }, [searchTerm, summaryData, loading]);
-
-  // Helper function to filter data based on search term
-  const filterData = (dataArray) => {
-    if (!searchTerm.trim()) return dataArray;
-    
-    const term = searchTerm.toLowerCase();
-    return dataArray.filter(item => {
-      // Check all string properties of the item
-      return Object.values(item).some(value => 
-        typeof value === 'string' && value.toLowerCase().includes(term)
-      );
-    });
-  };
-
-  // Handle tab change
-  const handleTabChange = (event, newValue) => {
-    setTabIndex(newValue);
-  };
-
-  // Format currency
-  const formatCurrency = (amount) => {
-    if (amount === undefined || amount === null) return '$0';
-    
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    }).format(amount);
-  };
-
-  // Format date
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-      });
-    } catch (e) {
-      return dateString;
-    }
-  };
-
-  // Get priority color
-  const getPriorityColor = (priority) => {
-    switch (priority) {
-      case 'high':
-        return COLORS.error;
-      case 'medium':
-        return COLORS.warning;
-      case 'low':
-        return COLORS.info;
-      default:
-        return COLORS.info;
-    }
+    return data;
   };
 
   // Get payment status color
   const getPaymentStatusColor = (status) => {
     switch (status) {
-      case 'paid':
-        return COLORS.success;
-      case 'partial':
-        return COLORS.warning;
-      case 'not_paid':
-      default:
-        return COLORS.error;
+      case 'paid': return 'success';
+      case 'partial': return 'warning';
+      case 'unpaid': return 'error';
+      default: return 'default';
     }
-  };
-
-  // Get payment ratio color
-  const getPaymentRatioColor = (ratio) => {
-    if (ratio >= 90) return COLORS.success;
-    if (ratio >= 75) return COLORS.info;
-    if (ratio >= 50) return COLORS.warning;
-    return COLORS.error;
-  };
-
-  // Handle sorting
-  const handleSort = (key) => {
-    let direction = 'asc';
-    if (sortConfig.key === key && sortConfig.direction === 'asc') {
-      direction = 'desc';
-    }
-    setSortConfig({ key, direction });
-  };
-
-  // Get sorted data
-  const getSortedData = (data) => {
-    if (!sortConfig.key) return data;
-    
-    return [...data].sort((a, b) => {
-      // Handle special sorting for dates
-      if (sortConfig.key.includes('date') || sortConfig.key.includes('Date')) {
-        const dateA = new Date(a[sortConfig.key] || '1970-01-01');
-        const dateB = new Date(b[sortConfig.key] || '1970-01-01');
-        
-        return sortConfig.direction === 'asc' 
-          ? dateA - dateB 
-          : dateB - dateA;
-      }
-      
-      // Handle numeric sorting
-      if (typeof a[sortConfig.key] === 'number' && typeof b[sortConfig.key] === 'number') {
-        return sortConfig.direction === 'asc' 
-          ? a[sortConfig.key] - b[sortConfig.key] 
-          : b[sortConfig.key] - a[sortConfig.key];
-      }
-      
-      // Handle string sorting
-      if (a[sortConfig.key] < b[sortConfig.key]) {
-        return sortConfig.direction === 'asc' ? -1 : 1;
-      }
-      if (a[sortConfig.key] > b[sortConfig.key]) {
-        return sortConfig.direction === 'asc' ? 1 : -1;
-      }
-      
-      return 0;
-    });
-  };
-
-  // Render sort icon
-  const renderSortIcon = (key) => {
-    if (sortConfig.key !== key) {
-      return null;
-    }
-    return sortConfig.direction === 'asc' 
-      ? <ArrowDropUpIcon fontSize="small" /> 
-      : <ArrowDropDownIcon fontSize="small" />;
-  };
-
-  // Navigate to payment page for specific apartment
-  const goToPayments = (apartmentId) => {
-    if (apartmentId) {
-      navigate(`/payments/${apartmentId}`);
-    } else {
-      navigate('/payments');
-    }
-  };
-
-  // Navigate to tenant details page
-  const goToTenantDetails = (tenantId) => {
-    navigate(`/tenants/${tenantId}`);
-  };
-
-  // Prepare data for payment status pie chart
-  const getPaymentStatusPieData = () => {
-    if (!summaryData) return [];
-
-    return [
-      { name: 'Paid', value: summaryData.payment_status.paid },
-      { name: 'Partial', value: summaryData.payment_status.partial },
-      { name: 'Not Paid', value: summaryData.payment_status.not_paid }
-    ];
   };
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Paper sx={{ p: 3, mb: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h4" component="h1" sx={{ display: 'flex', alignItems: 'center' }}>
-            <ChartIcon sx={{ mr: 1 }} /> Financial Dashboard
-          </Typography>
-          <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={fetchAnalytics}
-            disabled={loading}
-          >
-            Refresh Data
-          </Button>
+    <Container maxWidth="xl" sx={{ mt: 4, mb: 8 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+        <Typography
+          variant="h3"
+          sx={{
+            fontWeight: 700,
+            color: COLORS.primary,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1
+          }}
+        >
+          <TrendingUpIcon fontSize="large" /> Admin Analytics Dashboard
+        </Typography>
+        
+        <Button
+          variant="contained"
+          color="primary"
+          startIcon={<SwapIcon />}
+          onClick={handleGoToUserAnalytics}
+          sx={{ 
+            fontWeight: 'medium',
+            boxShadow: 2,
+            '&:hover': {
+              boxShadow: 4,
+              bgcolor: 'primary.dark'
+            }
+          }}
+        >
+          View Property Dashboard
+        </Button>
+      </Box>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 4, borderRadius: 2 }}>{error}</Alert>
+      )}
+
+      {loading ? (
+        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 12 }}>
+          <CircularProgress size={80} sx={{ color: COLORS.primary }} />
+          <Typography variant="h6" sx={{ mt: 3, color: COLORS.muted }}>Loading financial insights...</Typography>
         </Box>
+      ) : (
+        <>
+          {/* Summary Cards */}
+          <Grid container spacing={3} sx={{ mb: 6 }}>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card sx={{ bgcolor: COLORS.primary, color: 'white', borderRadius: 3, boxShadow: 3 }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>Total Apartments</Typography>
+                      <Typography variant="h4" sx={{ fontWeight: 600 }}>{summaryData?.total_apartments || 0}</Typography>
+                      <Typography variant="body2" sx={{ mt: 1 }}>
+                        {summaryData?.occupied_apartments || 0} occupied ({summaryData?.occupancy_rate || 0}%)
+                      </Typography>
+                    </Box>
+                    <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 48, height: 48 }}>
+                      <ApartmentIcon fontSize="large" />
+                    </Avatar>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card sx={{ bgcolor: COLORS.success, color: 'white', borderRadius: 3, boxShadow: 3 }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>Net Profit</Typography>
+                      <Typography variant="h4" sx={{ fontWeight: 600 }}>
+                        {formatCurrency(calculateTotalNetProfit)}
+                      </Typography>
+                      <Typography variant="body2" sx={{ mt: 1 }}>
+                        Across all units
+                      </Typography>
+                    </Box>
+                    <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 48, height: 48 }}>
+                      <MoneyIcon fontSize="large" />
+                    </Avatar>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card sx={{ bgcolor: COLORS.info, color: 'white', borderRadius: 3, boxShadow: 3 }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>Avg Price/m²</Typography>
+                      <Typography variant="h4" sx={{ fontWeight: 600 }}>
+                        {formatCurrency(
+                          apartmentMetrics.length
+                            ? apartmentMetrics.reduce((sum, apt) => sum + (apt.pricePerMeter || 0), 0) / apartmentMetrics.length
+                            : 0
+                        )}
+                      </Typography>
+                      <Typography variant="body2" sx={{ mt: 1 }}>Across units</Typography>
+                    </Box>
+                    <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 48, height: 48 }}>
+                      <TrendingUpIcon fontSize="large" />
+                    </Avatar>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card sx={{ bgcolor: COLORS.warning, color: 'white', borderRadius: 3, boxShadow: 3 }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box>
+                      <Typography variant="subtitle2" sx={{ opacity: 0.8 }}>Total Revenue</Typography>
+                      <Typography variant="h4" sx={{ fontWeight: 600 }}>
+                        {formatCurrency(
+                          paymentTrends.reduce((sum, month) => sum + (month.collected || 0), 0)
+                        )}
+                      </Typography>
+                      <Typography variant="body2" sx={{ mt: 1 }}>Year to date</Typography>
+                    </Box>
+                    <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 48, height: 48 }}>
+                      <MoneyIcon fontSize="large" />
+                    </Avatar>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 3 }}>
-            {error}
-          </Alert>
-        )}
-
-        {loading ? (
-          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 8 }}>
-            <CircularProgress size={60} />
-            <Typography variant="h6" sx={{ mt: 2 }}>
-              Loading analytics data...
-            </Typography>
-          </Box>
-        ) : (
-          <>
-            {/* Summary Cards */}
-            {summaryData && (
-              <Grid container spacing={3} sx={{ mb: 4 }}>
-                <Grid item xs={12} sm={6} lg={3}>
-                  <Card sx={{ bgcolor: 'primary.light', color: 'primary.contrastText' }}>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <Typography variant="h6" component="div" gutterBottom>
-                            Apartments
-                          </Typography>
-                          <Typography variant="h3" component="div">
-                            {summaryData.total_apartments}
-                          </Typography>
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            {summaryData.occupied_apartments} occupied ({summaryData.occupancy_rate}%)
-                          </Typography>
-                        </div>
-                        <ApartmentIcon fontSize="large" />
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-
-                <Grid item xs={12} sm={6} lg={3}>
-                  <Card sx={{ bgcolor: 'success.light', color: 'success.contrastText' }}>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <Typography variant="h6" component="div" gutterBottom>
-                            Total Revenue
-                          </Typography>
-                          <Typography variant="h3" component="div">
-                            {formatCurrency(summaryData.total_expected_rent)}
-                          </Typography>
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            {summaryData.payment_status.paid + summaryData.payment_status.partial} payments received
-                          </Typography>
-                        </div>
-                        <MoneyIcon fontSize="large" />
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-
-                <Grid item xs={12} sm={6} lg={3}>
-                  <Card sx={{ bgcolor: 'warning.light', color: 'warning.contrastText' }}>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <Typography variant="h6" component="div" gutterBottom>
-                            Total Tenants
-                          </Typography>
-                          <Typography variant="h3" component="div">
-                            {summaryData.total_tenants}
-                          </Typography>
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            Across {summaryData.occupied_apartments} occupied apartments
-                          </Typography>
-                        </div>
-                        <PersonIcon fontSize="large" />
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-
-                <Grid item xs={12} sm={6} lg={3}>
-                  <Card sx={{ bgcolor: 'error.light', color: 'error.contrastText' }}>
-                    <CardContent>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
-                          <Typography variant="h6" component="div" gutterBottom>
-                            Attention Needed
-                          </Typography>
-                          <Typography variant="h3" component="div">
-                            {filteredData.overdueTenants.length + filteredData.apartmentIssues.length}
-                          </Typography>
-                          <Typography variant="body2" sx={{ mt: 1 }}>
-                            {filteredData.overdueTenants.length} payment issues, {filteredData.apartmentIssues.length} property issues
-                          </Typography>
-                        </div>
-                        <WarningIcon fontSize="large" />
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
-            )}
-
-            {/* Search box */}
-            <Box sx={{ mb: 3 }}>
-              <TextField
-                fullWidth
-                placeholder="Search tenants, apartments, or issues..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                  endAdornment: searchTerm && (
-                    <InputAdornment position="end">
-                      <IconButton size="small" onClick={() => setSearchTerm('')}>
-                        <CancelIcon />
-                      </IconButton>
-                    </InputAdornment>
-                  )
-                }}
-              />
-            </Box>
-
-            {/* Navigation Tabs */}
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-              <Tabs
-                value={tabIndex}
-                onChange={handleTabChange}
-                variant="scrollable"
-                scrollButtons="auto"
-                aria-label="analytics tabs"
+          {/* Search and Filters */}
+          <Box sx={{ mb: 4, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            <TextField
+              variant="outlined"
+              placeholder="Search by apartment or amount..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              sx={{
+                '& .MuiOutlinedInput-root': {
+                  borderRadius: 2,
+                  bgcolor: 'white',
+                  flexGrow: 1,
+                  maxWidth: '480px'
+                }
+              }}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon sx={{ color: COLORS.muted }} />
+                  </InputAdornment>
+                )
+              }}
+            />
+            <FormControl variant="outlined" sx={{ minWidth: 180 }}>
+              <InputLabel>Property Status</InputLabel>
+              <Select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                label="Property Status"
               >
-                <Tab label="Overdue Payments" icon={<WarningIcon />} iconPosition="start" />
-                <Tab label="Upcoming Payments" icon={<CalendarIcon />} iconPosition="start" />
-                <Tab label="Property Alerts" icon={<ErrorOutlineIcon />} iconPosition="start" />
-                <Tab label="Financial Overview" icon={<MoneyIcon />} iconPosition="start" />
-                <Tab label="Net Earnings" icon={<AttachMoney />} iconPosition="start" /> {/* New tab */}
-              </Tabs>
-            </Box>
+                <MenuItem value="all">All Properties</MenuItem>
+                <MenuItem value="occupied">Occupied</MenuItem>
+                <MenuItem value="vacant">Vacant</MenuItem>
+                <MenuItem value="contract_sent">Contract Sent</MenuItem>
+              </Select>
+            </FormControl>
+            <Tooltip title="Refresh Data">
+              <IconButton
+                onClick={fetchAnalytics}
+                disabled={loading}
+                sx={{ bgcolor: 'white', boxShadow: 1, '&:hover': { bgcolor: 'rgba(0, 0, 0, 0.04)' } }}
+                aria-label="refresh analytics data"
+              >
+                <RefreshIcon />
+              </IconButton>
+            </Tooltip>
+          </Box>
 
-            {/* Overdue Payments Tab */}
-            {tabIndex === 0 && (
-              <>
-                <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="h6">
-                    Tenants with Overdue Payments
+          {/* Tabs */}
+          <Tabs
+            value={tabIndex}
+            onChange={(e, newValue) => setTabIndex(newValue)}
+            sx={{
+              bgcolor: 'white',
+              borderRadius: 2,
+              boxShadow: 1,
+              mb: 4,
+              '& .MuiTab-root': {
+                textTransform: 'none',
+                fontWeight: 500,
+                color: COLORS.muted,
+                '&.Mui-selected': { color: COLORS.primary }
+              },
+              '& .MuiTabs-indicator': { bgcolor: COLORS.primary }
+            }}
+          >
+            <Tab label="Overview" icon={<TrendingUpIcon />} iconPosition="start" />
+            <Tab label="Apartments" icon={<ApartmentIcon />} iconPosition="start" />
+            <Tab label="Payments" icon={<PaymentsIcon />} iconPosition="start" />
+          </Tabs>
+
+          {/* Overview Tab */}
+          {tabIndex === 0 && (
+            <Grid container spacing={4}>
+              <Grid item xs={12} md={6}>
+                <Paper sx={{ p: 3, borderRadius: 3, boxShadow: 2 }}>
+                  <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: COLORS.primary }}>
+                    Payment Status
                   </Typography>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Button 
-                      variant="outlined" 
-                      startIcon={<FilterListIcon />}
-                      size="small"
-                    >
-                      Filter
-                    </Button>
-                    <Button 
-                      variant="contained"
-                      startIcon={<MoneyIcon />}
-                      size="small"
-                      onClick={() => goToPayments()}
-                    >
-                      Payment Manager
-                    </Button>
-                  </Box>
-                </Box>
-
-                {filteredData.overdueTenants.length === 0 ? (
-                  <Alert severity="success" sx={{ mb: 3 }}>
-                    Great news! No tenants have overdue payments at the moment.
-                  </Alert>
-                ) : (
-                  <TableContainer component={Paper} variant="outlined">
-                    <Table>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell 
-                            onClick={() => handleSort('name')}
-                            sx={{ cursor: 'pointer' }}
-                          >
-                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                              Tenant {renderSortIcon('name')}
-                            </Box>
-                          </TableCell>
-                          <TableCell 
-                            onClick={() => handleSort('apartment')}
-                            sx={{ cursor: 'pointer' }}
-                          >
-                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                              Apartment {renderSortIcon('apartment')}
-                            </Box>
-                          </TableCell>
-                          <TableCell 
-                            onClick={() => handleSort('totalOverdue')}
-                            align="right"
-                            sx={{ cursor: 'pointer' }}
-                          >
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                              Amount Overdue {renderSortIcon('totalOverdue')}
-                            </Box>
-                          </TableCell>
-                          <TableCell 
-                            onClick={() => handleSort('unpaidMonths')}
-                            sx={{ cursor: 'pointer' }}
-                          >
-                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                              Unpaid Months {renderSortIcon('unpaidMonths')}
-                            </Box>
-                          </TableCell>
-                          <TableCell 
-                            onClick={() => handleSort('paymentRatio')}
-                            align="center"
-                            sx={{ cursor: 'pointer' }}
-                          >
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              Payment History {renderSortIcon('paymentRatio')}
-                            </Box>
-                          </TableCell>
-                          <TableCell align="right">Actions</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {getSortedData(filteredData.overdueTenants).map((tenant, index) => (
-                          <TableRow key={tenant.tenantId || index} hover>
-                            <TableCell>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <PersonIcon color="primary" fontSize="small" />
-                                <Typography variant="body2" fontWeight="medium">
-                                  {tenant.name}
-                                </Typography>
-                              </Box>
-                            </TableCell>
-                            <TableCell>
-                              <Chip 
-                                icon={<ApartmentIcon />} 
-                                label={tenant.apartment} 
-                                size="small" 
-                                variant="outlined"
-                              />
-                            </TableCell>
-                            <TableCell align="right">
-                              <Typography 
-                                variant="body2" 
-                                fontWeight="bold" 
-                                color="error.main"
-                              >
-                                {formatCurrency(tenant.totalOverdue)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2">
-                                {tenant.unpaidMonths}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="center">
-                              <Box sx={{ width: '100%', display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <LinearProgress 
-                                  variant="determinate" 
-                                  value={tenant.paymentRatio} 
-                                  sx={{ 
-                                    height: 8, 
-                                    borderRadius: 5,
-                                    flexGrow: 1,
-                                    backgroundColor: 'rgba(0,0,0,0.1)',
-                                    '& .MuiLinearProgress-bar': {
-                                      backgroundColor: getPaymentRatioColor(tenant.paymentRatio)
-                                    }
-                                  }}
-                                />
-                                <Typography variant="caption" fontWeight="medium">
-                                  {tenant.paymentRatio}%
-                                </Typography>
-                              </Box>
-                            </TableCell>
-                            <TableCell align="right">
-                              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  onClick={() => goToTenantDetails(tenant.tenantId)}
-                                >
-                                  Details
-                                </Button>
-                                <Button
-                                  size="small"
-                                  variant="contained"
-                                  startIcon={<PaymentsIcon />}
-                                  onClick={() => goToPayments(tenant.apartmentId)}
-                                >
-                                  Collect
-                                </Button>
-                              </Box>
-                            </TableCell>
-                          </TableRow>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={getPaymentStatusPieData}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={100}
+                        dataKey="value"
+                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                      >
+                        {getPaymentStatusPieData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS.pie[index % COLORS.pie.length]} />
                         ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                )}
-              </>
-            )}
-
-            {/* Upcoming Payments Tab */}
-            {tabIndex === 1 && (
-              <>
-                <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="h6">
-                    Upcoming Payments Schedule
+                      </Pie>
+                      <RechartsTooltip formatter={(value) => [`${value} units`, 'Count']} />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Paper sx={{ p: 3, borderRadius: 3, boxShadow: 2 }}>
+                  <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: COLORS.primary }}>
+                    Revenue Trends
                   </Typography>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Button 
-                      variant="outlined" 
-                      startIcon={<FilterListIcon />}
-                      size="small"
-                    >
-                      Filter
-                    </Button>
-                    <Button 
-                      variant="contained"
-                      startIcon={<ReceiptIcon />}
-                      size="small"
-                      onClick={() => goToPayments()}
-                    >
-                      All Payments
-                    </Button>
-                  </Box>
-                </Box>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={paymentTrends}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={COLORS.muted} />
+                      <XAxis dataKey="month" stroke={COLORS.muted} />
+                      <YAxis stroke={COLORS.muted} />
+                      <RechartsTooltip formatter={(value) => [formatCurrency(value), 'Amount']} />
+                      <Legend />
+                      <Line type="monotone" dataKey="expected" name="Expected" stroke={COLORS.info} strokeWidth={2} />
+                      <Line type="monotone" dataKey="collected" name="Collected" stroke={COLORS.success} strokeWidth={2} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Paper>
+              </Grid>
+            </Grid>
+          )}
 
-                <TableContainer component={Paper} variant="outlined">
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell 
-                          onClick={() => handleSort('address')}
+          {/* Apartments Tab */}
+          {tabIndex === 1 && (
+            <Paper sx={{ p: 3, borderRadius: 3, boxShadow: 2 }}>
+              <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: COLORS.primary }}>
+                Apartment Performance
+              </Typography>
+              <TableContainer>
+                <Table aria-label="apartment performance table">
+                  <TableHead>
+                    <TableRow>
+                      {[
+                        { key: 'address', label: 'Address' },
+                        { key: 'model', label: 'Model' },
+                        { key: 'rent', label: 'Rent', align: 'right' },
+                        { key: 'size', label: 'Size (m²)', align: 'right' },
+                        { key: 'pricePerMeter', label: 'Price/m²', align: 'right' },
+                        { key: 'netProfit', label: 'Net Profit', align: 'right' },
+                        { key: 'status', label: 'Status' }
+                      ].map(({ key, label, align }) => (
+                        <TableCell
+                          key={key}
+                          align={align}
+                          onClick={() => handleSort(key)}
                           sx={{ cursor: 'pointer' }}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => e.key === 'Enter' && handleSort(key)}
                         >
-                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                            Property {renderSortIcon('address')}
+                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: align === 'right' ? 'flex-end' : 'flex-start' }}>
+                            <Typography fontWeight={600}>{label}</Typography>
                           </Box>
                         </TableCell>
-                        <TableCell 
-                          onClick={() => handleSort('dueDate')}
-                          sx={{ cursor: 'pointer' }}
-                        >
-                          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                            Due Date {renderSortIcon('dueDate')}
-                          </Box>
-                        </TableCell>
-                        <TableCell 
-                          onClick={() => handleSort('daysUntil')}
-                          align="center"
-                          sx={{ cursor: 'pointer' }}
-                        >
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            Days Left {renderSortIcon('daysUntil')}
-                          </Box>
-                        </TableCell>
-                        <TableCell 
-                          onClick={() => handleSort('rent')}
-                          align="right"
-                          sx={{ cursor: 'pointer' }}
-                        >
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-                            Amount {renderSortIcon('rent')}
-                          </Box>
-                        </TableCell>
-                        <TableCell 
-                          onClick={() => handleSort('status')}
-                          align="center"
-                          sx={{ cursor: 'pointer' }}
-                        >
-                          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                            Status {renderSortIcon('status')}
-                          </Box>
-                        </TableCell>
-                        <TableCell align="right">Actions</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {getSortedData(filteredData.upcomingPayments).map((payment) => (
-                        <TableRow 
-                          key={payment.apartmentId} 
-                          hover
-                          sx={{ 
-                            bgcolor: payment.isPastDue ? 'rgba(244, 67, 54, 0.08)' : 'inherit'
-                          }}
-                        >
-                          <TableCell>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <ApartmentIcon color="primary" fontSize="small" />
-                              <Typography variant="body2" fontWeight="medium">
-                                {payment.address}
-                              </Typography>
-                              {payment.tenantCount > 0 && (
-                                <Chip
-                                  size="small"
-                                  label={`${payment.tenantCount} tenants`}
-                                  variant="outlined"
-                                />
-                              )}
-                            </Box>
-                          </TableCell>
-                          <TableCell>
-                            <Typography 
-                              variant="body2" 
-                              fontWeight={payment.isPastDue ? "bold" : "regular"}
-                              color={payment.isPastDue ? "error.main" : "inherit"}
-                            >
-                              {formatDate(payment.dueDate)}
-                            </Typography>
-                          </TableCell>
-                          <TableCell align="center">
-                            <Chip
-                              label={payment.isPastDue ? `${Math.abs(payment.daysUntil)} days overdue` : `${payment.daysUntil} days left`}
-                              color={payment.isPastDue ? "error" : payment.daysUntil <= 5 ? "warning" : "default"}
-                              size="small"
-                            />
-                          </TableCell>
-                          <TableCell align="right">
-                            <Typography variant="body2" fontWeight="bold">
-                              {formatCurrency(payment.rent)}
-                            </Typography>
-                          </TableCell>
-                          <TableCell align="center">
-                            <Chip
-                              icon={
-                                payment.status === 'paid' ? <CheckCircleIcon /> :
-                                payment.status === 'partial' ? <PendingIcon /> :
-                                <CancelIcon />
-                              }
-                              label={
-                                payment.status === 'paid' ? 'Paid' :
-                                payment.status === 'partial' ? 'Partial' :
-                                'Unpaid'
-                              }
-                              color={
-                                payment.status === 'paid' ? 'success' :
-                                payment.status === 'partial' ? 'warning' :
-                                'error'
-                              }
-                              size="small"
-                            />
-                          </TableCell>
-                          <TableCell align="right">
-                            <Button
-                              size="small"
-                              variant="contained"
-                              startIcon={<PaymentsIcon />}
-                              onClick={() => goToPayments(payment.apartmentId)}
-                            >
-                              Collect
-                            </Button>
-                          </TableCell>
-                        </TableRow>
                       ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </>
-            )}
-
-            {/* Property Alerts Tab */}
-            {tabIndex === 2 && (
-              <>
-                <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Typography variant="h6">
-                    Property Issues & Contract Alerts
-                  </Typography>
-                  <Box sx={{ display: 'flex', gap: 1 }}>
-                    <Button 
-                      variant="outlined" 
-                      startIcon={<FilterListIcon />}
-                      size="small"
-                    >
-                      Filter
-                    </Button>
-                    <Button 
-                      variant="contained"
-                      startIcon={<DescriptionIcon />}
-                      size="small"
-                      onClick={() => navigate('/contracts')}
-                    >
-                      Contracts
-                    </Button>
-                  </Box>
-                </Box>
-
-                {filteredData.apartmentIssues.length === 0 ? (
-                  <Alert severity="success" sx={{ mb: 3 }}>
-                    All properties are in good standing with no imminent contract expirations.
-                  </Alert>
-                ) : (
-                  <TableContainer component={Paper} variant="outlined">
-                    <Table>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell 
-                            onClick={() => handleSort('address')}
-                            sx={{ cursor: 'pointer' }}
-                          >
-                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                              Property {renderSortIcon('address')}
-                            </Box>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {getFilteredSortedApartments.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} align="center">
+                          <Alert severity="info">No apartments match your search criteria</Alert>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      getFilteredSortedApartments.map((apt) => (
+                        <TableRow key={apt.id} hover sx={{ '&:hover': { bgcolor: '#f9fafb' } }}>
+                          <TableCell>{apt.address || 'N/A'}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={apt.model === 'rental' ? 'Rental' : 'Management'}
+                              color={apt.model === 'rental' ? 'primary' : 'info'}
+                              size="small"
+                            />
                           </TableCell>
-                          <TableCell 
-                            onClick={() => handleSort('issue')}
-                            sx={{ cursor: 'pointer' }}
-                          >
-                            <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                              Issue {renderSortIcon('issue')}
-                            </Box>
+                          <TableCell align="right">{formatCurrency(apt.rent)}</TableCell>
+                          <TableCell align="right">{apt.size || 'N/A'}</TableCell>
+                          <TableCell align="right">{formatCurrency(apt.pricePerMeter)}</TableCell>
+                          <TableCell align="right">{formatCurrency(apt.netProfit)}</TableCell>
+                          <TableCell>
+                            <Chip
+                              label={apt.status === 'occupied' ? 'Occupied' :
+                                    apt.status === 'vacant' ? 'Vacant' :
+                                    apt.status === 'contract_sent' ? 'Contract Sent' : apt.status || 'Unknown'}
+                              color={apt.status === 'occupied' ? 'success' :
+                                    apt.status === 'vacant' ? 'primary' :
+                                    'warning'}
+                              size="small"
+                            />
                           </TableCell>
-                          <TableCell 
-                            onClick={() => handleSort('priority')}
-                            align="center"
-                            sx={{ cursor: 'pointer' }}
-                          >
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              Priority {renderSortIcon('priority')}
-                            </Box>
-                          </TableCell>
-                          <TableCell 
-                            onClick={() => handleSort('status')}
-                            align="center"
-                            sx={{ cursor: 'pointer' }}
-                          >
-                            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                              Status {renderSortIcon('status')}
-                            </Box>
-                          </TableCell>
-                          <TableCell align="right">Actions</TableCell>
                         </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {getSortedData(filteredData.apartmentIssues).map((issue) => (
-                          <TableRow key={issue.apartmentId} hover>
-                            <TableCell>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <ApartmentIcon color="primary" fontSize="small" />
-                                <Typography variant="body2" fontWeight="medium">
-                                  {issue.address}
-                                </Typography>
-                              </Box>
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2">
-                                {issue.issue}
-                              </Typography>
-                            </TableCell>
-                            <TableCell align="center">
-                              <Chip
-                                label={issue.priority.charAt(0).toUpperCase() + issue.priority.slice(1)}
-                                color={
-                                  issue.priority === 'high' ? 'error' :
-                                  issue.priority === 'medium' ? 'warning' :
-                                  'default'
-                                }
-                                size="small"
-                              />
-                            </TableCell>
-                            <TableCell align="center">
-                              <Chip
-                                label={
-                                  issue.status === 'vacant' ? 'Vacant' :
-                                  issue.status === 'occupied' ? 'Occupied' :
-                                  issue.status || 'Unknown'
-                                }
-                                variant="outlined"
-                                size="small"
-                              />
-                            </TableCell>
-                            <TableCell align="right">
-                              <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  onClick={() => navigate('/dashboard')}
-                                >
-                                  View
-                                </Button>
-                                {issue.issue.includes('Contract') && (
-                                  <Button
-                                    size="small"
-                                    variant="contained"
-                                    startIcon={<DescriptionIcon />}
-                                    onClick={() => navigate('/contracts')}
-                                  >
-                                    Renew
-                                  </Button>
-                                )}
-                                {issue.status === 'vacant' && (
-                                  <Button
-                                    size="small"
-                                    variant="contained"
-                                    color="success"
-                                    onClick={() => navigate('/dashboard')}
-                                  >
-                                    Advertise
-                                  </Button>
-                                )}
-                              </Box>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                )}
-              </>
-            )}
-            {tabIndex === 4 && (
-              <NetEarningsSection
-                paymentTrends={paymentTrends}
-                expenseData={expenseData}
-                apartments={apartmentMetrics}
-                loading={loading}
-                onRefresh={fetchAnalytics}
-              />
-            )}
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          )}
 
-            {/* Financial Overview Tab */}
-            {tabIndex === 3 && (
+          {/* Payments Tab */}
+          {tabIndex === 2 && (
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, fontWeight: 600, color: COLORS.primary }}>
+                  <PaymentsIcon /> Payment Management
+                </Typography>
+                
+                <Box sx={{ display: 'flex', gap: 2 }}>
+                  <FormControl variant="outlined" size="small" sx={{ minWidth: 150 }}>
+                    <InputLabel>Month</InputLabel>
+                    <Select
+                      value={paymentMonthFilter}
+                      onChange={(e) => setPaymentMonthFilter(e.target.value)}
+                      label="Month"
+                    >
+                      <MenuItem value="all">All Months</MenuItem>
+                      {["January", "February", "March", "April", "May", "June", 
+                        "July", "August", "September", "October", "November", "December"
+                      ].map(month => (
+                        <MenuItem key={month} value={month}>{month}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                  <FormControl variant="outlined" size="small" sx={{ minWidth: 150 }}>
+                    <InputLabel>Payment Status</InputLabel>
+                    <Select
+                      value={paymentFilter}
+                      onChange={(e) => setPaymentFilter(e.target.value)}
+                      label="Payment Status"
+                    >
+                      <MenuItem value="all">All Statuses</MenuItem>
+                      <MenuItem value="paid">Paid</MenuItem>
+                      <MenuItem value="partial">Partial</MenuItem>
+                      <MenuItem value="unpaid">Unpaid</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
+              </Box>
+              
               <Grid container spacing={3}>
-                {/* Payment Status Distribution */}
-                <Grid item xs={12} md={6}>
-                  <Paper sx={{ p: 2, height: '100%' }}>
-                    <Typography variant="h6" gutterBottom>
-                      Payment Status Distribution
-                    </Typography>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <PieChart>
-                        <Pie
-                          data={getPaymentStatusPieData()}
-                          cx="50%"
-                          cy="50%"
-                          labelLine={false}
-                          outerRadius={100}
-                          fill="#8884d8"
-                          dataKey="value"
-                          label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                        >
-                          {getPaymentStatusPieData().map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS.pie[index % COLORS.pie.length]} />
-                          ))}
-                        </Pie>
-                        <RechartsTooltip formatter={(value) => [`${value} apartments`, 'Count']} />
-                        <Legend />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </Paper>
-                </Grid>
-
-                {/* Monthly Revenue Breakdown */}
-                <Grid item xs={12} md={6}>
-                  <Paper sx={{ p: 2 }}>
-                    <Typography variant="h6" gutterBottom>
-                      Monthly Revenue Trends
-                    </Typography>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart
-                        data={paymentTrends}
-                        margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="month" />
-                        <YAxis />
-                        <RechartsTooltip formatter={(value) => [formatCurrency(value), 'Amount']} />
-                        <Legend />
-                        <Bar dataKey="expected" name="Expected" fill={COLORS.info} stackId="a" />
-                        <Bar dataKey="collected" name="Collected" fill={COLORS.success} stackId="b" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </Paper>
-                </Grid>
-
-                {/* Top Performing Tenants */}
-                <Grid item xs={12} md={6}>
-                  <Paper sx={{ p: 2 }}>
-                    <Typography variant="h6" gutterBottom sx={{ mb: 2 }}>
-                      Top 5 Performing Tenants
-                    </Typography>
-                    <TableContainer>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Tenant</TableCell>
-                            <TableCell align="right">Payment Ratio</TableCell>
-                            <TableCell align="right">Total Paid</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {tenantPayments
-                            .sort((a, b) => b.payment_ratio - a.payment_ratio)
-                            .slice(0, 5)
-                            .map((tenant) => (
-                              <TableRow key={tenant.name} hover>
-                                <TableCell>
-                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    <PersonIcon fontSize="small" color="primary" />
-                                    <Typography variant="body2">{tenant.name}</Typography>
-                                  </Box>
-                                </TableCell>
-                                <TableCell align="right">
-                                  <Chip 
-                                    label={`${tenant.payment_ratio}%`} 
-                                    size="small"
-                                    sx={{ 
-                                      bgcolor: getPaymentRatioColor(tenant.payment_ratio),
-                                      color: 'white' 
-                                    }}
-                                  />
-                                </TableCell>
-                                <TableCell align="right">
-                                  {formatCurrency(tenant.total_paid)}
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </Paper>
-                </Grid>
-
-                {/* Tenants Requiring Attention */}
-                <Grid item xs={12} md={6}>
-                  <Paper sx={{ p: 2 }}>
-                    <Typography variant="h6" gutterBottom sx={{ mb: 2 }}>
-                      Tenants Requiring Attention
-                    </Typography>
-                    <TableContainer>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Tenant</TableCell>
-                            <TableCell align="right">Payment Ratio</TableCell>
-                            <TableCell align="right">Amount Due</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {tenantPayments
-                            .sort((a, b) => a.payment_ratio - b.payment_ratio)
-                            .slice(0, 5)
-                            .map((tenant) => (
-                              <TableRow key={tenant.name} hover>
-                                <TableCell>
-                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                    <PersonIcon fontSize="small" color="error" />
-                                    <Typography variant="body2">{tenant.name}</Typography>
-                                  </Box>
-                                </TableCell>
-                                <TableCell align="right">
-                                  <Chip 
-                                    label={`${tenant.payment_ratio}%`} 
-                                    size="small"
-                                    sx={{ 
-                                      bgcolor: getPaymentRatioColor(tenant.payment_ratio),
-                                      color: 'white' 
-                                    }}
-                                  />
-                                </TableCell>
-                                <TableCell align="right">
-                                  {formatCurrency(tenant.total_due - tenant.total_paid)}
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </Paper>
-                </Grid>
-
-                {/* Expense Trend */}
+                {/* Payment Overview Chart */}
                 <Grid item xs={12}>
-                  <Paper sx={{ p: 2 }}>
-                    <Typography variant="h6" gutterBottom>
-                      Monthly Expenses
+                  <Paper sx={{ p: 3, borderRadius: 3, boxShadow: 2 }}>
+                    <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: COLORS.primary }}>
+                      Monthly Payment Overview
                     </Typography>
-                    <ResponsiveContainer width="100%" height={300}>
-                      <BarChart
-                        data={expenseData}
-                        margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="month" />
-                        <YAxis />
-                        <RechartsTooltip formatter={(value) => [formatCurrency(value), 'Amount']} />
-                        <Legend />
-                        <Bar dataKey="internet" name="Internet" fill={COLORS.info} stackId="a" />
-                        <Bar dataKey="electricity" name="Electricity" fill={COLORS.warning} stackId="a" />
-                        <Bar dataKey="other" name="Other" fill={COLORS.secondary} stackId="a" />
-                      </BarChart>
-                    </ResponsiveContainer>
+                    <Box sx={{ height: 400 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={getMonthlyPaymentChartData()}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.1)" />
+                          <XAxis dataKey="month" />
+                          <YAxis tickFormatter={(value) => formatCurrency(value)} />
+                          <RechartsTooltip formatter={(value) => [formatCurrency(value), '']} />
+                          <Legend />
+                          <Bar 
+                            dataKey="paid" 
+                            name="Paid" 
+                            stackId="a" 
+                            fill={COLORS.success}
+                            radius={[4, 4, 0, 0]}
+                          />
+                          <Bar 
+                            dataKey="partial" 
+                            name="Partial" 
+                            stackId="a" 
+                            fill={COLORS.warning}
+                            radius={[4, 4, 0, 0]}
+                          />
+                          <Bar 
+                            dataKey="unpaid" 
+                            name="Unpaid" 
+                            stackId="a" 
+                            fill={COLORS.secondary}
+                            radius={[4, 4, 0, 0]}
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </Box>
                   </Paper>
+                </Grid>
+                
+                {/* Payment Stats */}
+                <Grid item xs={12}>
+                  <Grid container spacing={3}>
+                    <Grid item xs={12} md={4}>
+                      <Card sx={{ bgcolor: COLORS.success, color: 'white', borderRadius: 2, height: '100%' }}>
+                        <CardContent>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Box>
+                              <Typography variant="subtitle2">Paid Payments</Typography>
+                              <Typography variant="h4" sx={{ mt: 1, fontWeight: 600 }}>
+                                {formatCurrency(
+                                  getMonthlyPaymentChartData().reduce((sum, item) => sum + item.paid, 0)
+                                )}
+                              </Typography>
+                              <Typography variant="body2" sx={{ mt: 1, opacity: 0.8 }}>
+                                {tenantPayments.filter(tenant => 
+                                  tenant.payment_history?.some(p => p.status === 'paid')
+                                ).length} tenants
+                              </Typography>
+                            </Box>
+                            <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 48, height: 48 }}>
+                              <DoneAllIcon fontSize="large" />
+                            </Avatar>
+                          </Box>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                    
+                    <Grid item xs={12} md={4}>
+                      <Card sx={{ bgcolor: COLORS.warning, color: 'white', borderRadius: 2, height: '100%' }}>
+                        <CardContent>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Box>
+                              <Typography variant="subtitle2">Partial Payments</Typography>
+                              <Typography variant="h4" sx={{ mt: 1, fontWeight: 600 }}>
+                                {formatCurrency(
+                                  getMonthlyPaymentChartData().reduce((sum, item) => sum + item.partial, 0)
+                                )}
+                              </Typography>
+                              <Typography variant="body2" sx={{ mt: 1, opacity: 0.8 }}>
+                                {tenantPayments.filter(tenant => 
+                                  tenant.payment_history?.some(p => p.status === 'partial')
+                                ).length} tenants
+                              </Typography>
+                            </Box>
+                            <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 48, height: 48 }}>
+                              <PendingIcon fontSize="large" />
+                            </Avatar>
+                          </Box>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                    
+                    <Grid item xs={12} md={4}>
+                      <Card sx={{ bgcolor: COLORS.secondary, color: 'white', borderRadius: 2, height: '100%' }}>
+                        <CardContent>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Box>
+                              <Typography variant="subtitle2">Unpaid Amount</Typography>
+                              <Typography variant="h4" sx={{ mt: 1, fontWeight: 600 }}>
+                                {formatCurrency(
+                                  getMonthlyPaymentChartData().reduce((sum, item) => sum + item.unpaid, 0)
+                                )}
+                              </Typography>
+                              <Typography variant="body2" sx={{ mt: 1, opacity: 0.8 }}>
+                                {tenantPayments.filter(tenant => 
+                                  tenant.payment_history?.some(p => p.status === 'unpaid')
+                                ).length} tenants
+                              </Typography>
+                            </Box>
+                            <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)', width: 48, height: 48 }}>
+                              <WarningIcon fontSize="large" />
+                            </Avatar>
+                          </Box>
+                        </CardContent>
+                      </Card>
+                    </Grid>
+                  </Grid>
                 </Grid>
               </Grid>
-            )}
-          </>
-        )}
-      </Paper>
+            </Box>
+          )}
+        </>
+      )}
     </Container>
   );
 }
+
+AnalyticsPanel.propTypes = {
+  showNotification: PropTypes.func.isRequired
+};
 
 export default AnalyticsPanel;

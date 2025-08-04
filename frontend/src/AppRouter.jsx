@@ -1,4 +1,4 @@
-// src/AppRouter.jsx
+// Updated AppRouter.jsx with admin access to UserAnalyticsPanel
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Box, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
@@ -13,11 +13,14 @@ import PaymentScreen from './components/PaymentScreen';
 import AdminPanel from './components/AdminPanel';
 import AnalyticsPanel from './components/AnalyticsPanel';
 import TenantsPanel from './components/TenantsPanel';
+import LandlordsPanel from './components/LandlordsPanel';
 import ContractGenerator from './components/ContractGenerator';
+import ContractManager from './components/ContractManager';
 import LogsViewer from './components/LogsViewer';
 import MainLayout from './components/MainLayout';
 import TenantDetails from './components/TenantDetails';
-
+import LandlordDetails from './components/LandlordDetails';
+import UserAnalyticsPanel from './components/UserAnalyticsPanel';
 // Utils and theme
 import theme from './theme';
 import { setAuthToken, verifyToken, getUserData } from './utils/api';
@@ -25,53 +28,64 @@ import sessionManager from './utils/SessionManager';
 
 // Protected Route wrapper component
 const ProtectedRoute = ({ children, adminOnly = false }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState(null);
-  const [isAuthorized, setIsAuthorized] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [isChecking, setIsChecking] = useState(true); // Add this state to track checking process
   const navigate = useNavigate();
   const location = useLocation();
   const authCheckInProgress = useRef(false);
 
   useEffect(() => {
     const checkAuth = async () => {
-      // Prevent multiple simultaneous auth checks
       if (authCheckInProgress.current) return;
       authCheckInProgress.current = true;
-      
+      setIsChecking(true); // Start checking
+
       try {
         // Check if token exists
         const token = localStorage.getItem('token');
+        console.log("Protected route check - token exists:", !!token);
 
         if (!token) {
           setIsAuthenticated(false);
+          setIsAuthorized(false);
           authCheckInProgress.current = false;
+          setIsChecking(false);
           return;
         }
 
         // Verify token with backend
+        console.log("Verifying token with backend");
         const isValid = await verifyToken();
+        console.log("Token verification result:", isValid);
+
         setIsAuthenticated(isValid);
 
         // Check authorization for admin routes
         if (isValid && adminOnly) {
           const userData = getUserData();
+          console.log("User data for admin check:", userData);
           const isAdmin = userData && userData.role === 'admin';
           setIsAuthorized(isAdmin);
+          console.log("Is user authorized as admin:", isAdmin);
         } else {
           setIsAuthorized(true);
         }
       } catch (error) {
         console.error('Auth verification error:', error);
         setIsAuthenticated(false);
+        setIsAuthorized(false);
       } finally {
         authCheckInProgress.current = false;
+        setIsChecking(false); // Finished checking
       }
     };
 
     checkAuth();
   }, [adminOnly]);
 
-  // Show loading while checking authentication
-  if (isAuthenticated === null || isAuthorized === null) {
+  // Show loading only while actively checking auth
+  if (isChecking) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <CircularProgress />
@@ -79,17 +93,22 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
     );
   }
 
+  console.log("Protected route state - authenticated:", isAuthenticated, "authorized:", isAuthorized);
+
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
+    console.log("Redirecting to login");
     return <Navigate to="/login" state={{ from: location.pathname }} />;
   }
 
-  // Redirect to dashboard if not authorized (e.g., non-admin trying to access admin route)
+  // Redirect to dashboard if not authorized
   if (!isAuthorized) {
+    console.log("Redirecting to dashboard - not authorized");
     return <Navigate to="/dashboard" />;
   }
 
   // Render the protected component
+  console.log("Rendering protected component");
   return children;
 };
 
@@ -124,12 +143,12 @@ const AppRouterContainer = () => {
     // Avoid setting up multiple times
     if (sessionHandlersSetup.current) return;
     sessionHandlersSetup.current = true;
-    
+
     // Configure session manager to handle expiration
     sessionManager.onSessionExpired(() => {
       // Clear data
       setAuthToken(null);
-      
+
       // Show notification if not already on the login page
       if (location.pathname !== '/login') {
         setNotification({
@@ -201,7 +220,9 @@ const AppRouterContainer = () => {
         } />
 
         {/* Root redirect */}
-        <Route path="/" element={<Navigate to="/dashboard" />} />
+        <Route path="/" element={
+          <Navigate to={localStorage.getItem('token') ? "/dashboard" : "/login"} />
+        } />
 
         {/* Protected Routes inside MainLayout */}
         <Route
@@ -242,6 +263,19 @@ const AppRouterContainer = () => {
             />
           } />
 
+          {/* Landlords Routes */}
+          <Route path="landlords" element={
+            <LandlordsPanel
+              showNotification={showNotification}
+            />
+          } />
+
+          <Route path="landlords/:landlordId" element={
+            <LandlordDetails
+              showNotification={showNotification}
+            />
+          } />
+
           {/* Payments Route */}
           <Route path="payments" element={
             <PaymentScreen
@@ -255,9 +289,9 @@ const AppRouterContainer = () => {
             />
           } />
 
-          {/* Admin Only Routes */}
+          {/* Apartment Management Routes - Admin Only */}
           <Route path="apartments/add" element={
-            <ProtectedRoute >
+            <ProtectedRoute adminOnly={false}>
               <ApartmentForm
                 showNotification={showNotification}
                 onSuccess={() => navigate('/dashboard')}
@@ -266,7 +300,7 @@ const AppRouterContainer = () => {
           } />
 
           <Route path="apartments/edit" element={
-            <ProtectedRoute >
+            <ProtectedRoute adminOnly={false}>
               <ApartmentForm
                 isEdit={true}
                 initialData={editingApartment}
@@ -276,22 +310,37 @@ const AppRouterContainer = () => {
             </ProtectedRoute>
           } />
 
+          {/* Analytics Panel Routes */}
           <Route path="analytics" element={
             <ProtectedRoute adminOnly={true}>
-              <AnalyticsPanel
-                showNotification={showNotification}
-              />
+              <AnalyticsPanel showNotification={showNotification} />
             </ProtectedRoute>
           } />
 
-          <Route path="contracts" element={
-            <ProtectedRoute adminOnly={true}>
+          <Route path="user-analytics" element={
+            <ProtectedRoute>
+              <UserAnalyticsPanel showNotification={showNotification} />
+            </ProtectedRoute>
+          } />
+
+          {/* Contract Routes - Available to all users */}
+          <Route path="contracts/generate" element={
+            <ProtectedRoute adminOnly={false}>
               <ContractGenerator
                 showNotification={showNotification}
               />
             </ProtectedRoute>
           } />
 
+          <Route path="contracts/manage" element={
+            <ProtectedRoute adminOnly={false}>
+              <ContractManager
+                showNotification={showNotification}
+              />
+            </ProtectedRoute>
+          } />
+
+          {/* Admin Only Routes */}
           <Route path="admin" element={
             <ProtectedRoute adminOnly={true}>
               <AdminPanel

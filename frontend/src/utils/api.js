@@ -5,11 +5,17 @@ import sessionManager from './SessionManager';
 // Define base URL with protocol and host detection
 const getBaseUrl = () => {
   // Check if running in production (on the digital ocean server)
-  if (window.location.hostname === '207.154.221.54') {
-    return 'http://207.154.221.54:5001/api';
+  const hostname = window.location.hostname;
+
+  // Production domains
+  if (hostname === '207.154.221.54' || hostname === 'shefaug.com' || hostname === 'www.shefaug.com') {
+    return 'https://www.shefaug.com/api'; // Use HTTPS and your domain
   }
-  // Local development
-  return 'http://localhost:5001/api';
+
+  // Local development - use relative path to go through proxy
+  // This will use the current origin (e.g., http://localhost or http://localhost:3001)
+  // and the Vite proxy or nginx will handle routing to the backend
+  return '/api';
 };
 
 // API service with dynamic base URL configuration
@@ -57,20 +63,20 @@ api.interceptors.response.use(
     if (!error.response) {
       return Promise.reject(error);
     }
-    
+
     // If the error is because of an expired token (401 Unauthorized)
     if (error.response && error.response.status === 401) {
       // Clear any pending debounce timers
       if (expirationDebounceTimer) {
         clearTimeout(expirationDebounceTimer);
       }
-      
+
       // Use debounce to prevent multiple rapid expiration handlers
       expirationDebounceTimer = setTimeout(() => {
         if (!isHandlingSessionExpiration) {
           // Set the flag to prevent multiple expiration handlers from running
           isHandlingSessionExpiration = true;
-          
+
           try {
             // Let the session manager handle the expiration
             sessionManager.handleSessionExpired();
@@ -79,7 +85,7 @@ api.interceptors.response.use(
           }
         }
       }, 1000); // 1 second debounce
-      
+
       // Return a rejected promise with a clear message
       return Promise.reject(new Error('Your session has expired. Please log in again.'));
     }
@@ -95,13 +101,13 @@ export const setAuthToken = (token) => {
     if (token) {
       // Store token securely
       localStorage.setItem('token', token);
-      
+
       // Set in axios defaults
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      
+
       // Reset session timers when token is set
       sessionManager.resetSessionTimers();
-      
+
       // Reset the expiration handling flags
       isHandlingSessionExpiration = false;
       if (expirationDebounceTimer) {
@@ -153,11 +159,22 @@ export const isAdmin = () => {
 // Check if token is valid by making a verification request with a longer timeout
 export const verifyToken = async () => {
   try {
-    await api.get('/auth/verify', { timeout: 5000 }); // 5-second timeout
+    const token = localStorage.getItem('token');
+    if (!token) {
+      return false;
+    }
+
+    // Important: Log the token for debugging (remove in production)
+    console.log("Verifying token:", token.substring(0, 10) + "...");
+
+    const response = await api.get('/auth/verify', { timeout: 5000 });
+    console.log("Token verification response:", response.status);
+
     // Reset expiration flag on successful verification
     isHandlingSessionExpiration = false;
     return true;
   } catch (error) {
+    console.error("Token verification failed:", error);
     if (error.response && error.response.status === 401) {
       // Token is invalid, clear it
       setAuthToken(null);

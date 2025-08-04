@@ -2,7 +2,7 @@ import pandas as pd
 from io import BytesIO
 from datetime import datetime, timedelta
 from flask import Blueprint, request, jsonify, g, current_app, send_file, Response
-from models.models import Apartment, Tenant
+from models.models import Apartment, Tenant, ContractTemplate
 from extentions import db
 from typing import Tuple, List, Optional
 from schemas import ApartmentData, TenantData
@@ -20,12 +20,13 @@ documents_bp = Blueprint("documents_bp", __name__)
 # Minimal request model only to get the apartmentId from the client
 class ContractRequest(BaseModel):
     apartmentId: int
+    templateId: Optional[int] = None  # Optional template ID
 
 
 @documents_bp.route("/createContract", methods=["POST"])
 def create_contract_route() -> tuple[Response, int]:
     try:
-        # Get request data (only expecting apartmentId)
+        # Get request data (expecting apartmentId and optionally templateId)
         data = request.get_json()
         if not data or "apartmentId" not in data:
             return jsonify({"message": "Invalid request: No apartmentId provided"}), 400
@@ -46,6 +47,11 @@ def create_contract_route() -> tuple[Response, int]:
         if not tenants_list:
             return jsonify({"message": "No tenants linked to apartment"}), 400
 
+        # Get the contract template
+        template_path = get_contract_template_path(contract_req.templateId)
+        if not template_path:
+            return jsonify({"message": "Contract template not found"}), 500
+
         # Use DB dates: fall back to defaults if not set on the apartment
         today, start_date, end_date = format_dates(apartment)
         # Use DB financial details (rent and deposit)
@@ -63,12 +69,6 @@ def create_contract_route() -> tuple[Response, int]:
             today,
             formatted_tenants,
         )
-
-        # Get and verify the contract template path
-        template_path = os.path.join(current_app.root_path, "contract.docx")
-        if not os.path.exists(template_path):
-            current_app.logger.error(f"Contract template not found at: {template_path}")
-            return jsonify({"message": "Contract template not found"}), 500
 
         # Generate the contract document
         buffer = BytesIO()
@@ -88,6 +88,55 @@ def create_contract_route() -> tuple[Response, int]:
     except Exception as e:
         current_app.logger.error(f"Error generating contract: {e}")
         return jsonify({"message": "Error generating contract", "error": str(e)}), 500
+
+
+def get_contract_template_path(template_id=None):
+    """
+    Get the path to the contract template file.
+    If template_id is provided, use that specific template.
+    Otherwise, use the default template.
+    Falls back to the legacy contract.docx if no templates are found.
+    """
+    try:
+        if template_id:
+            # Get specific template by ID
+            template = ContractTemplate.query.get(template_id)
+            if template and template.file_path and os.path.exists(template.file_path):
+                current_app.logger.info(f"Using specific template: {template.name} (ID: {template_id})")
+                return template.file_path
+            else:
+                current_app.logger.warning(f"Requested template ID {template_id} not found or file missing")
+
+        # Get default template
+        default_template = ContractTemplate.query.filter_by(is_default=True).first()
+        if default_template and default_template.file_path and os.path.exists(default_template.file_path):
+            current_app.logger.info(f"Using default template: {default_template.name}")
+            return default_template.file_path
+
+        # Get any available template
+        any_template = ContractTemplate.query.first()
+        if any_template and any_template.file_path and os.path.exists(any_template.file_path):
+            current_app.logger.info(f"Using first available template: {any_template.name}")
+            return any_template.file_path
+
+        # Fall back to legacy template
+        legacy_template_path = os.path.join(current_app.root_path, "contract.docx")
+        if os.path.exists(legacy_template_path):
+            current_app.logger.warning("Using legacy contract.docx template")
+            return legacy_template_path
+
+        # No template found
+        current_app.logger.error("No contract template found")
+        return None
+
+    except Exception as e:
+        current_app.logger.error(f"Error getting contract template: {e}")
+        # Fall back to legacy template as last resort
+        legacy_template_path = os.path.join(current_app.root_path, "contract.docx")
+        if os.path.exists(legacy_template_path):
+            current_app.logger.warning("Falling back to legacy contract.docx template due to error")
+            return legacy_template_path
+        return None
 
 
 def format_dates(apartment):
@@ -157,16 +206,19 @@ def build_db_data(
     Build the dictionary of data to pass to the contract template updater,
     using all values from the database.
     """
+
     return {
-        "landlord_company_name": apartment.landlordCompanyName,
-        "landlord_name": apartment.landlordName,
-        "landlord_company_address": apartment.landlordCompanyAddress,
-        "landlord_email": apartment.landlordEmail,
-        "landlord_phone": apartment.landlordPhone,
-        "landlord_iban": apartment.landlordIban,
+        "landlord_company_name": apartment.landlord.name if apartment.landlord else "",
+        "landlord_name": apartment.landlord.company_name,
+        "landlord_company_address": apartment.landlord.company_address
+        if apartment.landlord
+        else "",
+        "landlord_email": apartment.landlord.email if apartment.landlord else "",
+        "landlord_phone": apartment.landlord.phone if apartment.landlord else "",
+        "landlord_iban": apartment.landlord.iban if apartment.landlord else "",
         "apartment_address": apartment.address,
         "rent_price": f"{apartment.rent:.2f}",
-        "rent_words": apartment.rentInSentance,
+        "rent_words": str(num2words(int(apartment.rent))),
         "deposit": apartment.deposit,
         "start_date": start_date,
         "end_date": end_date,

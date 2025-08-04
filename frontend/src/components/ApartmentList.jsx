@@ -1,4 +1,3 @@
-// Updated ApartmentList.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -20,7 +19,11 @@ import {
   Skeleton,
   Tooltip,
   Container,
-  Alert
+  Alert,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText
 } from '@mui/material';
 
 // Icons
@@ -41,7 +44,26 @@ import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import EventIcon from '@mui/icons-material/Event';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import DescriptionIcon from '@mui/icons-material/Description';
+import SortByAlphaIcon from '@mui/icons-material/SortByAlpha';
+import DateRangeIcon from '@mui/icons-material/DateRange';
+import WarningIcon from '@mui/icons-material/Warning';
+import ErrorIcon from '@mui/icons-material/Error';
+import CheckIcon from '@mui/icons-material/Check';
 import api, { getUserData } from '../utils/api';
+
+// Import the new ContractExtensionDialog component
+import ContractExtensionDialog from './ContractExtensionDialog';
+
+// Function to fetch landlord data
+const fetchLandlordData = async (landlordId) => {
+  try {
+    const response = await api.get(`/landlords/${landlordId}`);
+    return response.data;
+  } catch (error) {
+    console.error('Error fetching landlord data:', error);
+    return null;
+  }
+};
 
 function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   const [apartments, setApartments] = useState([]);
@@ -50,136 +72,46 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   const [selectedApartment, setSelectedApartment] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [landlordData, setLandlordData] = useState({});
+  const [sortBy, setSortBy] = useState('expiry'); // 'expiry' or 'alphabetical'
+  const [filterMenuAnchor, setFilterMenuAnchor] = useState(null);
+
+  // Contract extension state
+  const [extendContractOpen, setExtendContractOpen] = useState(false);
+  const [selectedApartmentForExtension, setSelectedApartmentForExtension] = useState(null);
+  const [isExtendingContract, setIsExtendingContract] = useState(false);
 
   // Get user data to check if admin
   const userData = getUserData();
   const isAdmin = userData && userData.role === 'admin';
 
-  const fetchApartments = async () => {
-    setIsLoading(true);
-    const token = localStorage.getItem('token');
-    if (!token) {
-      console.error('No authentication token found');
-      showNotification('Authentication required. Please log in again.', 'error');
-      setIsLoading(false);
-      return;
-    }
-    try {
-      const response = await api.get('/list');
-      const normalizedApartments = response.data.map(apartment => {
-        let normalizedStatus = apartment.status;
-        if (apartment.status === 'מושכר' || apartment.status === 'Rented') {
-          normalizedStatus = 'occupied';
-        } else if (apartment.status === 'פנוי' || apartment.status === 'Available') {
-          normalizedStatus = 'vacant';
-        } else if (apartment.status === 'חוזה נשלח' || apartment.status === 'Contract Sent') {
-          normalizedStatus = 'contract_sent';
-        }
-        return {
-          ...apartment,
-          status: normalizedStatus,
-          displayStatus: apartment.status
-        };
-      });
-      setApartments(normalizedApartments);
-      setFilteredApartments(normalizedApartments);
-    } catch (error) {
-      console.error(error);
-      if (error.response && error.response.status === 401) {
-        showNotification('Your session has expired. Please log in again.', 'error');
-      } else {
-        showNotification('Error loading apartment list', 'error');
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Helper function to check if contract is expired or expiring soon
+  const getExpiryStatus = (contractEndDate) => {
+    if (!contractEndDate) return { status: 'no_date', daysUntilExpiry: null };
 
-  // More reliable handler for contract generation
-  const handleGenerateContract = (apartmentId, e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-    
-    setDetailsOpen(false); // Close details dialog if open
-    generateContract(apartmentId);
-  };
-  
-  // Separate function for contract generation logic
-  const generateContract = async (apartmentId) => {
-    try {
-      const response = await api.post('/documents/createContract', {
-        apartmentId: apartmentId
-      }, {
-        responseType: 'blob'
-      });
+    const endDate = new Date(contractEndDate);
+    const today = new Date();
+    const timeDiff = endDate.getTime() - today.getTime();
+    const daysUntilExpiry = Math.ceil(timeDiff / (1000 * 3600 * 24));
 
-      // Create a blob from the response data
-      const blob = new Blob([response.data], {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      });
-
-      // Create a link element and trigger download
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      // Get apartment details for filename
-      const apartment = apartments.find(apt => apt.id === apartmentId);
-      const fileName = `Rental_Contract_${apartment ? (apartment.address || 'Apartment') : 'Apartment'}.docx`;
-
-      link.href = url;
-      link.setAttribute('download', fileName);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      showNotification('Contract generated successfully', 'success');
-    } catch (error) {
-      console.error('Error generating contract:', error);
-      showNotification('Failed to generate contract', 'error');
-    }
-  };
-
-  useEffect(() => {
-    fetchApartments();
-  }, []);
-
-  useEffect(() => {
-    if (searchTerm.trim() === '') {
-      setFilteredApartments(apartments);
+    if (daysUntilExpiry < 0) {
+      return { status: 'expired', daysUntilExpiry };
+    } else if (daysUntilExpiry <= 30) {
+      return { status: 'expiring_soon', daysUntilExpiry };
     } else {
-      const filtered = apartments.filter(apartment =>
-        apartment.address.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-      setFilteredApartments(filtered);
-    }
-  }, [searchTerm, apartments]);
-
-  const handleSearchChange = (event) => {
-    setSearchTerm(event.target.value);
-  };
-
-  const handleExport = async () => {
-    try {
-      const response = await api.get('/export', {
-        responseType: 'blob'
-      });
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', 'apartments.xlsx');
-      document.body.appendChild(link);
-      link.click();
-      showNotification('File exported successfully');
-    } catch (error) {
-      console.error(error);
-      showNotification('Error exporting file', 'error');
+      return { status: 'valid', daysUntilExpiry };
     }
   };
 
-  const getStatusChip = (status) => {
+  // Enhanced status chip with expiry colors
+  const getStatusChip = (status, contractEndDate) => {
+    const expiryStatus = getExpiryStatus(contractEndDate);
+
     let color = 'default';
     let displayStatus = status;
+    let icon = null;
+
+    // First handle the basic status
     switch (status) {
       case 'occupied':
         color = 'success';
@@ -210,19 +142,266 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
       default:
         displayStatus = status || 'Unknown';
     }
+
+    // Override color based on expiry status for occupied properties
+    if (status === 'occupied' || status === 'מושכר' || status === 'Rented') {
+      if (expiryStatus.status === 'expired') {
+        color = 'error';
+        displayStatus = 'Expired';
+        icon = <ErrorIcon sx={{ fontSize: '0.8rem' }} />;
+      } else if (expiryStatus.status === 'expiring_soon') {
+        color = 'warning';
+        displayStatus = `Expires in ${expiryStatus.daysUntilExpiry} days`;
+        icon = <WarningIcon sx={{ fontSize: '0.8rem' }} />;
+      }
+    }
+
     return (
       <Chip
         label={displayStatus}
         color={color}
         size="small"
+        icon={icon}
         sx={{
           fontWeight: '500',
           borderRadius: '8px',
           fontSize: '0.75rem',
-          height: '24px'
+          height: '24px',
+          '& .MuiChip-icon': {
+            fontSize: '0.8rem'
+          }
         }}
       />
     );
+  };
+
+  // Handle contract extension
+  const handleExtendContract = async (apartmentId, newEndDate) => {
+    setIsExtendingContract(true);
+    try {
+      // Format the date for the API
+      const formattedDate = newEndDate.toISOString().split('T')[0];
+
+      await api.put(`/apartments/${apartmentId}/extend-contract`, {
+        contractEndDate: formattedDate
+      });
+
+      showNotification('Contract extended successfully', 'success');
+
+      // Refresh the apartment list to show updated data
+      await fetchApartments();
+
+      // Close the extension dialog
+      setExtendContractOpen(false);
+      setSelectedApartmentForExtension(null);
+
+      // Also close the details dialog if it's open
+      setDetailsOpen(false);
+
+    } catch (error) {
+      console.error('Error extending contract:', error);
+      showNotification('Failed to extend contract', 'error');
+    } finally {
+      setIsExtendingContract(false);
+    }
+  };
+
+  // Open the extension dialog
+  const openExtendContractDialog = (apartment, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setSelectedApartmentForExtension(apartment);
+    setExtendContractOpen(true);
+  };
+
+  const fetchApartments = async () => {
+    setIsLoading(true);
+    const token = localStorage.getItem('token');
+    if (!token) {
+      console.error('No authentication token found');
+      showNotification('Authentication required. Please log in again.', 'error');
+      setIsLoading(false);
+      return;
+    }
+    try {
+      const response = await api.get('/list');
+      const normalizedApartments = await Promise.all(
+        response.data.map(async (apartment) => {
+          let normalizedStatus = apartment.status;
+          if (apartment.status === 'מושכר' || apartment.status === 'Rented') {
+            normalizedStatus = 'occupied';
+          } else if (apartment.status === 'פנוי' || apartment.status === 'Available') {
+            normalizedStatus = 'vacant';
+          } else if (apartment.status === 'חוזה נשלח' || apartment.status === 'Contract Sent') {
+            normalizedStatus = 'contract_sent';
+          }
+
+          // Fetch landlord data if only landlord_id is provided
+          let landlordInfo = {};
+          if (apartment.landlord_id && !apartment.landlord) {
+            const landlord = await fetchLandlordData(apartment.landlord_id);
+            landlordInfo = landlord || {};
+            setLandlordData(prev => ({
+              ...prev,
+              [apartment.landlord_id]: landlordInfo
+            }));
+          }
+
+          return {
+            ...apartment,
+            status: normalizedStatus,
+            displayStatus: apartment.status,
+            landlord: apartment.landlord || landlordInfo,
+            expiryStatus: getExpiryStatus(apartment.contractEndDate)
+          };
+        })
+      );
+      setApartments(normalizedApartments);
+    } catch (error) {
+      console.error(error);
+      if (error.response && error.response.status === 401) {
+        showNotification('Your session has expired. Please log in again.', 'error');
+      } else {
+        showNotification('Error loading apartment list', 'error');
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Sort and filter apartments
+  const sortAndFilterApartments = () => {
+    let filtered = apartments;
+
+    // Apply search filter
+    if (searchTerm.trim() !== '') {
+      filtered = filtered.filter(apartment =>
+        apartment.address.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    // Apply sorting
+    if (sortBy === 'alphabetical') {
+      filtered = [...filtered].sort((a, b) =>
+        a.address.localeCompare(b.address)
+      );
+    } else if (sortBy === 'expiry') {
+      filtered = [...filtered].sort((a, b) => {
+        // First, sort by expiry status priority
+        const statusPriority = {
+          'expired': 1,
+          'expiring_soon': 2,
+          'valid': 3,
+          'no_date': 4
+        };
+
+        const aPriority = statusPriority[a.expiryStatus.status] || 5;
+        const bPriority = statusPriority[b.expiryStatus.status] || 5;
+
+        if (aPriority !== bPriority) {
+          return aPriority - bPriority;
+        }
+
+        // If same status, sort by days until expiry (ascending for expired/expiring, descending for valid)
+        if (a.expiryStatus.daysUntilExpiry !== null && b.expiryStatus.daysUntilExpiry !== null) {
+          if (a.expiryStatus.status === 'expired' || a.expiryStatus.status === 'expiring_soon') {
+            return a.expiryStatus.daysUntilExpiry - b.expiryStatus.daysUntilExpiry;
+          } else {
+            return b.expiryStatus.daysUntilExpiry - a.expiryStatus.daysUntilExpiry;
+          }
+        }
+
+        // Finally, sort alphabetically
+        return a.address.localeCompare(b.address);
+      });
+    }
+
+    setFilteredApartments(filtered);
+  };
+
+  const handleGenerateContract = (apartmentId, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    setDetailsOpen(false);
+    generateContract(apartmentId);
+  };
+
+  const generateContract = async (apartmentId) => {
+    try {
+      const response = await api.post('/documents/createContract', {
+        apartmentId: apartmentId
+      }, {
+        responseType: 'blob'
+      });
+
+      const blob = new Blob([response.data], {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      });
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const apartment = apartments.find(apt => apt.id === apartmentId);
+      const fileName = `Rental_Contract_${apartment ? (apartment.address || 'Apartment') : 'Apartment'}.docx`;
+
+      link.href = url;
+      link.setAttribute('download', fileName);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      showNotification('Contract generated successfully', 'success');
+    } catch (error) {
+      console.error('Error generating contract:', error);
+      showNotification('Failed to generate contract', 'error');
+    }
+  };
+
+  useEffect(() => {
+    fetchApartments();
+  }, []);
+
+  useEffect(() => {
+    sortAndFilterApartments();
+  }, [searchTerm, apartments, sortBy]);
+
+  const handleSearchChange = (event) => {
+    setSearchTerm(event.target.value);
+  };
+
+  const handleFilterClick = (event) => {
+    setFilterMenuAnchor(event.currentTarget);
+  };
+
+  const handleFilterClose = () => {
+    setFilterMenuAnchor(null);
+  };
+
+  const handleSortChange = (newSortBy) => {
+    setSortBy(newSortBy);
+    handleFilterClose();
+  };
+
+  const handleExport = async () => {
+    try {
+      const response = await api.get('/export', {
+        responseType: 'blob'
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'apartments.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      showNotification('File exported successfully');
+    } catch (error) {
+      console.error(error);
+      showNotification('Error exporting file', 'error');
+    }
   };
 
   const openDetails = (apartment) => {
@@ -234,31 +413,26 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     return address && address.charAt(0).toUpperCase();
   };
 
-  // Improved handler for edit button
   const handleEditClick = (apartment, e) => {
     e.preventDefault();
     e.stopPropagation();
     onEdit(apartment);
   };
 
-  // Improved handler for payment button
   const handlePaymentClick = (apartmentId, e) => {
     e.preventDefault();
     e.stopPropagation();
     onGoToPayments(apartmentId);
   };
-  
-  // Improved handler for details button
+
   const handleDetailsClick = (apartment, e) => {
     e.preventDefault();
     e.stopPropagation();
     openDetails(apartment);
   };
 
-  // Format currency
   const formatCurrency = (amount) => {
     if (amount === undefined || amount === null) return '';
-    
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
@@ -267,20 +441,95 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     }).format(amount);
   };
 
-  // Format date
   const formatDate = (dateString) => {
     if (!dateString) return 'Not provided';
-
     try {
       const date = new Date(dateString);
       if (isNaN(date.getTime())) {
-        // If not a valid date object, return as is
         return dateString;
       }
       return date.toLocaleDateString();
     } catch (error) {
       return dateString;
     }
+  };
+
+  const getLandlordInfo = (apartment) => {
+    if (apartment.landlord) {
+      return {
+        name: apartment.landlord.name || 'Not specified',
+        email: apartment.landlord.email || '',
+        phone: apartment.landlord.phone || ''
+      };
+    }
+
+    if (apartment.landlord_id && landlordData[apartment.landlord_id]) {
+      return {
+        name: landlordData[apartment.landlord_id].name || 'Not specified',
+        email: landlordData[apartment.landlord_id].email || '',
+        phone: landlordData[apartment.landlord_id].phone || ''
+      };
+    }
+
+    return {
+      name: apartment.landlordName || 'Not specified',
+      email: apartment.landlordEmail || '',
+      phone: apartment.landlordPhone || ''
+    };
+  };
+
+  const LandlordSection = ({ apartment }) => {
+    const landlordInfo = getLandlordInfo(apartment);
+
+    return (
+      <Grid item xs={12} sx={{ mt: 2 }}>
+        <Typography
+          variant="subtitle1"
+          sx={{
+            fontWeight: 600,
+            mb: 2,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1
+          }}
+        >
+          <PersonIcon color="primary" fontSize="small" />
+          Landlord Information
+        </Typography>
+        <Grid container spacing={2}>
+          <Grid item xs={12} sm={4}>
+            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                Name
+              </Typography>
+              <Typography variant="body2" fontWeight={500}>
+                {landlordInfo.name}
+              </Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={12} sm={4}>
+            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                Email
+              </Typography>
+              <Typography variant="body2" fontWeight={500}>
+                {landlordInfo.email || 'Not provided'}
+              </Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={12} sm={4}>
+            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                Phone
+              </Typography>
+              <Typography variant="body2" fontWeight={500}>
+                {landlordInfo.phone || 'Not provided'}
+              </Typography>
+            </Box>
+          </Grid>
+        </Grid>
+      </Grid>
+    );
   };
 
   if (isLoading) {
@@ -302,7 +551,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
 
   return (
     <Container maxWidth="xl" sx={{ py: 4 }}>
-      {/* Header */}
       <Box
         sx={{
           display: 'flex',
@@ -332,42 +580,25 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             width: { xs: '100%', md: 'auto' }
           }}
         >
-            <Button
-              variant="outlined"
-              startIcon={<FileDownloadIcon />}
-              onClick={handleExport}
-              sx={{
-                borderRadius: 1,
-                textTransform: 'none',
-                fontWeight: 500,
-                borderWidth: 1.5,
-                px: 3,
-                height: '48px'
-              }}
-            >
-              Export
-            </Button>
-
-            <Button
-              variant="contained"
-              startIcon={<ApartmentIcon />}
-              onClick={() => onEdit(null)}
-              sx={{
-                borderRadius: 1,
-                textTransform: 'none',
-                fontWeight: 500,
-                backgroundColor: 'primary.main',
-                px: 3,
-                height: '48px',
-                boxShadow: 2
-              }}
-            >
-              Add Property
-            </Button>
+          <Button
+            variant="contained"
+            startIcon={<ApartmentIcon />}
+            onClick={() => onEdit(null)}
+            sx={{
+              borderRadius: 1,
+              textTransform: 'none',
+              fontWeight: 500,
+              backgroundColor: 'primary.main',
+              px: 3,
+              height: '48px',
+              boxShadow: 2
+            }}
+          >
+            Add Property
+          </Button>
         </Box>
       </Box>
 
-      {/* Search and Filter */}
       <Box
         sx={{
           display: 'flex',
@@ -403,6 +634,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         <Button
           variant="outlined"
           startIcon={<FilterListIcon />}
+          onClick={handleFilterClick}
           sx={{
             borderRadius: 1,
             textTransform: 'none',
@@ -412,11 +644,60 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             borderColor: 'divider'
           }}
         >
-          Filters
+          Sort: {sortBy === 'expiry' ? 'Expiry Date' : 'A-Z'}
         </Button>
+
+        <Menu
+          anchorEl={filterMenuAnchor}
+          open={Boolean(filterMenuAnchor)}
+          onClose={handleFilterClose}
+          PaperProps={{
+            sx: {
+              borderRadius: 1,
+              minWidth: 200,
+              mt: 1
+            }
+          }}
+        >
+          <MenuItem
+            onClick={() => handleSortChange('expiry')}
+            selected={sortBy === 'expiry'}
+          >
+            <ListItemIcon>
+              <DateRangeIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>
+              By Expiry Date
+              {sortBy === 'expiry' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}
+            </ListItemText>
+          </MenuItem>
+          <MenuItem
+            onClick={() => handleSortChange('alphabetical')}
+            selected={sortBy === 'alphabetical'}
+          >
+            <ListItemIcon>
+              <SortByAlphaIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>
+              Alphabetical (A-Z)
+              {sortBy === 'alphabetical' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}
+            </ListItemText>
+          </MenuItem>
+        </Menu>
       </Box>
 
-      {/* Empty State */}
+      {/* Expiry Status Summary */}
+      {sortBy === 'expiry' && (
+        <Box sx={{ mb: 3 }}>
+          <Alert severity="info" sx={{ borderRadius: 1 }}>
+            <Typography variant="body2">
+              Properties are sorted by contract expiry: <strong style={{ color: '#d32f2f' }}>Expired</strong> contracts first,
+              then <strong style={{ color: '#ed6c02' }}>expiring within 30 days</strong>, followed by valid contracts.
+            </Typography>
+          </Alert>
+        </Box>
+      )}
+
       {filteredApartments.length === 0 ? (
         <Box
           sx={{
@@ -453,7 +734,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
           )}
         </Box>
       ) : (
-        /* Property Grid */
         <Grid container spacing={3}>
           {filteredApartments.map((apartment) => (
             <Grid item xs={12} sm={6} md={4} lg={3} key={apartment.id}>
@@ -466,20 +746,31 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   overflow: 'hidden',
                   transition: 'all 0.2s ease',
                   border: '1px solid',
-                  borderColor: 'divider',
+                  borderColor: apartment.expiryStatus.status === 'expired'
+                    ? 'error.main'
+                    : apartment.expiryStatus.status === 'expiring_soon'
+                      ? 'warning.main'
+                      : 'divider',
                   '&:hover': {
                     boxShadow: 3,
                     transform: 'translateY(-4px)',
-                    borderColor: 'transparent'
+                    borderColor: apartment.expiryStatus.status === 'expired'
+                      ? 'error.main'
+                      : apartment.expiryStatus.status === 'expiring_soon'
+                        ? 'warning.main'
+                        : 'primary.main'
                   },
                   cursor: 'pointer'
                 }}
               >
-                {/* Property Header */}
                 <Box
                   sx={{
                     p: 2,
-                    background: 'linear-gradient(to right, rgba(0,0,0,0.02), rgba(0,0,0,0))',
+                    background: apartment.expiryStatus.status === 'expired'
+                      ? 'linear-gradient(to right, rgba(211, 47, 47, 0.05), rgba(211, 47, 47, 0))'
+                      : apartment.expiryStatus.status === 'expiring_soon'
+                        ? 'linear-gradient(to right, rgba(237, 108, 2, 0.05), rgba(237, 108, 2, 0))'
+                        : 'linear-gradient(to right, rgba(0,0,0,0.02), rgba(0,0,0,0))',
                     borderBottom: '1px solid',
                     borderColor: 'divider',
                     display: 'flex',
@@ -490,7 +781,11 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, maxWidth: '80%' }}>
                     <Avatar
                       sx={{
-                        backgroundColor: 'primary.main',
+                        backgroundColor: apartment.expiryStatus.status === 'expired'
+                          ? 'error.main'
+                          : apartment.expiryStatus.status === 'expiring_soon'
+                            ? 'warning.main'
+                            : 'primary.main',
                         width: 36,
                         height: 36
                       }}
@@ -513,10 +808,9 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       {apartment.address}
                     </Typography>
                   </Box>
-                  {getStatusChip(apartment.status)}
+                  {getStatusChip(apartment.status, apartment.contractEndDate)}
                 </Box>
 
-                {/* Property Content */}
                 <CardContent sx={{ p: 2 }}>
                   <Box sx={{ mb: 2 }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5, gap: 1 }}>
@@ -536,6 +830,33 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                         <EventIcon fontSize="small" sx={{ color: 'text.secondary', fontSize: '1rem' }} />
                         <Typography variant="body2" color="text.secondary">
                           {new Date(apartment.moveInDate).toLocaleDateString()}
+                        </Typography>
+                      </Box>
+                    )}
+                    {apartment.contractEndDate && (
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5, gap: 1 }}>
+                        <AccessTimeIcon
+                          fontSize="small"
+                          sx={{
+                            color: apartment.expiryStatus.status === 'expired'
+                              ? 'error.main'
+                              : apartment.expiryStatus.status === 'expiring_soon'
+                                ? 'warning.main'
+                                : 'text.secondary',
+                            fontSize: '1rem'
+                          }}
+                        />
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            color: apartment.expiryStatus.status === 'expired'
+                              ? 'error.main'
+                              : apartment.expiryStatus.status === 'expiring_soon'
+                                ? 'warning.main'
+                                : 'text.secondary'
+                          }}
+                        >
+                          Expires: {new Date(apartment.contractEndDate).toLocaleDateString()}
                         </Typography>
                       </Box>
                     )}
@@ -562,7 +883,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   </Box>
                   <Divider sx={{ my: 2 }} />
 
-                  {/* Action Buttons */}
                   <Box
                     sx={{
                       display: 'flex',
@@ -570,13 +890,12 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       mt: 1
                     }}
                   >
-                    {/* Payment Button - Fixed by making it an IconButton with text */}
-                    <Box 
+                    <Box
                       onClick={(e) => handlePaymentClick(apartment.id, e)}
-                      sx={{ 
-                        display: 'flex', 
-                        alignItems: 'center', 
-                        gap: 0.5, 
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 0.5,
                         cursor: 'pointer',
                         borderRadius: 1,
                         py: 0.5,
@@ -585,10 +904,10 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                       }}
                     >
                       <PaymentIcon fontSize="small" color="primary" />
-                      <Typography 
-                        variant="body2" 
+                      <Typography
+                        variant="body2"
                         color="primary"
-                        sx={{ 
+                        sx={{
                           fontWeight: 500,
                           fontSize: '0.8rem',
                           userSelect: 'none'
@@ -597,9 +916,8 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                         Payments
                       </Typography>
                     </Box>
-                    
+
                     <Box sx={{ display: 'flex', gap: 1 }}>
-                      {/* Contract Generation Button */}
                       <Tooltip title="Generate Contract">
                         <IconButton
                           size="small"
@@ -609,20 +927,17 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                           <DescriptionIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-                      
-                      {/* Edit Property Button - Only for admins */}
-                        <Tooltip title="Edit Property">
-                          <IconButton
-                            size="small"
-                            onClick={(e) => handleEditClick(apartment, e)}
-                            sx={{ color: 'primary.main' }}
-                          >
-                            <EditIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      
-                      
-                      {/* Details Button */}
+
+                      <Tooltip title="Edit Property">
+                        <IconButton
+                          size="small"
+                          onClick={(e) => handleEditClick(apartment, e)}
+                          sx={{ color: 'primary.main' }}
+                        >
+                          <EditIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+
                       <Button
                         size="small"
                         variant="outlined"
@@ -647,7 +962,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         </Grid>
       )}
 
-      {/* Property Details Dialog */}
       <Dialog
         open={detailsOpen}
         onClose={() => setDetailsOpen(false)}
@@ -690,7 +1004,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             </DialogTitle>
 
             <DialogContent dividers sx={{ p: 0 }}>
-              {/* Property Status Banner */}
               <Box
                 sx={{
                   p: 2,
@@ -706,27 +1019,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   <Typography variant="body2" color="text.secondary">
                     Status:
                   </Typography>
-                  <Chip
-                    label={
-                      selectedApartment.status === 'occupied'
-                        ? 'Occupied'
-                        : selectedApartment.status === 'vacant'
-                        ? 'Vacant'
-                        : selectedApartment.status === 'contract_sent'
-                        ? 'Contract Sent'
-                        : selectedApartment.status || 'Unknown'
-                    }
-                    color={
-                      selectedApartment.status === 'occupied'
-                        ? 'success'
-                        : selectedApartment.status === 'vacant'
-                        ? 'primary'
-                        : selectedApartment.status === 'contract_sent'
-                        ? 'warning'
-                        : 'default'
-                    }
-                    size="small"
-                  />
+                  {getStatusChip(selectedApartment.status, selectedApartment.contractEndDate)}
                 </Box>
                 <Box sx={{ display: 'flex', gap: 2 }}>
                   {isAdmin && (
@@ -802,7 +1095,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                           </Typography>
                         </Box>
                       </Grid>
-                      {/* Only show model to admins */}
                       {isAdmin && (
                         <Grid item xs={12} sm={6} md={3}>
                           <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
@@ -813,12 +1105,22 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                               {selectedApartment.model === 'management'
                                 ? 'Property Management'
                                 : selectedApartment.model === 'rental'
-                                ? 'Rental Property'
-                                : selectedApartment.model || 'Not specified'}
+                                  ? 'Rental Property'
+                                  : selectedApartment.model || 'Not specified'}
                             </Typography>
                           </Box>
                         </Grid>
                       )}
+                      <Grid item xs={12} sm={6} md={3}>
+                        <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                          <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                            Monthly Rent
+                          </Typography>
+                          <Typography variant="body2" fontWeight={500}>
+                            {formatCurrency(selectedApartment.rent)}
+                          </Typography>
+                        </Box>
+                      </Grid>
                     </Grid>
                   </Grid>
 
@@ -844,25 +1146,59 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                             Move-In Date
                           </Typography>
                           <Typography variant="body2" fontWeight={500}>
-                            {selectedApartment.moveInDate ? new Date(selectedApartment.moveInDate).toLocaleDateString() : 'Not set'}
+                            {formatDate(selectedApartment.moveInDate)}
                           </Typography>
                         </Box>
                       </Grid>
                       <Grid item xs={12} sm={6}>
-                        <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                        <Box sx={{
+                          p: 2,
+                          border: '1px solid',
+                          borderColor: selectedApartment.expiryStatus.status === 'expired'
+                            ? 'error.main'
+                            : selectedApartment.expiryStatus.status === 'expiring_soon'
+                              ? 'warning.main'
+                              : 'divider',
+                          borderRadius: 1,
+                          bgcolor: selectedApartment.expiryStatus.status === 'expired'
+                            ? 'error.50'
+                            : selectedApartment.expiryStatus.status === 'expiring_soon'
+                              ? 'warning.50'
+                              : 'inherit'
+                        }}>
                           <Typography variant="caption" color="text.secondary" gutterBottom display="block">
                             Contract End Date
                           </Typography>
-                          <Typography variant="body2" fontWeight={500}>
-                            {selectedApartment.contractEndDate ? new Date(selectedApartment.contractEndDate).toLocaleDateString() : 'Not set'}
+                          <Typography
+                            variant="body2"
+                            fontWeight={500}
+                            sx={{
+                              color: selectedApartment.expiryStatus.status === 'expired'
+                                ? 'error.main'
+                                : selectedApartment.expiryStatus.status === 'expiring_soon'
+                                  ? 'warning.main'
+                                  : 'inherit'
+                            }}
+                          >
+                            {formatDate(selectedApartment.contractEndDate)}
+                            {selectedApartment.expiryStatus.status === 'expired' && (
+                              <Typography variant="caption" display="block" color="error.main">
+                                Expired {Math.abs(selectedApartment.expiryStatus.daysUntilExpiry)} days ago
+                              </Typography>
+                            )}
+                            {selectedApartment.expiryStatus.status === 'expiring_soon' && (
+                              <Typography variant="caption" display="block" color="warning.main">
+                                Expires in {selectedApartment.expiryStatus.daysUntilExpiry} days
+                              </Typography>
+                            )}
                           </Typography>
                         </Box>
                       </Grid>
                     </Grid>
                   </Grid>
 
-                  {/* Landlord Information - Only shown to admins */}
-                  {isAdmin && (
+                  {/* Tenant Information */}
+                  {selectedApartment.tenants && (
                     <Grid item xs={12} sx={{ mt: 2 }}>
                       <Typography
                         variant="subtitle1"
@@ -875,234 +1211,79 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                         }}
                       >
                         <PersonIcon color="primary" fontSize="small" />
-                        Landlord Information
-                      </Typography>
-                      <Box
-                        sx={{
-                          p: 2,
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 1,
-                          display: 'flex',
-                          flexDirection: { xs: 'column', sm: 'row' },
-                          gap: 2,
-                          justifyContent: 'space-between'
-                        }}
-                      >
-                        <Box>
-                          <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                            Name
-                          </Typography>
-                          <Typography variant="body2" fontWeight={500}>
-                            {selectedApartment.landlordName || 'Not specified'}
-                          </Typography>
-                        </Box>
-                        {selectedApartment.landlordPhone && (
-                          <Box>
-                            <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                              Phone
-                            </Typography>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                              <PhoneIcon color="primary" fontSize="small" />
-                              <Typography variant="body2" fontWeight={500}>
-                                {selectedApartment.landlordPhone}
-                              </Typography>
-                            </Box>
-                          </Box>
-                        )}
-                        {selectedApartment.landlordEmail && (
-                          <Box>
-                            <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                              Email
-                            </Typography>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                              <EmailIcon color="primary" fontSize="small" />
-                              <Typography variant="body2" fontWeight={500}>
-                                {selectedApartment.landlordEmail}
-                              </Typography>
-                            </Box>
-                          </Box>
-                        )}
-                      </Box>
-                    </Grid>
-                  )}
-
-                  {/* Tenants */}
-                  <Grid item xs={12} sx={{ mt: 2 }}>
-                    <Typography                    
-                      variant="subtitle1"
-                      sx={{
-                        fontWeight: 600,
-                        mb: 2,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 1
-                      }}
-                    >
-                      <PersonIcon color="primary" fontSize="small" />
-                      Current Tenants
-                    </Typography>
-                    <Box
-                      sx={{
-                        p: 2,
-                        border: '1px solid',
-                        borderColor: 'divider',
-                        borderRadius: 1
-                      }}
-                    >
-                      {selectedApartment.tenants ? (
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                          {Array.isArray(selectedApartment.tenants) ? (
-                            selectedApartment.tenants.map((tenant, index) => (
-                              <Chip
-                                key={tenant.id || index}
-                                label={
-                                  tenant.firstName && tenant.lastName
-                                    ? `${tenant.firstName} ${tenant.lastName}`
-                                    : tenant.name || 'Unnamed Tenant'
-                                }
-                                icon={<PersonIcon />}
-                                variant="outlined"
-                                color="primary"
-                                sx={{
-                                  borderRadius: 1,
-                                  fontWeight: tenant.isPrimary ? 600 : 400
-                                }}
-                              />
-                            ))
-                          ) : (
-                            selectedApartment.tenants.split(',').map((tenant, index) => (
-                              <Chip
-                                key={index}
-                                label={tenant.trim()}
-                                icon={<PersonIcon />}
-                                variant="outlined"
-                                color="primary"
-                                sx={{
-                                  borderRadius: 1
-                                }}
-                              />
-                            ))
-                          )}
-                        </Box>
-                      ) : (
-                        <Typography variant="body2" color="text.secondary">
-                          No tenants assigned to this property
-                        </Typography>
-                      )}
-                    </Box>
-                  </Grid>
-
-                  {/* Financial Information - Only visible to admins */}
-                  {isAdmin && (
-                    <Grid item xs={12} sx={{ mt: 2 }}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
-                        Financial Information
+                        Tenant Information
                       </Typography>
                       <Grid container spacing={2}>
-                        <Grid item xs={12} sm={6}>
+                        <Grid item xs={12}>
                           <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
                             <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                              Monthly Rent
+                              Tenants
                             </Typography>
                             <Typography variant="body2" fontWeight={500}>
-                              {formatCurrency(selectedApartment.rent || 0)}
+                              {Array.isArray(selectedApartment.tenants)
+                                ? selectedApartment.tenants.map(t => t.firstName && t.lastName ? `${t.firstName} ${t.lastName}` : t.name).join(', ')
+                                : selectedApartment.tenants}
                             </Typography>
                           </Box>
                         </Grid>
-                        <Grid item xs={12} sm={6}>
-                          <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                            <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                              Security Deposit
-                            </Typography>
-                            <Typography variant="body2" fontWeight={500}>
-                              {formatCurrency(selectedApartment.deposit || 0)}
-                            </Typography>
-                          </Box>
-                        </Grid>
-                        {selectedApartment.model === 'management' && (
-                          <Grid item xs={12} sm={6}>
-                            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                                Management Fee
-                              </Typography>
-                              <Typography variant="body2" fontWeight={500}>
-                                {selectedApartment.managementFee || 0}%
-                              </Typography>
-                            </Box>
-                          </Grid>
-                        )}
-                        {selectedApartment.model === 'rental' && (
-                          <Grid item xs={12} sm={6}>
-                            <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                              <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                                Rental Cost
-                              </Typography>
-                              <Typography variant="body2" fontWeight={500}>
-                                {formatCurrency(selectedApartment.rentCost || 0)}
-                              </Typography>
-                            </Box>
-                          </Grid>
-                        )}
                       </Grid>
                     </Grid>
                   )}
 
-                  {/* Notes - Only visible to admins */}
-                  {isAdmin && selectedApartment.notes && (
-                    <Grid item xs={12} sx={{ mt: 2 }}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
-                        Notes
-                      </Typography>
-                      <Box
-                        sx={{
-                          p: 2,
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: 1,
-                          bgcolor: 'background.default'
-                        }}
-                      >
-                        <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
-                          {selectedApartment.notes}
-                        </Typography>
-                      </Box>
-                    </Grid>
-                  )}
+                  {/* Landlord Information */}
+                  {isAdmin && <LandlordSection apartment={selectedApartment} />}
                 </Grid>
               </Box>
             </DialogContent>
 
-            {/* Updated Dialog Actions with Generate Contract Button */}
-            <DialogActions sx={{ px: 3, pb: 3 }}>
+            <DialogActions sx={{ p: 2 }}>
               <Button
                 onClick={() => setDetailsOpen(false)}
                 variant="outlined"
-                sx={{
-                  borderRadius: 1,
-                  textTransform: 'none',
-                  px: 3
-                }}
+                sx={{ borderRadius: 1, textTransform: 'none' }}
               >
                 Close
               </Button>
-              <Button
-                onClick={() => handleGenerateContract(selectedApartment.id)}
-                variant="contained"
-                color="primary"
-                startIcon={<DescriptionIcon />}
-                sx={{
-                  borderRadius: 1,
-                  textTransform: 'none',
-                  px: 3
-                }}
-              >
-                Generate Contract
-              </Button>
+
+              {/* Add the Extend Contract button */}
+              {selectedApartment?.contractEndDate && (
+                <Button
+                  onClick={() => openExtendContractDialog(selectedApartment)}
+                  variant="outlined"
+                  color="secondary"
+                  startIcon={<AccessTimeIcon />}
+                  sx={{ borderRadius: 1, textTransform: 'none' }}
+                >
+                  Extend Contract
+                </Button>
+              )}
+
+              {isAdmin && (
+                <Button
+                  onClick={() => handleGenerateContract(selectedApartment.id)}
+                  variant="contained"
+                  startIcon={<DescriptionIcon />}
+                  sx={{ borderRadius: 1, textTransform: 'none' }}
+                >
+                  Generate Contract
+                </Button>
+              )}
             </DialogActions>
           </>
         )}
       </Dialog>
+
+      {/* Contract Extension Dialog */}
+      <ContractExtensionDialog
+        open={extendContractOpen}
+        onClose={() => {
+          setExtendContractOpen(false);
+          setSelectedApartmentForExtension(null);
+        }}
+        apartment={selectedApartmentForExtension}
+        onExtend={handleExtendContract}
+        isSubmitting={isExtendingContract}
+      />
     </Container>
   );
 }

@@ -10,54 +10,97 @@ from schemas import ApartmentData, TenantData
 from flasgger import swag_from
 from pydantic import ValidationError
 from .auth import token_required, role_required
+from activity_logger import ActivityLogger
 
 apartments_bp = Blueprint("apartments_bp", __name__)
 
 
 @apartments_bp.route("/add", methods=["POST"])
 @token_required
-@role_required("admin")
 def add_apartment_route() -> Tuple[Response, int]:
     try:
-        # ✅ Get and validate request data
         data = request.get_json()
         if not data:
             return jsonify({"message": "Invalid request: No data provided"}), 400
 
-        # ✅ Validate request body using Pydantic
-        try:
-            new_apartment = ApartmentData(**data["new_apartment"])
-            new_tenants = [
-                TenantData(**tenant) for tenant in data.get("new_tenants", [])
-            ]
-        except ValidationError as e:
-            return jsonify({"message": "Invalid data", "errors": e.errors()}), 400
+        # Get apartment data
+        apartment_data = data.get("new_apartment", {})
+        if not apartment_data:
+            return jsonify({"message": "No apartment data provided"}), 400
 
-        # ✅ Add Apartment to DB
-        current_app.logger.error(new_apartment)
-        apartment = Apartment(**new_apartment.model_dump(exclude={"tenants"}))
-
+        # Create the apartment
+        apartment = Apartment(**apartment_data)
         db.session.add(apartment)
         db.session.flush()  # Ensure apartment ID is assigned before adding tenants
 
-        # ✅ Add Tenants to DB
-        tenants = [
-            Tenant(**tenant.dict(), apartment_id=apartment.id) for tenant in new_tenants
-        ]
-        db.session.add_all(tenants)
+        # Get tenant data
+        tenants_data = data.get("new_tenants", [])
+        tenant_ids = []
+
+        # Process tenant data, handling both existing and new tenants
+        for tenant_data in tenants_data:
+            # Check if this is an existing tenant or a new one
+            is_existing = tenant_data.get("isExistingTenant", False)
+            tenant_id = tenant_data.get("id")
+
+            if is_existing and tenant_id:
+                # For existing tenants, just update the apartment_id
+                existing_tenant = Tenant.query.get(tenant_id)
+                if existing_tenant:
+                    existing_tenant.apartment_id = apartment.id
+                    tenant_ids.append(tenant_id)
+                    # Log the reassignment
+                    current_app.logger.info(
+                        f"Reassigned existing tenant {tenant_id} to apartment {apartment.id}"
+                    )
+            else:
+                # For new tenants, create them
+                # First, remove the isExistingTenant flag as it's not a database field
+                if "isExistingTenant" in tenant_data:
+                    del tenant_data["isExistingTenant"]
+
+                # Create and add the new tenant
+                new_tenant = Tenant(**tenant_data, apartment_id=apartment.id)
+                db.session.add(new_tenant)
+                db.session.flush()  # Get the ID of the new tenant
+                tenant_ids.append(new_tenant.id)
+                current_app.logger.info(
+                    f"Created new tenant for apartment {apartment.id}"
+                )
 
         db.session.commit()
-        return jsonify({"message": "Apartment added successfully"}), 201
+
+        # Log the activity
+        ActivityLogger.log_apartment_action(
+            action="create",
+            apartment_id=apartment.id,
+            details={
+                "address": apartment.address,
+                "landlord_id": apartment.landlord_id,
+                "tenants": tenant_ids
+            }
+        )
+
+        return jsonify({"message": "Apartment added successfully", "id": apartment.id}), 201
 
     except Exception as e:
         current_app.logger.error(f"Error adding apartment: {e}")
         db.session.rollback()
+
+        # Log failure
+        ActivityLogger.log_apartment_action(
+            action="create",
+            apartment_id=None,
+            details={"error": str(e), "apartment_data": data.get("new_apartment", {})},
+            success=False,
+            error=e
+        )
+
         return jsonify({"message": "Error adding apartment", "error": str(e)}), 500
 
 
 @apartments_bp.route("/edit/<int:apartment_id>", methods=["PUT"])
 @token_required
-@role_required("admin")
 def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
     try:
         data = request.get_json()
@@ -71,10 +114,21 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
         if not apartment_data:
             return jsonify({"message": "No apartment data provided"}), 400
 
+        # Remove nested 'landlord' field if present to avoid assigning a dict to the relationship
+        apartment_data.pop("landlord", None)
+
         # Get the apartment
         apartment = Apartment.query.get(apartment_id)
         if not apartment:
             return jsonify({"message": "Apartment not found"}), 404
+
+        # Capture original data for logging
+        original_data = {
+            "address": apartment.address,
+            "landlord_id": apartment.landlord_id,
+            "status": apartment.status,
+            "rent": float(apartment.rent) if apartment.rent else 0
+        }
 
         # Update apartment fields
         for field, value in apartment_data.items():
@@ -95,38 +149,82 @@ def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
             elif field != "tenants" and hasattr(apartment, field):
                 setattr(apartment, field, value)
 
-        # Handle tenants - first unassign all tenants from this apartment
+        # Track original tenants for logging
+        original_tenants = [tenant.id for tenant in Tenant.query.filter_by(apartment_id=apartment_id).all()]
+
+        # Unassign all existing tenants from this apartment
         existing_tenants = Tenant.query.filter_by(apartment_id=apartment_id).all()
         for tenant in existing_tenants:
             tenant.apartment_id = None  # Set to NULL instead of deleting the tenant
 
         # Then assign the selected tenants to this apartment
+        new_tenant_ids = []
         for tenant_data in tenants_data:
             tenant_id = tenant_data.get("id")
 
-            if tenant_id:
+            # Fixed bug: Handle temporary IDs properly
+            if tenant_id and not str(tenant_id).startswith("temp-"):
                 # If tenant has an ID, find and update
                 tenant = Tenant.query.get(tenant_id)
                 if tenant:
                     tenant.apartment_id = apartment_id
-                    continue
+                    new_tenant_ids.append(tenant_id)
+            else:
+                # This is a new tenant, create it
+                # Extract only the valid fields for a Tenant
+                new_tenant_data = {
+                    "name": tenant_data.get("name", ""),
+                    "email": tenant_data.get("email", ""),
+                    "phone": tenant_data.get("phone", ""),
+                    "bornOn": tenant_data.get("bornOn", ""),
+                    "refundIban": tenant_data.get("refundIban", ""),
+                    "apartment_id": apartment_id,
+                }
 
-            # If tenant doesn't exist or has no ID, create a new one
-            tenant = Tenant(
-                name=tenant_data.get("name")
-                or f"{tenant_data.get('firstName', '')} {tenant_data.get('lastName', '')}".strip(),
-                email=tenant_data.get("email", ""),
-                phone=tenant_data.get("phone", ""),
-                apartment_id=apartment_id,
-            )
-            db.session.add(tenant)
+                # Create new tenant with apartment_id
+                tenant = Tenant(**new_tenant_data)
+                db.session.add(tenant)
+                db.session.flush()  # Get the ID
+                new_tenant_ids.append(tenant.id)
 
         db.session.commit()
+
+        # Prepare updated data for logging
+        updated_data = {
+            "address": apartment.address,
+            "landlord_id": apartment.landlord_id,
+            "status": apartment.status,
+            "rent": float(apartment.rent) if apartment.rent else 0,
+            "original_tenants": original_tenants,
+            "new_tenants": new_tenant_ids
+        }
+
+        # Log the update
+        ActivityLogger.log_apartment_action(
+            action="update",
+            apartment_id=apartment_id,
+            details={
+                "original": original_data,
+                "updated": updated_data,
+                "changed_fields": [k for k, v in apartment_data.items() if k in original_data and original_data[k] != v]
+            }
+        )
+
         return jsonify({"message": "Apartment updated successfully"}), 200
 
     except Exception as e:
         current_app.logger.error(f"Error editing apartment: {e}")
         db.session.rollback()
+
+        # Log failure
+        ActivityLogger.log_apartment_action(
+            action="update",
+            apartment_id=apartment_id,
+            details={"error": str(e)},
+            success=False,
+            error=e
+        )
+
         return jsonify({"message": "Error editing apartment", "error": str(e)}), 500
 
 
@@ -142,7 +240,19 @@ def list_apartments() -> Tuple[Response, int]:
 
             # Get tenants for this apartment
             tenants = Tenant.query.filter_by(apartment_id=apt.id).all()
-            tenants_list = [tenant.to_dict() for tenant in tenants]
+            tenants_list = []
+
+            # Build tenant list with full information for ALL authenticated users
+            for tenant in tenants:
+                tenant_data = {
+                    "id": tenant.id,
+                    "name": tenant.name,
+                    "email": tenant.email,      # Now visible to all users
+                    "phone": tenant.phone,      # Now visible to all users
+                    "bornOn": tenant.bornOn,    # Now visible to all users
+                    "refundIban": tenant.refundIban  # Now visible to all users
+                }
+                tenants_list.append(tenant_data)
 
             # Convert tenants to comma-separated string for backward compatibility
             tenant_names = ", ".join(
@@ -152,7 +262,7 @@ def list_apartments() -> Tuple[Response, int]:
             apt_dict["tenants"] = tenant_names if not tenants_list else tenants_list
             apartments_data.append(apt_dict)
 
-        # For non-admin users, remove sensitive fields
+        # For non-admin users, remove sensitive apartment fields but KEEP tenant info
         role = g.user.get("role", "limited")
         if role != "admin":
             for apt in apartments_data:
@@ -162,6 +272,7 @@ def list_apartments() -> Tuple[Response, int]:
                 apt.pop("notes", None)
                 apt.pop("managementFee", None)
                 apt.pop("rentCost", None)
+                # NOTE: We are NOT removing tenant information anymore
 
         return jsonify(apartments_data), 200
 
@@ -183,6 +294,14 @@ def export_excel() -> Tuple[Response, int]:
         df.to_excel(writer, index=False, sheet_name="Apartments")
         writer.close()
         output.seek(0)
+
+        # Log export
+        ActivityLogger.log_activity(
+            action="export",
+            entity_type="apartment",
+            details={"format": "excel", "count": len(apartments_data)}
+        )
+
         return send_file(output, download_name="apartments.xlsx", as_attachment=True)
     except Exception as e:
         current_app.logger.error(f"Error exporting apartments: {e}")
@@ -198,11 +317,254 @@ def delete_apartment(apartment_id: int) -> Tuple[Response, int]:
         if not apartment:
             return jsonify({"message": "Apartment not found"}), 404
 
+        # Capture data for logging before deletion
+        apartment_data = {
+            "id": apartment.id,
+            "address": apartment.address,
+            "landlord_id": apartment.landlord_id,
+            "tenants": [tenant.id for tenant in apartment.tenants]
+        }
+
         db.session.delete(apartment)
         db.session.commit()
+
+        # Log deletion
+        ActivityLogger.log_apartment_action(
+            action="delete",
+            apartment_id=apartment_id,
+            details=apartment_data
+        )
+
         return jsonify({"message": "Apartment deleted successfully"}), 200
 
     except Exception as e:
         current_app.logger.error(f"Error deleting apartment: {e}")
         db.session.rollback()
+
+        # Log failure
+        ActivityLogger.log_apartment_action(
+            action="delete",
+            apartment_id=apartment_id,
+            details={"error": str(e)},
+            success=False,
+            error=e
+        )
+
         return jsonify({"message": "Error deleting apartment", "error": str(e)}), 500
+
+
+# NEW ENDPOINT: Contract Extension
+@apartments_bp.route("/apartments/<int:apartment_id>/extend-contract", methods=["PUT"])
+@token_required
+def extend_contract(apartment_id: int) -> Tuple[Response, int]:
+    """
+    Extend the contract end date for a specific apartment.
+    """
+    try:
+        data = request.get_json()
+        if not data or "contractEndDate" not in data:
+            return jsonify({"message": "Contract end date is required"}), 400
+
+        # Check if apartment exists
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
+
+        # Capture original data for logging
+        original_end_date = apartment.contractEndDate.isoformat() if apartment.contractEndDate else None
+
+        # Parse and validate the new contract end date
+        new_end_date_str = data["contractEndDate"]
+        try:
+            new_end_date = datetime.strptime(new_end_date_str, "%Y-%m-%d").date()
+        except ValueError:
+            return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+        # Validate that the new end date is in the future
+        if apartment.contractEndDate and new_end_date <= apartment.contractEndDate:
+            return jsonify({"message": "New end date must be later than current end date"}), 400
+
+        # Update the contract end date
+        apartment.contractEndDate = new_end_date
+        db.session.commit()
+
+        # Log the contract extension
+        ActivityLogger.log_apartment_action(
+            action="extend_contract",
+            apartment_id=apartment_id,
+            details={
+                "address": apartment.address,
+                "original_end_date": original_end_date,
+                "new_end_date": new_end_date_str,
+                "extension_days": (new_end_date - apartment.contractEndDate).days if apartment.contractEndDate else None
+            }
+        )
+
+        return jsonify({
+            "message": "Contract extended successfully",
+            "contractEndDate": new_end_date_str
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error extending contract: {e}")
+        db.session.rollback()
+
+        # Log failure
+        ActivityLogger.log_apartment_action(
+            action="extend_contract",
+            apartment_id=apartment_id,
+            details={"error": str(e), "requested_date": data.get("contractEndDate") if data else None},
+            success=False,
+            error=e
+        )
+
+        return jsonify({"message": "Error extending contract", "error": str(e)}), 500
+
+
+# Add this to routes/apartments.py after the existing routes
+@apartments_bp.route("/apartment/<int:apartment_id>/contracts", methods=["GET"])
+@token_required
+def get_apartment_contracts(apartment_id: int) -> Tuple[Response, int]:
+    """
+    Returns all payment periods (contracts) for a specific apartment.
+    Creates a fallback contract from apartment details if no explicit contracts exist.
+    """
+    try:
+        # Check if apartment exists
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
+
+        # For now, create a fallback contract structure based on apartment details
+        # In the future, you could create a separate PaymentPeriod/Contract model
+        contracts = []
+
+        # Create current/main contract from apartment details
+        if apartment.moveInDate or apartment.contractEndDate or apartment.rent:
+            contract = {
+                "id": "current",
+                "startDate": apartment.moveInDate.isoformat() if apartment.moveInDate else None,
+                "endDate": apartment.contractEndDate.isoformat() if apartment.contractEndDate else None,
+                "rent": float(apartment.rent) if apartment.rent else 0
+            }
+            contracts.append(contract)
+
+        # If no contracts found, create a minimal fallback
+        if not contracts:
+            contracts.append({
+                "id": "current",
+                "startDate": None,
+                "endDate": None,
+                "rent": 0
+            })
+
+        # Log the activity
+        ActivityLogger.log_activity(
+            action="view_contracts",
+            entity_type="apartment",
+            entity_id=apartment_id,
+            details={"contract_count": len(contracts)}
+        )
+
+        return jsonify(contracts), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error getting apartment contracts: {e}")
+        return jsonify({"message": "Error getting apartment contracts", "error": str(e)}), 500
+
+
+@apartments_bp.route("/apartment/<int:apartment_id>/new-payment-period", methods=["POST"])
+@token_required
+@role_required("admin")
+def create_new_payment_period(apartment_id: int) -> Tuple[Response, int]:
+    """
+    Creates a new payment period for an apartment.
+    Updates the apartment's contract dates and rent information.
+    """
+    try:
+        # Check if apartment exists
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"message": "No data provided"}), 400
+
+        # Extract required fields
+        start_date = data.get("start_date")
+        end_date = data.get("end_date")  # Can be null for open-ended
+        rent = data.get("rent")
+        tenants = data.get("tenants", [])
+
+        if not start_date or not rent:
+            return jsonify({"message": "start_date and rent are required"}), 400
+
+        # Capture original data for logging
+        original_data = {
+            "moveInDate": apartment.moveInDate.isoformat() if apartment.moveInDate else None,
+            "contractEndDate": apartment.contractEndDate.isoformat() if apartment.contractEndDate else None,
+            "rent": float(apartment.rent) if apartment.rent else 0
+        }
+
+        # Parse dates
+        try:
+            start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else None
+        except ValueError as e:
+            return jsonify({"message": f"Invalid date format: {str(e)}"}), 400
+
+        # Update apartment with new contract/period information
+        apartment.moveInDate = start_date_obj
+        apartment.contractEndDate = end_date_obj
+        apartment.rent = float(rent)
+
+        # Update tenants if provided (reassign existing tenants to this apartment)
+        if tenants:
+            # First, unassign current tenants
+            current_tenants = Tenant.query.filter_by(apartment_id=apartment_id).all()
+            for tenant in current_tenants:
+                tenant.apartment_id = None
+
+            # Then assign the specified tenants
+            for tenant_name in tenants:
+                # Find tenant by name (you might want to use ID instead)
+                tenant = Tenant.query.filter_by(name=tenant_name).first()
+                if tenant:
+                    tenant.apartment_id = apartment_id
+
+        db.session.commit()
+
+        # Log the new payment period creation
+        ActivityLogger.log_activity(
+            action="create_payment_period",
+            entity_type="apartment",
+            entity_id=apartment_id,
+            details={
+                "original": original_data,
+                "new": {
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "rent": rent,
+                    "tenants": tenants
+                }
+            }
+        )
+
+        return jsonify({"message": "New payment period created successfully"}), 201
+
+    except Exception as e:
+        current_app.logger.error(f"Error creating new payment period: {e}")
+        db.session.rollback()
+
+        # Log failure
+        ActivityLogger.log_activity(
+            action="create_payment_period",
+            entity_type="apartment",
+            entity_id=apartment_id,
+            details={"error": str(e)},
+            status="failed",
+            error=e
+        )
+
+        return jsonify({"message": "Error creating new payment period", "error": str(e)}), 500

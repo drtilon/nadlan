@@ -15,3 +15,5 @@ cryptography
 python-docx
 num2words
 dotenv
+openpyxl
+num2words

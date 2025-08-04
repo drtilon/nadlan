@@ -1,0 +1,16 @@
+FROM node:18-alpine
+
+WORKDIR /app
+RUN addgroup -g 1001 -S nodejs && adduser -S nextjs -u 1001
+
+COPY package.json package-lock.json* ./
+RUN npm install
+COPY . .
+
+RUN mkdir -p /app/node_modules/.vite-temp \
+ && chown -R nextjs:nodejs /app \
+ && chmod -R 755 /app
+
+USER nextjs
+EXPOSE 3001
+CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "3001"]

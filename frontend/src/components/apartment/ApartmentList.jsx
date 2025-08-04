@@ -29,6 +29,7 @@ import {
   Select,
   Stack
 } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
 
 // Icons
 import EditIcon from '@mui/icons-material/Edit';
@@ -89,6 +90,9 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   // Get user data to check if admin
   const userData = getUserData();
   const isAdmin = userData && userData.role === 'admin';
+
+  // Navigation hook
+  const navigate = useNavigate();
 
   // Fetch apartments with pagination
   const fetchApartments = useCallback(async (page = 1, size = pageSize, search = '', sort = sortBy, refresh = false) => {
@@ -304,6 +308,19 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
       showNotification('Failed to generate contract', 'error');
     }
   }, [displayedApartments, showNotification]);
+
+  // Handle tenant navigation - FIXED VERSION
+  const handleGoToTenant = (tenantId) => {
+    // Close any open dialogs first
+    setContractDialogOpen(false);
+    setDetailsOpen(false);
+
+    // Show navigation notification
+    showNotification('Navigating to tenant details...', 'info');
+
+    // Navigate to tenant details page
+    navigate(`/tenants/${tenantId}`);
+  };
 
   // Initial load
   useEffect(() => {
@@ -614,6 +631,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   onGoToPayments={onGoToPayments}
                   onGenerateContract={handleGenerateContract}
                   onOpenDetails={openDetails}
+                  onGoToTenant={handleGoToTenant}
                   isAdmin={isAdmin}
                 />
               </Grid>
@@ -658,6 +676,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         onGenerateContract={handleGenerateContract}
         onExtendContract={openExtendContractDialog}
         onOpenContractManagement={() => setContractDialogOpen(true)}
+        onGoToTenant={handleGoToTenant}
         isAdmin={isAdmin}
       />
 
@@ -680,6 +699,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         apartment={selectedApartment}
         showNotification={showNotification}
         onContractChange={() => fetchApartments(currentPage, pageSize, searchTerm, sortBy, true)}
+        onGoToTenant={handleGoToTenant}
       />
 
       <style>

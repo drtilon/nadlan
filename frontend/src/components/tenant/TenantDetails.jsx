@@ -1,5 +1,6 @@
-// components/TenantDetails.jsx
+// components/TenantDetails.jsx - Complete implementation with all tabs
 import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   Container,
   Paper,
@@ -43,7 +44,18 @@ import {
 } from '@mui/icons-material';
 import api from '../../utils/api';
 
-function TenantDetails({ tenantId, onBack, showNotification }) {
+function TabPanel({ children, value, index }) {
+  return (
+    <div hidden={value !== index}>
+      {value === index && <Box sx={{ py: 3 }}>{children}</Box>}
+    </div>
+  );
+}
+
+function TenantDetails({ showNotification }) {
+  const { tenantId } = useParams();
+  const navigate = useNavigate();
+
   const [tenant, setTenant] = useState(null);
   const [apartment, setApartment] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
@@ -51,7 +63,9 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
   const [activeTab, setActiveTab] = useState(0);
 
   useEffect(() => {
-    fetchTenantData();
+    if (tenantId) {
+      fetchTenantData();
+    }
   }, [tenantId]);
 
   const fetchTenantData = async () => {
@@ -83,7 +97,7 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
             if (tenantData) {
               tenantPayments.push({
                 month,
-                year: new Date().getFullYear(), // Assuming current year
+                year: new Date().getFullYear(),
                 status: tenantData.paid ? 'paid' :
                   (parseFloat(tenantData.amountPaid) > 0 ? 'partial' : 'unpaid'),
                 amountDue: parseFloat(tenantData.amountDue) || 0,
@@ -96,7 +110,7 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
           }
         });
 
-        // Sort payments by month (assuming they're named January, February, etc.)
+        // Sort payments by month
         const monthOrder = [
           'January', 'February', 'March', 'April', 'May', 'June',
           'July', 'August', 'September', 'October', 'November', 'December'
@@ -116,13 +130,17 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
     }
   };
 
+  const handleBack = () => {
+    navigate('/tenants');
+  };
+
   const handleTabChange = (event, newValue) => {
     setActiveTab(newValue);
   };
 
   // Calculate payment statistics
   const calculatePaymentStats = () => {
-    if (!paymentHistory.length) return { onTime: 0, late: 0, missed: 0, total: 0, ratio: 0 };
+    if (!paymentHistory.length) return { paid: 0, partial: 0, unpaid: 0, total: 0, paymentRatio: 0 };
 
     const total = paymentHistory.length;
     const paid = paymentHistory.filter(p => p.status === 'paid').length;
@@ -144,7 +162,7 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
-      currency: 'USD'
+      currency: 'EUR'
     }).format(amount);
   };
 
@@ -155,7 +173,6 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
     try {
       const date = new Date(dateString);
       if (isNaN(date.getTime())) {
-        // If not a valid date object, return as is
         return dateString;
       }
       return date.toLocaleDateString();
@@ -201,7 +218,7 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
           <Button
             variant="outlined"
             startIcon={<ArrowBackIcon />}
-            onClick={onBack}
+            onClick={handleBack}
             sx={{ mt: 2 }}
           >
             Back to Tenants
@@ -219,7 +236,7 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
           <Button
             variant="outlined"
             startIcon={<ArrowBackIcon />}
-            onClick={onBack}
+            onClick={handleBack}
           >
             Back to Tenants List
           </Button>
@@ -354,120 +371,133 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
         </Box>
 
         {/* Payment History Tab */}
-        {activeTab === 0 && (
-          <>
-            {paymentHistory.length === 0 ? (
-              <Alert severity="info" sx={{ mt: 2 }}>
-                No payment history available for this tenant.
-              </Alert>
-            ) : (
-              <TableContainer component={Paper} variant="outlined">
-                <Table>
-                  <TableHead sx={{ bgcolor: 'grey.100' }}>
-                    <TableRow>
-                      <TableCell>Month</TableCell>
-                      <TableCell>Status</TableCell>
-                      <TableCell align="right">Amount Due</TableCell>
-                      <TableCell align="right">Amount Paid</TableCell>
-                      <TableCell align="right">Balance</TableCell>
-                      <TableCell>Notes</TableCell>
+        <TabPanel value={activeTab} index={0}>
+          {paymentHistory.length === 0 ? (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              No payment history available for this tenant.
+            </Alert>
+          ) : (
+            <TableContainer component={Paper} variant="outlined">
+              <Table>
+                <TableHead sx={{ bgcolor: 'grey.100' }}>
+                  <TableRow>
+                    <TableCell>Month</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell align="right">Amount Due</TableCell>
+                    <TableCell align="right">Amount Paid</TableCell>
+                    <TableCell align="right">Balance</TableCell>
+                    <TableCell>Notes</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {paymentHistory.map((payment, index) => (
+                    <TableRow key={index} hover>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <CalendarIcon fontSize="small" color="action" />
+                          <Typography>{payment.month} {payment.year}</Typography>
+                        </Box>
+                      </TableCell>
+                      <TableCell>{renderPaymentStatusChip(payment.status)}</TableCell>
+                      <TableCell align="right">{formatCurrency(payment.amountDue)}</TableCell>
+                      <TableCell align="right">{formatCurrency(payment.amountPaid)}</TableCell>
+                      <TableCell align="right">
+                        <Typography
+                          color={payment.amountPaid >= payment.amountDue ? 'success.main' : 'error.main'}
+                          fontWeight="medium"
+                        >
+                          {formatCurrency(payment.amountPaid - payment.amountDue)}
+                        </Typography>
+                      </TableCell>
+                      <TableCell>{payment.notes || '-'}</TableCell>
                     </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {paymentHistory.map((payment, index) => (
-                      <TableRow key={index} hover>
-                        <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <CalendarIcon fontSize="small" color="action" />
-                            <Typography>{payment.month} {payment.year}</Typography>
-                          </Box>
-                        </TableCell>
-                        <TableCell>{renderPaymentStatusChip(payment.status)}</TableCell>
-                        <TableCell align="right">{formatCurrency(payment.amountDue)}</TableCell>
-                        <TableCell align="right">{formatCurrency(payment.amountPaid)}</TableCell>
-                        <TableCell align="right">
-                          <Typography
-                            color={payment.amountPaid >= payment.amountDue ? 'success.main' : 'error.main'}
-                            fontWeight="medium"
-                          >
-                            {formatCurrency(payment.amountPaid - payment.amountDue)}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>{payment.notes}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-          </>
-        )}
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </TabPanel>
 
         {/* Property Details Tab */}
-        {activeTab === 1 && (
-          <>
-            {!apartment ? (
-              <Alert severity="info" sx={{ mt: 2 }}>
-                No property is currently assigned to this tenant.
-              </Alert>
-            ) : (
-              <Card variant="outlined">
-                <CardContent>
-                  <Typography variant="h6" gutterBottom>
-                    {apartment.address}
-                  </Typography>
-                  <Grid container spacing={3}>
-                    <Grid item xs={12} md={6}>
-                      <Stack spacing={2}>
+        <TabPanel value={activeTab} index={1}>
+          {!apartment ? (
+            <Alert severity="info" sx={{ mt: 2 }}>
+              No property is currently assigned to this tenant.
+            </Alert>
+          ) : (
+            <Card variant="outlined">
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  {apartment.address}
+                </Typography>
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={6}>
+                    <Stack spacing={2}>
+                      <Box>
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          Property Details
+                        </Typography>
+                        <Typography variant="body1">
+                          {apartment.rooms} Rooms • {apartment.size} sq meters
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          Status
+                        </Typography>
+                        <Chip
+                          label={apartment.status || 'Not specified'}
+                          color={apartment.status === 'occupied' ? 'success' : 'default'}
+                        />
+                      </Box>
+                      {apartment.notes && (
                         <Box>
                           <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Property Details
+                            Notes
                           </Typography>
                           <Typography variant="body1">
-                            {apartment.rooms} Rooms • {apartment.size} sq meters
+                            {apartment.notes}
                           </Typography>
                         </Box>
-                        <Box>
-                          <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Status
-                          </Typography>
-                          <Chip
-                            label={apartment.status || 'Not specified'}
-                            color={apartment.status === 'occupied' ? 'success' : 'default'}
-                          />
-                        </Box>
-                      </Stack>
-                    </Grid>
-                    <Grid item xs={12} md={6}>
-                      <Stack spacing={2}>
-                        <Box>
-                          <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Contract Period
-                          </Typography>
-                          <Typography variant="body1">
-                            {apartment.moveInDate ? new Date(apartment.moveInDate).toLocaleDateString() : 'Not set'} -
-                            {apartment.contractEndDate ? new Date(apartment.contractEndDate).toLocaleDateString() : 'Not set'}
-                          </Typography>
-                        </Box>
-                        <Box>
-                          <Typography variant="body2" color="text.secondary" gutterBottom>
-                            Monthly Rent
-                          </Typography>
-                          <Typography variant="h6" color="primary.main">
-                            {formatCurrency(apartment.rent || 0)}
-                          </Typography>
-                        </Box>
-                      </Stack>
-                    </Grid>
+                      )}
+                    </Stack>
                   </Grid>
-                </CardContent>
-              </Card>
-            )}
-          </>
-        )}
+                  <Grid item xs={12} md={6}>
+                    <Stack spacing={2}>
+                      <Box>
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          Contract Period
+                        </Typography>
+                        <Typography variant="body1">
+                          {apartment.moveInDate ? formatDate(apartment.moveInDate) : 'Not set'} - {apartment.contractEndDate ? formatDate(apartment.contractEndDate) : 'Not set'}
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          Monthly Rent
+                        </Typography>
+                        <Typography variant="h6" color="primary.main">
+                          {formatCurrency(apartment.rent || 0)}
+                        </Typography>
+                      </Box>
+                      <Box>
+                        <Typography variant="body2" color="text.secondary" gutterBottom>
+                          Security Deposit
+                        </Typography>
+                        <Typography variant="body1">
+                          {formatCurrency(apartment.deposit || 0)}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  </Grid>
+                </Grid>
+              </CardContent>
+            </Card>
+          )}
+        </TabPanel>
 
         {/* Personal Details Tab */}
-        {activeTab === 2 && (
+        <TabPanel value={activeTab} index={2}>
           <Card variant="outlined">
             <CardContent>
               <Typography variant="h6" gutterBottom>
@@ -538,10 +568,10 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
               </Grid>
             </CardContent>
           </Card>
-        )}
+        </TabPanel>
 
         {/* Financial Summary Tab */}
-        {activeTab === 3 && (
+        <TabPanel value={activeTab} index={3}>
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
               <Card variant="outlined" sx={{ height: '100%' }}>
@@ -649,7 +679,7 @@ function TenantDetails({ tenantId, onBack, showNotification }) {
               </Card>
             </Grid>
           </Grid>
-        )}
+        </TabPanel>
       </Paper>
     </Container>
   );

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Card,
   CardContent,
@@ -8,7 +8,12 @@ import {
   Divider,
   IconButton,
   Tooltip,
-  Button
+  Button,
+  Chip,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText
 } from '@mui/material';
 import {
   Edit as EditIcon,
@@ -20,8 +25,11 @@ import {
   Event as EventIcon,
   AccessTime as AccessTimeIcon,
   Warning as WarningIcon,
-  Error as ErrorIcon
+  Error as ErrorIcon,
+  MoreVert as MoreVertIcon,
+  Visibility as ViewIcon
 } from '@mui/icons-material';
+
 // Import utility functions locally
 const getStatusChip = (status, contractEndDate) => {
   const getExpiryStatus = (contractEndDate) => {
@@ -107,8 +115,11 @@ function ApartmentCard({
   onGoToPayments,
   onGenerateContract,
   onOpenDetails,
+  onGoToTenant, // New prop for tenant navigation
   isAdmin
 }) {
+  const [tenantMenuAnchor, setTenantMenuAnchor] = useState(null);
+
   const getAddressInitial = (address) => {
     return address && address.charAt(0).toUpperCase();
   };
@@ -137,6 +148,23 @@ function ApartmentCard({
     onOpenDetails(apartment);
   };
 
+  const handleTenantMenuClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setTenantMenuAnchor(e.currentTarget);
+  };
+
+  const handleTenantMenuClose = () => {
+    setTenantMenuAnchor(null);
+  };
+
+  const handleTenantClick = (tenant) => {
+    handleTenantMenuClose();
+    if (onGoToTenant && tenant.id) {
+      onGoToTenant(tenant.id);
+    }
+  };
+
   const formatTenantNames = (tenants) => {
     if (!tenants || !Array.isArray(tenants) || tenants.length === 0) {
       return 'No tenants assigned';
@@ -149,6 +177,16 @@ function ApartmentCard({
       return tenant.name || 'Unnamed Tenant';
     }).join(', ');
   };
+
+  const getTenantDisplayName = (tenant) => {
+    if (tenant.firstName && tenant.lastName) {
+      return `${tenant.firstName} ${tenant.lastName}`;
+    }
+    return tenant.name || 'Unnamed Tenant';
+  };
+
+  const tenants = apartment.tenants || [];
+  const hasTenants = tenants.length > 0;
 
   return (
     <Card
@@ -274,21 +312,75 @@ function ApartmentCard({
               </Typography>
             </Box>
           )}
+
+          {/* Enhanced Tenants Section */}
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
             <PersonIcon fontSize="small" sx={{ color: 'text.secondary', fontSize: '1rem', mt: 0.5 }} />
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                display: '-webkit-box',
-                WebkitLineClamp: 1,
-                WebkitBoxOrient: 'vertical'
-              }}
-            >
-              {formatTenantNames(apartment.tenants)}
-            </Typography>
+            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+              {hasTenants ? (
+                <Box>
+                  {/* Show tenant names or clickable chips */}
+                  {onGoToTenant ? (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                      {tenants.slice(0, 2).map((tenant) => (
+                        <Chip
+                          key={tenant.id}
+                          label={getTenantDisplayName(tenant)}
+                          size="small"
+                          variant="outlined"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleTenantClick(tenant);
+                          }}
+                          sx={{
+                            fontSize: '0.7rem',
+                            height: '20px',
+                            cursor: 'pointer',
+                            '&:hover': {
+                              backgroundColor: 'primary.50',
+                              borderColor: 'primary.main'
+                            }
+                          }}
+                        />
+                      ))}
+                      {tenants.length > 2 && (
+                        <IconButton
+                          size="small"
+                          onClick={handleTenantMenuClick}
+                          sx={{
+                            width: 20,
+                            height: 20,
+                            color: 'text.secondary',
+                            '&:hover': { color: 'primary.main' }
+                          }}
+                        >
+                          <MoreVertIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Box>
+                  ) : (
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 1,
+                        WebkitBoxOrient: 'vertical'
+                      }}
+                    >
+                      {formatTenantNames(tenants)}
+                    </Typography>
+                  )}
+                </Box>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No tenants assigned
+                </Typography>
+              )}
+            </Box>
           </Box>
         </Box>
         <Divider sx={{ my: 2 }} />
@@ -368,6 +460,36 @@ function ApartmentCard({
           </Box>
         </Box>
       </CardContent>
+
+      {/* Tenant Menu for overflow tenants */}
+      <Menu
+        anchorEl={tenantMenuAnchor}
+        open={Boolean(tenantMenuAnchor)}
+        onClose={handleTenantMenuClose}
+        PaperProps={{
+          sx: {
+            maxWidth: 250,
+            borderRadius: 1
+          }
+        }}
+      >
+        {tenants.slice(2).map((tenant) => (
+          <MenuItem
+            key={tenant.id}
+            onClick={() => handleTenantClick(tenant)}
+            sx={{ py: 1 }}
+          >
+            <ListItemIcon>
+              <PersonIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText
+              primary={getTenantDisplayName(tenant)}
+              secondary={tenant.email || 'No email'}
+            />
+            <ViewIcon fontSize="small" color="action" sx={{ ml: 1 }} />
+          </MenuItem>
+        ))}
+      </Menu>
     </Card>
   );
 }

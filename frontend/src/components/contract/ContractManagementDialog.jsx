@@ -1,4 +1,4 @@
-// ContractManagementDialog.jsx
+// ContractManagementDialog.jsx - IMPROVED VERSION
 import React, { useState, useEffect } from 'react';
 import {
   Dialog,
@@ -30,7 +30,11 @@ import {
   Checkbox,
   ListItemIcon,
   Switch,
-  FormControlLabel
+  FormControlLabel,
+  Avatar,
+  Stack,
+  Collapse,
+  Paper
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -42,7 +46,13 @@ import {
   Description as DescriptionIcon,
   Event as EventIcon,
   AttachMoney as MoneyIcon,
-  History as HistoryIcon
+  History as HistoryIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  Group as GroupIcon,
+  Star as StarIcon,
+  StarBorder as StarBorderIcon,
+  Visibility as VisibilityIcon
 } from '@mui/icons-material';
 import api from '../../utils/api';
 
@@ -58,13 +68,15 @@ function ContractManagementDialog({
   onClose,
   apartment,
   showNotification,
-  onContractChange // Callback when contracts are modified
+  onContractChange,
+  onGoToTenant // New prop for navigation to tenant details
 }) {
   const [contracts, setContracts] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [loading, setLoading] = useState(false);
   const [tabValue, setTabValue] = useState(0);
   const [editingContract, setEditingContract] = useState(null);
+  const [expandedContracts, setExpandedContracts] = useState(new Set());
   const [contractForm, setContractForm] = useState({
     contract_number: '',
     start_date: '',
@@ -153,8 +165,8 @@ function ContractManagementDialog({
 
       await fetchContracts();
       resetForm();
-      setTabValue(0); // Switch back to contracts list
-      onContractChange?.(); // Notify parent component
+      setTabValue(0);
+      onContractChange?.();
     } catch (error) {
       console.error('Error saving contract:', error);
       const errorMessage = error.response?.data?.message || 'Error saving contract';
@@ -176,7 +188,7 @@ function ContractManagementDialog({
       notes: contract.notes || '',
       tenant_ids: contract.tenants?.map(t => t.tenant_id) || []
     });
-    setTabValue(1); // Switch to form tab
+    setTabValue(1);
   };
 
   const handleDeleteContract = async (contractId) => {
@@ -223,6 +235,124 @@ function ContractManagementDialog({
     );
   };
 
+  const toggleContractExpansion = (contractId) => {
+    setExpandedContracts(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(contractId)) {
+        newSet.delete(contractId);
+      } else {
+        newSet.add(contractId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleTenantClick = (contractTenant) => {
+    if (onGoToTenant && contractTenant.tenant) {
+      // Close the dialog first
+      onClose();
+      // Navigate to tenant details
+      onGoToTenant(contractTenant.tenant.id);
+    }
+  };
+
+  const renderTenantsSection = (tenants) => {
+    if (!tenants || tenants.length === 0) {
+      return (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <PersonIcon fontSize="small" color="action" />
+          <Typography variant="body2" color="text.secondary">
+            No tenants assigned
+          </Typography>
+        </Box>
+      );
+    }
+
+    return (
+      <Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+          <GroupIcon fontSize="small" color="primary" />
+          <Typography variant="subtitle2" color="primary">
+            Tenants ({tenants.length})
+          </Typography>
+        </Box>
+        <Stack spacing={1}>
+          {tenants.map((contractTenant) => (
+            <Paper
+              key={contractTenant.id}
+              elevation={1}
+              sx={{
+                p: 2,
+                backgroundColor: contractTenant.is_primary ? 'primary.50' : 'grey.50',
+                border: contractTenant.is_primary ? '1px solid' : 'none',
+                borderColor: contractTenant.is_primary ? 'primary.200' : 'transparent',
+                cursor: onGoToTenant ? 'pointer' : 'default',
+                transition: 'all 0.2s ease',
+                '&:hover': onGoToTenant ? {
+                  boxShadow: 2,
+                  borderColor: 'primary.main',
+                  transform: 'translateY(-2px)'
+                } : {}
+              }}
+              onClick={() => handleTenantClick(contractTenant)}
+            >
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Avatar sx={{ bgcolor: contractTenant.is_primary ? 'primary.main' : 'grey.400' }}>
+                    {contractTenant.is_primary ? <StarIcon /> : <PersonIcon />}
+                  </Avatar>
+                  <Box>
+                    <Typography variant="subtitle2" fontWeight="medium">
+                      {contractTenant.tenant?.name || 'Unknown Tenant'}
+                      {contractTenant.is_primary && (
+                        <Chip
+                          label="Primary"
+                          size="small"
+                          color="primary"
+                          sx={{ ml: 1 }}
+                        />
+                      )}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      {contractTenant.tenant?.email || 'No email'}
+                    </Typography>
+                    {contractTenant.tenant?.phone && (
+                      <Typography variant="body2" color="text.secondary">
+                        📞 {contractTenant.tenant.phone}
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
+
+                <Box sx={{ textAlign: 'right' }}>
+                  <Typography variant="body2" fontWeight="medium">
+                    {contractTenant.rent_share_percentage}% share
+                  </Typography>
+                  {contractTenant.move_in_date && (
+                    <Typography variant="caption" color="text.secondary">
+                      Moved in: {formatDate(contractTenant.move_in_date)}
+                    </Typography>
+                  )}
+                  {contractTenant.move_out_date && (
+                    <Typography variant="caption" color="error">
+                      Moved out: {formatDate(contractTenant.move_out_date)}
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
+
+              {contractTenant.notes && (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontStyle: 'italic' }}>
+                  Note: {contractTenant.notes}
+                </Typography>
+              )}
+            </Paper>
+          ))}
+        </Stack>
+      </Box>
+    );
+  };
+
   const TabPanel = ({ children, value, index }) => (
     <div hidden={value !== index}>
       {value === index && <Box sx={{ p: 2 }}>{children}</Box>}
@@ -238,7 +368,7 @@ function ContractManagementDialog({
       PaperProps={{
         sx: {
           height: '90vh',
-          maxHeight: '800px'
+          maxHeight: '900px'
         }
       }}
     >
@@ -287,130 +417,277 @@ function ContractManagementDialog({
         <TabPanel value={tabValue} index={0}>
           <Box sx={{ height: '500px', overflow: 'auto' }}>
             {contracts.length === 0 ? (
-              <Box sx={{ textAlign: 'center', py: 6 }}>
+              <Box sx={{ textAlign: 'center', py: 8 }}>
                 <DescriptionIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
                 <Typography variant="h6" color="text.secondary" gutterBottom>
-                  No Contracts Found
+                  No Contract Periods Found
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                  Create the first contract period for this apartment
+                  Create your first contract period to start managing tenant assignments and rental terms.
                 </Typography>
                 <Button
                   variant="contained"
                   startIcon={<AddIcon />}
                   onClick={() => setTabValue(1)}
                 >
-                  Create Contract
+                  Create First Contract
                 </Button>
               </Box>
             ) : (
-              <List>
-                {contracts.map((contract, index) => (
+              <List sx={{ p: 1 }}>
+                {contracts.map((contract) => (
                   <React.Fragment key={contract.id}>
-                    <ListItem sx={{ px: 3, py: 2 }}>
-                      <ListItemIcon>
-                        <Box
-                          sx={{
-                            width: 40,
-                            height: 40,
-                            borderRadius: '50%',
-                            bgcolor: contract.is_current ? 'success.main' : 'grey.300',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: 'white',
-                            fontSize: '0.875rem',
-                            fontWeight: 600
-                          }}
-                        >
-                          {index + 1}
-                        </Box>
-                      </ListItemIcon>
-                      <ListItemText
-                        primary={
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
-                            <Typography variant="subtitle1" fontWeight={600}>
-                              {contract.contract_number}
-                            </Typography>
-                            {getStatusChip(contract.status)}
-                            {contract.is_current && (
-                              <Chip
-                                label="CURRENT"
-                                color="success"
-                                size="small"
-                                variant="filled"
-                              />
-                            )}
-                          </Box>
-                        }
-                        secondary={
+                    <Card
+                      elevation={2}
+                      sx={{
+                        mb: 2,
+                        border: contract.is_current ? '2px solid' : '1px solid',
+                        borderColor: contract.is_current ? 'success.main' : 'divider'
+                      }}
+                    >
+                      <CardContent>
+                        {/* Contract Header */}
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
                           <Box>
-                            <Grid container spacing={2} sx={{ mt: 1 }}>
-                              <Grid item xs={12} sm={6}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                                  <EventIcon fontSize="small" color="action" />
-                                  <Typography variant="body2">
-                                    {formatDate(contract.start_date)} - {formatDate(contract.end_date) || 'Ongoing'}
+                            <Typography variant="h6" component="div" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              {contract.contract_number}
+                              {contract.is_current && (
+                                <Chip
+                                  label="Current"
+                                  color="success"
+                                  size="small"
+                                  variant="filled"
+                                />
+                              )}
+                              {getStatusChip(contract.status)}
+                            </Typography>
+                            <Typography variant="body2" color="text.secondary">
+                              Contract ID: {contract.id}
+                            </Typography>
+                          </Box>
+
+                          <Box sx={{ display: 'flex', gap: 1 }}>
+                            <IconButton
+                              size="small"
+                              onClick={() => toggleContractExpansion(contract.id)}
+                              color="primary"
+                            >
+                              {expandedContracts.has(contract.id) ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleEditContract(contract)}
+                              color="primary"
+                            >
+                              <EditIcon />
+                            </IconButton>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleDeleteContract(contract.id)}
+                              color="error"
+                            >
+                              <DeleteIcon />
+                            </IconButton>
+                          </Box>
+                        </Box>
+
+                        {/* Contract Summary */}
+                        <Grid container spacing={2} sx={{ mb: 2 }}>
+                          <Grid item xs={12} sm={6} md={3}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <EventIcon fontSize="small" color="action" />
+                              <Box>
+                                <Typography variant="caption" color="text.secondary">
+                                  Duration
+                                </Typography>
+                                <Typography variant="body2" fontWeight="medium">
+                                  {formatDate(contract.start_date)} - {formatDate(contract.end_date) || 'Ongoing'}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  ({contract.duration_days || 0} days)
+                                </Typography>
+                              </Box>
+                            </Box>
+                          </Grid>
+
+                          <Grid item xs={12} sm={6} md={3}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <MoneyIcon fontSize="small" color="action" />
+                              <Box>
+                                <Typography variant="caption" color="text.secondary">
+                                  Monthly Rent
+                                </Typography>
+                                <Typography variant="body2" fontWeight="medium">
+                                  {formatCurrency(contract.monthly_rent)}
+                                </Typography>
+                                {contract.security_deposit > 0 && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    Deposit: {formatCurrency(contract.security_deposit)}
                                   </Typography>
-                                </Box>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                  <MoneyIcon fontSize="small" color="action" />
-                                  <Typography variant="body2">
-                                    {formatCurrency(contract.monthly_rent)}/month
-                                  </Typography>
-                                </Box>
-                              </Grid>
-                              <Grid item xs={12} sm={6}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                                  <PersonIcon fontSize="small" color="action" />
-                                  <Typography variant="body2">
-                                    {contract.tenants?.length || 0} tenant(s)
-                                  </Typography>
-                                </Box>
-                                {contract.tenants && contract.tenants.length > 0 && (
-                                  <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, mt: 1 }}>
-                                    {contract.tenants.map((ct) => (
-                                      <Chip
-                                        key={ct.id}
-                                        label={ct.tenant?.name || 'Unknown'}
-                                        size="small"
-                                        variant="outlined"
-                                        color={ct.is_primary ? 'primary' : 'default'}
-                                        sx={{ fontSize: '0.75rem' }}
-                                      />
-                                    ))}
-                                  </Box>
                                 )}
+                              </Box>
+                            </Box>
+                          </Grid>
+
+                          <Grid item xs={12} sm={6} md={3}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <GroupIcon fontSize="small" color="action" />
+                              <Box>
+                                <Typography variant="caption" color="text.secondary">
+                                  Tenants
+                                </Typography>
+                                <Typography variant="body2" fontWeight="medium">
+                                  {contract.tenants?.length || 0} assigned
+                                </Typography>
+                                {contract.tenants?.length > 0 && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    Primary: {contract.tenants.find(t => t.is_primary)?.tenant?.name || 'None'}
+                                  </Typography>
+                                )}
+                              </Box>
+                            </Box>
+                          </Grid>
+
+                          <Grid item xs={12} sm={6} md={3}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <DescriptionIcon fontSize="small" color="action" />
+                              <Box>
+                                <Typography variant="caption" color="text.secondary">
+                                  Created
+                                </Typography>
+                                <Typography variant="body2" fontWeight="medium">
+                                  {formatDate(contract.created_at)}
+                                </Typography>
+                                {contract.created_by && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    by {contract.created_by}
+                                  </Typography>
+                                )}
+                              </Box>
+                            </Box>
+                          </Grid>
+                        </Grid>
+
+                        {/* Quick Tenant Preview */}
+                        {contract.tenants && contract.tenants.length > 0 && (
+                          <Box sx={{ mb: 1 }}>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
+                              <Typography variant="body2" color="text.secondary">
+                                Tenants:
+                              </Typography>
+                              {contract.tenants.slice(0, 3).map((ct) => (
+                                <Chip
+                                  key={ct.id}
+                                  label={ct.tenant?.name || 'Unknown'}
+                                  size="small"
+                                  variant={ct.is_primary ? "filled" : "outlined"}
+                                  color={ct.is_primary ? "primary" : "default"}
+                                  icon={ct.is_primary ? <StarIcon /> : <PersonIcon />}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleTenantClick(ct);
+                                  }}
+                                  sx={{
+                                    cursor: onGoToTenant ? 'pointer' : 'default',
+                                    '&:hover': onGoToTenant ? {
+                                      backgroundColor: ct.is_primary ? 'primary.700' : 'grey.300'
+                                    } : {}
+                                  }}
+                                />
+                              ))}
+                              {contract.tenants.length > 3 && (
+                                <Chip
+                                  label={`+${contract.tenants.length - 3} more`}
+                                  size="small"
+                                  variant="outlined"
+                                  color="default"
+                                />
+                              )}
+                            </Box>
+                          </Box>
+                        )}
+
+                        {/* Contract Notes Preview */}
+                        {contract.notes && (
+                          <Box sx={{ mb: 1 }}>
+                            <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+                              "{contract.notes.length > 100 ? contract.notes.substring(0, 100) + '...' : contract.notes}"
+                            </Typography>
+                          </Box>
+                        )}
+
+                        {/* Expanded Details */}
+                        <Collapse in={expandedContracts.has(contract.id)}>
+                          <Divider sx={{ my: 2 }} />
+                          <Box sx={{ mt: 2 }}>
+                            <Typography variant="subtitle1" gutterBottom sx={{ fontWeight: 'bold', color: 'primary.main' }}>
+                              Detailed Information
+                            </Typography>
+
+                            {/* Full Tenants Section */}
+                            <Box sx={{ mb: 3 }}>
+                              {renderTenantsSection(contract.tenants)}
+                            </Box>
+
+                            {/* Full Notes */}
+                            {contract.notes && (
+                              <Box sx={{ mb: 2 }}>
+                                <Typography variant="subtitle2" gutterBottom>
+                                  Contract Notes
+                                </Typography>
+                                <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
+                                  <Typography variant="body2">
+                                    {contract.notes}
+                                  </Typography>
+                                </Paper>
+                              </Box>
+                            )}
+
+                            {/* Additional Details */}
+                            <Grid container spacing={2}>
+                              <Grid item xs={12} md={6}>
+                                <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
+                                  <Typography variant="subtitle2" gutterBottom>
+                                    Financial Details
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    <strong>Monthly Rent:</strong> {formatCurrency(contract.monthly_rent)}
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    <strong>Security Deposit:</strong> {formatCurrency(contract.security_deposit)}
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    <strong>Status:</strong> {contract.status.charAt(0).toUpperCase() + contract.status.slice(1)}
+                                  </Typography>
+                                </Paper>
+                              </Grid>
+
+                              <Grid item xs={12} md={6}>
+                                <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
+                                  <Typography variant="subtitle2" gutterBottom>
+                                    Timeline
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    <strong>Start Date:</strong> {formatDate(contract.start_date)}
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    <strong>End Date:</strong> {formatDate(contract.end_date) || 'Open-ended'}
+                                  </Typography>
+                                  <Typography variant="body2">
+                                    <strong>Duration:</strong> {contract.duration_days || 0} days
+                                  </Typography>
+                                  {contract.updated_at !== contract.created_at && (
+                                    <Typography variant="body2">
+                                      <strong>Last Updated:</strong> {formatDate(contract.updated_at)}
+                                    </Typography>
+                                  )}
+                                </Paper>
                               </Grid>
                             </Grid>
-                            {contract.notes && (
-                              <Typography variant="body2" color="text.secondary" sx={{ mt: 1, fontStyle: 'italic' }}>
-                                {contract.notes}
-                              </Typography>
-                            )}
                           </Box>
-                        }
-                      />
-                      <ListItemSecondaryAction>
-                        <Box sx={{ display: 'flex', gap: 1 }}>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleEditContract(contract)}
-                            color="primary"
-                          >
-                            <EditIcon />
-                          </IconButton>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleDeleteContract(contract.id)}
-                            color="error"
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        </Box>
-                      </ListItemSecondaryAction>
-                    </ListItem>
-                    {index < contracts.length - 1 && <Divider />}
+                        </Collapse>
+                      </CardContent>
+                    </Card>
                   </React.Fragment>
                 ))}
               </List>
@@ -420,10 +697,13 @@ function ContractManagementDialog({
 
         {/* Contract Form Tab */}
         <TabPanel value={tabValue} index={1}>
-          <Box sx={{ height: '500px', overflow: 'auto', px: 2 }}>
+          <Box sx={{ height: '500px', overflow: 'auto', p: 2 }}>
             <Grid container spacing={3}>
               <Grid item xs={12}>
-                <Alert severity="info" sx={{ mb: 2 }}>
+                <Alert
+                  severity={editingContract ? "info" : "success"}
+                  sx={{ mb: 2 }}
+                >
                   {editingContract
                     ? `Editing contract: ${editingContract.contract_number}`
                     : 'Create a new contract period for this apartment'
@@ -490,8 +770,9 @@ function ContractManagementDialog({
                   value={contractForm.monthly_rent}
                   onChange={(e) => handleFormChange('monthly_rent', e.target.value)}
                   InputProps={{
-                    startAdornment: <Typography sx={{ mr: 1 }}>€</Typography>
+                    startAdornment: '€',
                   }}
+                  helperText="Enter the monthly rental amount"
                 />
               </Grid>
 
@@ -503,8 +784,9 @@ function ContractManagementDialog({
                   value={contractForm.security_deposit}
                   onChange={(e) => handleFormChange('security_deposit', e.target.value)}
                   InputProps={{
-                    startAdornment: <Typography sx={{ mr: 1 }}>€</Typography>
+                    startAdornment: '€',
                   }}
+                  helperText="Security deposit amount"
                 />
               </Grid>
 
@@ -513,9 +795,9 @@ function ContractManagementDialog({
                   multiple
                   options={tenants}
                   getOptionLabel={(tenant) => tenant.name}
-                  value={tenants.filter(t => contractForm.tenant_ids.includes(t.id))}
+                  value={tenants.filter(tenant => contractForm.tenant_ids.includes(tenant.id))}
                   onChange={(event, newValue) => {
-                    handleFormChange('tenant_ids', newValue.map(t => t.id));
+                    handleFormChange('tenant_ids', newValue.map(tenant => tenant.id));
                   }}
                   renderOption={(props, tenant, { selected }) => (
                     <li {...props}>

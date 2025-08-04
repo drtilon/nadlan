@@ -45,8 +45,8 @@ def create_app():
         app = Flask(__name__)
         app.config.from_object(Config)
 
-        # Set file upload limits - reduced for better reliability
-        app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size (reduced from 100MB)
+        # Set file upload limits - INCREASED for larger files
+        app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size (increased from 50MB)
         app.config['UPLOAD_FOLDER'] = os.path.join(app.root_path, 'uploads')
 
         # Additional configuration for better file handling
@@ -128,7 +128,7 @@ def create_app():
         # Add error handler for file too large
         @app.errorhandler(413)
         def too_large(e):
-            return {"error": "File too large. Maximum file size is 50MB."}, 413
+            return {"error": "File too large. Maximum file size is 100MB."}, 413
 
         # Add error handler for request entity too large (Nginx/server level)
         @app.errorhandler(400)

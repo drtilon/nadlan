@@ -1,4 +1,4 @@
-# models/models.py - Fixed version with extend_existing=True
+# models/models.py - FIXED VERSION with circular reference prevention
 from datetime import date
 from flask_bcrypt import Bcrypt
 from extentions import db, bcrypt
@@ -28,9 +28,9 @@ class Landlord(db.Model):
     # Relationship with apartments
     apartments = db.relationship("Apartment", backref="landlord", lazy=True)
 
-    def to_dict(self):
-        """Convert Landlord object to dictionary"""
-        return {
+    def to_dict(self, include_apartments=False):
+        """Convert Landlord object to dictionary with optional apartments"""
+        result = {
             "id": self.id,
             "company_name": self.company_name,
             "name": self.name,
@@ -43,6 +43,11 @@ class Landlord(db.Model):
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "apartment_count": len(self.apartments) if self.apartments else 0,
         }
+
+        if include_apartments:
+            result["apartments"] = [apt.to_dict(include_landlord=False, include_contract_periods=False) for apt in self.apartments]
+
+        return result
 
 
 class Apartment(db.Model):
@@ -73,34 +78,36 @@ class Apartment(db.Model):
     tenants = db.relationship("Tenant", backref="apartment", lazy=True)
     contract_periods = db.relationship("ContractPeriod", backref="apartment", lazy=True, cascade="all, delete-orphan")
 
-    def to_dict(self):
-        tenant_data = []
-        for tenant in self.tenants:
-            tenant_data.append(tenant.to_dict())
-
+    def to_dict(self, include_landlord=True, include_tenants=True, include_contract_periods=True):
+        """Convert to dictionary with optional related data to prevent circular references"""
         result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
         # Convert date objects to string format
         if self.moveInDate:
             result["moveInDate"] = self.moveInDate.isoformat()
         if self.contractEndDate:
             result["contractEndDate"] = self.contractEndDate.isoformat()
 
-        # Add tenants data if there are any
-        if tenant_data:
-            result["tenants"] = tenant_data
+        # Add tenants data if requested
+        if include_tenants and self.tenants:
+            result["tenants"] = [
+                tenant.to_dict(include_apartment=False, include_contracts=False)
+                for tenant in self.tenants
+            ]
 
-        # Add landlord data if available
-        if self.landlord:
-            result["landlord"] = self.landlord.to_dict()
+        # Add landlord data if requested and available
+        if include_landlord and self.landlord:
+            result["landlord"] = self.landlord.to_dict(include_apartments=False)
 
-        # Add current contract period
-        current_contract = self.get_current_contract()
-        if current_contract:
-            result["current_contract"] = current_contract.to_dict()
-            result["current_contract_id"] = current_contract.id
+        # Add current contract period if requested
+        if include_contract_periods:
+            current_contract = self.get_current_contract()
+            if current_contract:
+                result["current_contract"] = current_contract.to_dict(include_apartment=False)
+                result["current_contract_id"] = current_contract.id
 
-        # Add contract periods count
-        result["contract_periods_count"] = len(self.contract_periods)
+            # Add contract periods count
+            result["contract_periods_count"] = len(self.contract_periods)
 
         return result
 
@@ -141,8 +148,9 @@ class ContractPeriod(db.Model):
     contract_tenants = db.relationship("ContractTenant", backref="contract_period", lazy=True, cascade="all, delete-orphan")
     payments = db.relationship("Payment", backref="contract_period", lazy=True)
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_apartment=True, include_tenants=True):
+        """Convert to dictionary with optional related data"""
+        result = {
             "id": self.id,
             "apartment_id": self.apartment_id,
             "contract_number": self.contract_number,
@@ -155,12 +163,21 @@ class ContractPeriod(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "created_by": self.created_by,
-            "tenants": [ct.to_dict() for ct in self.contract_tenants],
-            "apartment_address": self.apartment.address if self.apartment else None,
             "is_current": self.is_current_contract(),
             "duration_days": self.get_duration_days(),
             "payments_count": len(self.payments) if self.payments else 0
         }
+
+        if include_tenants:
+            result["tenants"] = [
+                ct.to_dict(include_contract=False)
+                for ct in self.contract_tenants
+            ]
+
+        if include_apartment and self.apartment:
+            result["apartment_address"] = self.apartment.address
+
+        return result
 
     def is_current_contract(self):
         """Check if this contract is currently active"""
@@ -171,6 +188,8 @@ class ContractPeriod(db.Model):
 
     def get_duration_days(self):
         """Get the duration of the contract in days"""
+        if not self.start_date:
+            return 0
         end_date = self.end_date or date.today()
         return (end_date - self.start_date).days
 
@@ -200,12 +219,12 @@ class ContractTenant(db.Model):
     # Relationships
     tenant = db.relationship("Tenant", backref="contract_assignments", lazy=True)
 
-    def to_dict(self):
-        return {
+    def to_dict(self, include_tenant=True, include_contract=True):
+        """Convert to dictionary with optional related data"""
+        result = {
             "id": self.id,
             "contract_period_id": self.contract_period_id,
             "tenant_id": self.tenant_id,
-            "tenant": self.tenant.to_dict() if self.tenant else None,
             "is_primary": self.is_primary,
             "move_in_date": self.move_in_date.isoformat() if self.move_in_date else None,
             "move_out_date": self.move_out_date.isoformat() if self.move_out_date else None,
@@ -213,6 +232,15 @@ class ContractTenant(db.Model):
             "notes": self.notes,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
+
+        if include_tenant and self.tenant:
+            result["tenant"] = self.tenant.to_dict(include_apartment=False, include_contracts=False)
+
+        if include_contract and self.contract_period:
+            result["contract_number"] = self.contract_period.contract_number
+            result["contract_status"] = self.contract_period.status
+
+        return result
 
 
 class Tenant(db.Model):
@@ -229,13 +257,14 @@ class Tenant(db.Model):
     # Keep apartment_id for backward compatibility, but it's now optional
     apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=True)
 
-    def to_dict(self):
+    def to_dict(self, include_apartment=True, include_contracts=True):
+        """Convert to dictionary with optional related data"""
         # Split name into first and last name for frontend
         name_parts = self.name.split(" ", 1) if self.name else ["", ""]
         first_name = name_parts[0]
         last_name = name_parts[1] if len(name_parts) > 1 else ""
 
-        return {
+        result = {
             "id": self.id,
             "name": self.name,
             "firstName": first_name,
@@ -245,10 +274,20 @@ class Tenant(db.Model):
             "bornOn": self.bornOn,
             "refundIban": self.refundIban,
             "apartment_id": self.apartment_id,
-            "current_contracts": [ca.contract_period.to_dict() for ca in self.contract_assignments
-                                if ca.contract_period.is_current_contract()],
-            "contract_history_count": len(self.contract_assignments) if self.contract_assignments else 0
         }
+
+        if include_contracts:
+            result["current_contracts"] = [
+                ca.contract_period.to_dict(include_apartment=False, include_tenants=False)
+                for ca in self.contract_assignments
+                if ca.contract_period.is_current_contract()
+            ]
+            result["contract_history_count"] = len(self.contract_assignments) if self.contract_assignments else 0
+
+        if include_apartment and self.apartment:
+            result["apartment_address"] = self.apartment.address
+
+        return result
 
     def get_current_contracts(self):
         """Get all currently active contracts for this tenant"""
@@ -324,7 +363,8 @@ class Payment(db.Model):
     tenant_name = db.Column(db.String(255), nullable=True)  # For individual payments
     payment_type = db.Column(db.String(50), nullable=True, default="rent")  # rent, deposit, utilities, other
 
-    def to_dict(self):
+    def to_dict(self, include_apartment=True, include_contract=True):
+        """Convert to dictionary with optional related data to prevent circular references"""
         # Determine if this is an individual payment
         is_individual = bool(hasattr(self, 'amount') and self.amount and
                            hasattr(self, 'tenant_name') and self.tenant_name)
@@ -343,14 +383,18 @@ class Payment(db.Model):
             "isIndividual": is_individual
         }
 
-        # Add contract information if available
-        if self.contract_period:
+        # Add contract information if requested and available
+        if include_contract and self.contract_period:
             result["contract_info"] = {
                 "contract_number": self.contract_period.contract_number,
                 "start_date": self.contract_period.start_date.isoformat(),
                 "end_date": self.contract_period.end_date.isoformat() if self.contract_period.end_date else None,
                 "tenants": self.contract_period.get_tenants_list()
             }
+
+        # Add apartment info if requested and available
+        if include_apartment and self.apartment:
+            result["apartment_address"] = self.apartment.address
 
         if is_individual:
             # Individual payment

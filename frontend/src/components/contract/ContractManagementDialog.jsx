@@ -1,5 +1,4 @@
-// ContractManagementDialog.jsx - IMPROVED VERSION
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -52,7 +51,9 @@ import {
   Group as GroupIcon,
   Star as StarIcon,
   StarBorder as StarBorderIcon,
-  Visibility as VisibilityIcon
+  Visibility as VisibilityIcon,
+  Download as DownloadIcon,
+  Refresh as RefreshIcon
 } from '@mui/icons-material';
 import api from '../../utils/api';
 
@@ -63,13 +64,19 @@ const CONTRACT_STATUSES = [
   { value: 'pending', label: 'Pending', color: 'warning' }
 ];
 
+const TabPanel = React.memo(({ children, value, index }) => (
+  <div hidden={value !== index}>
+    {value === index && <Box sx={{ p: 2 }}>{children}</Box>}
+  </div>
+));
+
 function ContractManagementDialog({
   open,
   onClose,
   apartment,
   showNotification,
   onContractChange,
-  onGoToTenant // New prop for navigation to tenant details
+  onGoToTenant
 }) {
   const [contracts, setContracts] = useState([]);
   const [tenants, setTenants] = useState([]);
@@ -77,6 +84,7 @@ function ContractManagementDialog({
   const [tabValue, setTabValue] = useState(0);
   const [editingContract, setEditingContract] = useState(null);
   const [expandedContracts, setExpandedContracts] = useState(new Set());
+
   const [contractForm, setContractForm] = useState({
     contract_number: '',
     start_date: '',
@@ -88,6 +96,11 @@ function ContractManagementDialog({
     tenant_ids: []
   });
 
+  // Debug re-renders
+  useEffect(() => {
+    console.log('ContractManagementDialog re-rendered');
+  });
+
   useEffect(() => {
     if (open && apartment) {
       fetchContracts();
@@ -96,7 +109,7 @@ function ContractManagementDialog({
     }
   }, [open, apartment]);
 
-  const fetchContracts = async () => {
+  const fetchContracts = useCallback(async () => {
     try {
       setLoading(true);
       const response = await api.get(`/apartments/${apartment.id}/contracts`);
@@ -107,19 +120,20 @@ function ContractManagementDialog({
     } finally {
       setLoading(false);
     }
-  };
+  }, [apartment, showNotification]);
 
-  const fetchTenants = async () => {
+  const fetchTenants = useCallback(async () => {
     try {
       const response = await api.get('/tenants/list');
+      console.log('Tenants fetched:', response.data);
       setTenants(response.data || []);
     } catch (error) {
       console.error('Error fetching tenants:', error);
       showNotification('Error loading tenants', 'error');
     }
-  };
+  }, [showNotification]);
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setContractForm({
       contract_number: '',
       start_date: '',
@@ -131,16 +145,69 @@ function ContractManagementDialog({
       tenant_ids: []
     });
     setEditingContract(null);
-  };
+  }, [apartment]);
 
-  const handleFormChange = (field, value) => {
-    setContractForm(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
+  const handleContractNumberChange = useCallback((e) => {
+    setContractForm(prev => ({ ...prev, contract_number: e.target.value }));
+  }, []);
 
-  const handleCreateContract = async () => {
+  const handleStatusChange = useCallback((e) => {
+    setContractForm(prev => ({ ...prev, status: e.target.value }));
+  }, []);
+
+  const handleStartDateChange = useCallback((e) => {
+    setContractForm(prev => ({ ...prev, start_date: e.target.value }));
+  }, []);
+
+  const handleEndDateChange = useCallback((e) => {
+    setContractForm(prev => ({ ...prev, end_date: e.target.value }));
+  }, []);
+
+  const handleMonthlyRentChange = useCallback((e) => {
+    setContractForm(prev => ({ ...prev, monthly_rent: e.target.value }));
+  }, []);
+
+  const handleSecurityDepositChange = useCallback((e) => {
+    setContractForm(prev => ({ ...prev, security_deposit: e.target.value }));
+  }, []);
+
+  const handleNotesChange = useCallback((e) => {
+    setContractForm(prev => ({ ...prev, notes: e.target.value }));
+  }, []);
+
+  const handleTenantIdsChange = useCallback((event, newValue) => {
+    setContractForm(prev => ({ ...prev, tenant_ids: newValue.map(tenant => tenant.id) }));
+  }, []);
+
+  const loadFromApartment = useCallback(() => {
+    if (!apartment) {
+      showNotification('No apartment data available', 'error');
+      return;
+    }
+
+    const apartmentTenantIds = apartment.tenants ? apartment.tenants.map(tenant => tenant.id) : [];
+    const currentDate = new Date();
+    const contractNumber = `APT${apartment.id}-${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+
+    const loadedForm = {
+      contract_number: contractNumber,
+      start_date: apartment.moveInDate || currentDate.toISOString().split('T')[0],
+      end_date: apartment.contractEndDate || '',
+      monthly_rent: apartment.rent?.toString() || '',
+      security_deposit: apartment.deposit?.toString() || '',
+      status: 'active',
+      notes: apartment.notes || '',
+      tenant_ids: apartmentTenantIds
+    };
+
+    setContractForm(loadedForm);
+    showNotification(
+      `Loaded data from apartment: ${apartmentTenantIds.length} tenants, rent €${apartment.rent || 0}`,
+      'success'
+    );
+  }, [apartment, showNotification]);
+
+  const handleCreateContract = useCallback(async () => {
     if (!contractForm.contract_number || !contractForm.start_date || !contractForm.monthly_rent) {
       showNotification('Please fill in all required fields', 'error');
       return;
@@ -174,9 +241,9 @@ function ContractManagementDialog({
     } finally {
       setLoading(false);
     }
-  };
+  }, [apartment, contractForm, editingContract, showNotification, onContractChange, resetForm, fetchContracts]);
 
-  const handleEditContract = (contract) => {
+  const handleEditContract = useCallback((contract) => {
     setEditingContract(contract);
     setContractForm({
       contract_number: contract.contract_number || '',
@@ -189,9 +256,9 @@ function ContractManagementDialog({
       tenant_ids: contract.tenants?.map(t => t.tenant_id) || []
     });
     setTabValue(1);
-  };
+  }, []);
 
-  const handleDeleteContract = async (contractId) => {
+  const handleDeleteContract = useCallback(async (contractId) => {
     if (!window.confirm('Are you sure you want to delete this contract? This action cannot be undone.')) {
       return;
     }
@@ -209,21 +276,21 @@ function ContractManagementDialog({
     } finally {
       setLoading(false);
     }
-  };
+  }, [showNotification, onContractChange, fetchContracts]);
 
-  const formatCurrency = (amount) => {
+  const formatCurrency = useCallback((amount) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'EUR'
     }).format(amount || 0);
-  };
+  }, []);
 
-  const formatDate = (dateString) => {
+  const formatDate = useCallback((dateString) => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString();
-  };
+  }, []);
 
-  const getStatusChip = (status) => {
+  const getStatusChip = useCallback((status) => {
     const statusConfig = CONTRACT_STATUSES.find(s => s.value === status) || CONTRACT_STATUSES[0];
     return (
       <Chip
@@ -233,9 +300,9 @@ function ContractManagementDialog({
         variant="outlined"
       />
     );
-  };
+  }, []);
 
-  const toggleContractExpansion = (contractId) => {
+  const toggleContractExpansion = useCallback((contractId) => {
     setExpandedContracts(prev => {
       const newSet = new Set(prev);
       if (newSet.has(contractId)) {
@@ -245,18 +312,16 @@ function ContractManagementDialog({
       }
       return newSet;
     });
-  };
+  }, []);
 
-  const handleTenantClick = (contractTenant) => {
+  const handleTenantClick = useCallback((contractTenant) => {
     if (onGoToTenant && contractTenant.tenant) {
-      // Close the dialog first
       onClose();
-      // Navigate to tenant details
       onGoToTenant(contractTenant.tenant.id);
     }
-  };
+  }, [onClose, onGoToTenant]);
 
-  const renderTenantsSection = (tenants) => {
+  const renderTenantsSection = useCallback((tenants) => {
     if (!tenants || tenants.length === 0) {
       return (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -351,13 +416,39 @@ function ContractManagementDialog({
         </Stack>
       </Box>
     );
-  };
+  }, [formatDate, onGoToTenant]);
 
-  const TabPanel = ({ children, value, index }) => (
-    <div hidden={value !== index}>
-      {value === index && <Box sx={{ p: 2 }}>{children}</Box>}
-    </div>
-  );
+  const tenantOptions = useMemo(() => tenants, [tenants]);
+  const selectedTenants = useMemo(() => tenants.filter(tenant => contractForm.tenant_ids.includes(tenant.id)), [tenants, contractForm.tenant_ids]);
+
+  const renderAutocompleteInput = useCallback((params) => {
+    console.log('Autocomplete renderInput called');
+    return (
+      <TextField
+        {...params}
+        label="Assign Tenants"
+        placeholder="Select tenants for this contract"
+        helperText="Choose which tenants will be part of this contract period"
+        inputProps={{ ...params.inputProps, 'data-testid': 'tenant-autocomplete-input' }}
+      />
+    );
+  }, []);
+
+  const renderAutocompleteOption = useCallback((props, tenant, { selected }) => {
+    console.log('Autocomplete renderOption called for tenant:', tenant.id);
+    return (
+      <li {...props} key={tenant.id}>
+        <Checkbox
+          checked={selected}
+          style={{ marginRight: 8 }}
+        />
+        <ListItemText
+          primary={tenant.name}
+          secondary={tenant.email || tenant.phone || 'No contact info'}
+        />
+      </li>
+    );
+  }, []);
 
   return (
     <Dialog
@@ -413,7 +504,6 @@ function ContractManagementDialog({
       </Box>
 
       <DialogContent sx={{ p: 0, overflow: 'hidden' }}>
-        {/* Contracts List Tab */}
         <TabPanel value={tabValue} index={0}>
           <Box sx={{ height: '500px', overflow: 'auto' }}>
             {contracts.length === 0 ? (
@@ -446,7 +536,6 @@ function ContractManagementDialog({
                       }}
                     >
                       <CardContent>
-                        {/* Contract Header */}
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
                           <Box>
                             <Typography variant="h6" component="div" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -491,7 +580,6 @@ function ContractManagementDialog({
                           </Box>
                         </Box>
 
-                        {/* Contract Summary */}
                         <Grid container spacing={2} sx={{ mb: 2 }}>
                           <Grid item xs={12} sm={6} md={3}>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -568,7 +656,6 @@ function ContractManagementDialog({
                           </Grid>
                         </Grid>
 
-                        {/* Quick Tenant Preview */}
                         {contract.tenants && contract.tenants.length > 0 && (
                           <Box sx={{ mb: 1 }}>
                             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, alignItems: 'center' }}>
@@ -607,7 +694,6 @@ function ContractManagementDialog({
                           </Box>
                         )}
 
-                        {/* Contract Notes Preview */}
                         {contract.notes && (
                           <Box sx={{ mb: 1 }}>
                             <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
@@ -616,7 +702,6 @@ function ContractManagementDialog({
                           </Box>
                         )}
 
-                        {/* Expanded Details */}
                         <Collapse in={expandedContracts.has(contract.id)}>
                           <Divider sx={{ my: 2 }} />
                           <Box sx={{ mt: 2 }}>
@@ -624,12 +709,10 @@ function ContractManagementDialog({
                               Detailed Information
                             </Typography>
 
-                            {/* Full Tenants Section */}
                             <Box sx={{ mb: 3 }}>
                               {renderTenantsSection(contract.tenants)}
                             </Box>
 
-                            {/* Full Notes */}
                             {contract.notes && (
                               <Box sx={{ mb: 2 }}>
                                 <Typography variant="subtitle2" gutterBottom>
@@ -643,7 +726,6 @@ function ContractManagementDialog({
                               </Box>
                             )}
 
-                            {/* Additional Details */}
                             <Grid container spacing={2}>
                               <Grid item xs={12} md={6}>
                                 <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
@@ -695,7 +777,6 @@ function ContractManagementDialog({
           </Box>
         </TabPanel>
 
-        {/* Contract Form Tab */}
         <TabPanel value={tabValue} index={1}>
           <Box sx={{ height: '500px', overflow: 'auto', p: 2 }}>
             <Grid container spacing={3}>
@@ -711,14 +792,50 @@ function ContractManagementDialog({
                 </Alert>
               </Grid>
 
+              {!editingContract && (
+                <Grid item xs={12}>
+                  <Paper
+                    sx={{
+                      p: 2,
+                      bgcolor: 'info.50',
+                      border: '1px solid',
+                      borderColor: 'info.200'
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Box>
+                        <Typography variant="subtitle2" color="info.main" gutterBottom>
+                          Quick Setup
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          Load apartment data: {apartment?.tenants?.length || 0} tenants, rent €{apartment?.rent || 0}
+                        </Typography>
+                      </Box>
+                      <Button
+                        variant="outlined"
+                        color="info"
+                        startIcon={<DownloadIcon />}
+                        onClick={loadFromApartment}
+                        disabled={!apartment}
+                      >
+                        Load from Apartment
+                      </Button>
+                    </Box>
+                  </Paper>
+                </Grid>
+              )}
+
               <Grid item xs={12} md={6}>
                 <TextField
                   fullWidth
                   label="Contract Number *"
                   value={contractForm.contract_number}
-                  onChange={(e) => handleFormChange('contract_number', e.target.value)}
+                  onChange={handleContractNumberChange}
+                  onFocus={() => console.log('Contract Number focused')}
+                  onBlur={() => console.log('Contract Number blurred')}
                   placeholder="e.g., APT001-2025-01"
                   helperText="Enter a unique identifier for this contract"
+                  inputProps={{ 'data-testid': 'contract-number-input' }}
                 />
               </Grid>
 
@@ -728,7 +845,7 @@ function ContractManagementDialog({
                   <Select
                     value={contractForm.status}
                     label="Status"
-                    onChange={(e) => handleFormChange('status', e.target.value)}
+                    onChange={handleStatusChange}
                   >
                     {CONTRACT_STATUSES.map((status) => (
                       <MenuItem key={status.value} value={status.value}>
@@ -745,8 +862,9 @@ function ContractManagementDialog({
                   label="Start Date *"
                   type="date"
                   value={contractForm.start_date}
-                  onChange={(e) => handleFormChange('start_date', e.target.value)}
+                  onChange={handleStartDateChange}
                   InputLabelProps={{ shrink: true }}
+                  inputProps={{ 'data-testid': 'start-date-input' }}
                 />
               </Grid>
 
@@ -756,9 +874,10 @@ function ContractManagementDialog({
                   label="End Date"
                   type="date"
                   value={contractForm.end_date}
-                  onChange={(e) => handleFormChange('end_date', e.target.value)}
+                  onChange={handleEndDateChange}
                   InputLabelProps={{ shrink: true }}
                   helperText="Leave empty for open-ended contract"
+                  inputProps={{ 'data-testid': 'end-date-input' }}
                 />
               </Grid>
 
@@ -768,11 +887,12 @@ function ContractManagementDialog({
                   label="Monthly Rent *"
                   type="number"
                   value={contractForm.monthly_rent}
-                  onChange={(e) => handleFormChange('monthly_rent', e.target.value)}
+                  onChange={handleMonthlyRentChange}
                   InputProps={{
                     startAdornment: '€',
                   }}
                   helperText="Enter the monthly rental amount"
+                  inputProps={{ 'data-testid': 'monthly-rent-input' }}
                 />
               </Grid>
 
@@ -782,43 +902,24 @@ function ContractManagementDialog({
                   label="Security Deposit"
                   type="number"
                   value={contractForm.security_deposit}
-                  onChange={(e) => handleFormChange('security_deposit', e.target.value)}
+                  onChange={handleSecurityDepositChange}
                   InputProps={{
                     startAdornment: '€',
                   }}
                   helperText="Security deposit amount"
+                  inputProps={{ 'data-testid': 'security-deposit-input' }}
                 />
               </Grid>
 
               <Grid item xs={12}>
                 <Autocomplete
                   multiple
-                  options={tenants}
+                  options={tenantOptions}
                   getOptionLabel={(tenant) => tenant.name}
-                  value={tenants.filter(tenant => contractForm.tenant_ids.includes(tenant.id))}
-                  onChange={(event, newValue) => {
-                    handleFormChange('tenant_ids', newValue.map(tenant => tenant.id));
-                  }}
-                  renderOption={(props, tenant, { selected }) => (
-                    <li {...props}>
-                      <Checkbox
-                        checked={selected}
-                        style={{ marginRight: 8 }}
-                      />
-                      <ListItemText
-                        primary={tenant.name}
-                        secondary={tenant.email || tenant.phone || 'No contact info'}
-                      />
-                    </li>
-                  )}
-                  renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="Assign Tenants"
-                      placeholder="Select tenants for this contract"
-                      helperText="Choose which tenants will be part of this contract period"
-                    />
-                  )}
+                  value={selectedTenants}
+                  onChange={handleTenantIdsChange}
+                  renderOption={renderAutocompleteOption}
+                  renderInput={renderAutocompleteInput}
                 />
               </Grid>
 
@@ -829,8 +930,11 @@ function ContractManagementDialog({
                   multiline
                   rows={3}
                   value={contractForm.notes}
-                  onChange={(e) => handleFormChange('notes', e.target.value)}
+                  onChange={handleNotesChange}
+                  onFocus={() => console.log('Notes focused')}
+                  onBlur={() => console.log('Notes blurred')}
                   placeholder="Additional notes about this contract period..."
+                  inputProps={{ 'data-testid': 'notes-input' }}
                 />
               </Grid>
             </Grid>
@@ -848,9 +952,20 @@ function ContractManagementDialog({
             <Button
               onClick={resetForm}
               disabled={loading}
+              startIcon={<RefreshIcon />}
             >
               Reset
             </Button>
+            {!editingContract && (
+              <Button
+                onClick={loadFromApartment}
+                disabled={loading || !apartment}
+                startIcon={<DownloadIcon />}
+                color="info"
+              >
+                Load from Apartment
+              </Button>
+            )}
             <Button
               onClick={handleCreateContract}
               variant="contained"

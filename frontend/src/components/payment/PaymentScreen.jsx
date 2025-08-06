@@ -1,6 +1,6 @@
 // Fixed PaymentScreen.jsx with Contract Management and History
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   Paper,
   Typography,
@@ -53,7 +53,8 @@ import {
   Event as EventIcon,
   Schedule as ScheduleIcon,
   CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon
+  Error as ErrorIcon,
+  Visibility as VisibilityIcon
 } from '@mui/icons-material';
 import api from '../../utils/api';
 import ContractManagementDialog from '../contract/ContractManagementDialog';
@@ -78,6 +79,7 @@ const PAYMENT_METHODS = [
 
 function PaymentScreen({ showNotification }) {
   const { apartmentId } = useParams();
+  const navigate = useNavigate();
   const currentYear = new Date().getFullYear();
 
   // State management
@@ -164,8 +166,28 @@ function PaymentScreen({ showNotification }) {
       const stats = {};
       for (const contract of contractsData) {
         try {
-          const paymentsResponse = await api.get(`/contracts/${contract.id}/payments`);
-          const contractPayments = paymentsResponse.data?.payments || [];
+          // Get payments for this specific contract
+          const paymentsResponse = await api.get(`/payment-history/${selectedApartment}`);
+          const allPayments = paymentsResponse.data || [];
+
+          // Filter payments for this contract
+          const contractPayments = allPayments.filter(payment => {
+            // If payment has contract_period_id, use that for matching
+            if (payment.contract_period_id) {
+              return payment.contract_period_id === contract.id;
+            }
+
+            // Otherwise, check if payment date falls within contract period
+            if (payment.paymentDate && contract.start_date) {
+              const paymentDate = new Date(payment.paymentDate);
+              const startDate = new Date(contract.start_date);
+              const endDate = contract.end_date ? new Date(contract.end_date) : new Date();
+              return paymentDate >= startDate && paymentDate <= endDate;
+            }
+
+            return false;
+          });
+
           const totalPaid = contractPayments.reduce((sum, p) => sum + (parseFloat(p.amountPaid) || 0), 0);
 
           stats[contract.id] = {
@@ -180,8 +202,8 @@ function PaymentScreen({ showNotification }) {
       }
       setContractsStats(stats);
 
-      // Auto-select current contract if available, otherwise keep 'current'
-      const currentContract = contractsData.find(c => c.is_current);
+      // Auto-select current contract if available
+      const currentContract = contractsData.find(c => c.is_current || c.status === 'active');
       if (currentContract) {
         setSelectedContract(currentContract.id.toString());
       } else {
@@ -221,29 +243,46 @@ function PaymentScreen({ showNotification }) {
 
   const loadPaymentHistory = async () => {
     try {
-      if (selectedContract === 'all') {
-        // Load all payments for the apartment
-        const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
-        setPayments(transformPaymentsData(historyResponse.data || []));
-      } else if (selectedContract && selectedContract !== 'current') {
-        // Load payments for specific contract
-        const contractResponse = await api.get(`/contracts/${selectedContract}/payments`);
-        setPayments(transformPaymentsData(contractResponse.data?.payments || []));
-      } else {
-        // Load current payments (default behavior)
-        const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
-        const allPayments = transformPaymentsData(historyResponse.data || []);
+      // Always load all payments first
+      const historyResponse = await api.get(`/payment-history/${selectedApartment}`);
+      const allPayments = transformPaymentsData(historyResponse.data || []);
 
-        // Filter to current contract if available
-        const currentContract = contracts.find(c => c.is_current);
+      if (selectedContract === 'all') {
+        // Show all payments for the apartment
+        setPayments(allPayments);
+      } else if (selectedContract === 'current') {
+        // Filter to current contract
+        const currentContract = contracts.find(c => c.is_current || c.status === 'active');
         if (currentContract) {
-          const filtered = allPayments.filter(payment =>
-            payment.contract_period_id === currentContract.id ||
-            (!payment.contract_period_id && isPaymentInDateRange(payment, currentContract))
-          );
+          const filtered = allPayments.filter(payment => {
+            // First check if payment has contract_period_id
+            if (payment.contract_period_id) {
+              return payment.contract_period_id === currentContract.id;
+            }
+
+            // Otherwise, check if payment date falls within contract period
+            return isPaymentInDateRange(payment, currentContract);
+          });
           setPayments(filtered);
         } else {
           setPayments(allPayments);
+        }
+      } else {
+        // Filter to specific contract
+        const targetContract = contracts.find(c => c.id.toString() === selectedContract);
+        if (targetContract) {
+          const filtered = allPayments.filter(payment => {
+            // First check if payment has contract_period_id
+            if (payment.contract_period_id) {
+              return payment.contract_period_id === targetContract.id;
+            }
+
+            // Otherwise, check if payment date falls within contract period
+            return isPaymentInDateRange(payment, targetContract);
+          });
+          setPayments(filtered);
+        } else {
+          setPayments([]);
         }
       }
     } catch (error) {
@@ -286,29 +325,38 @@ function PaymentScreen({ showNotification }) {
     if (selectedApartment && contracts.length > 0) {
       loadPaymentHistory();
     }
-  }, [selectedContract]);
+  }, [selectedContract, contracts]);
 
   // Helper functions
   const getCurrentTenants = () => {
     const currentContract = getCurrentContractData();
     if (currentContract && currentContract.tenants) {
-      return currentContract.tenants.map(ct => ct.tenant?.name || 'Unknown').filter(name => name !== 'Unknown');
+      return currentContract.tenants.map(ct => ({
+        id: ct.tenant?.id,
+        name: ct.tenant?.name || 'Unknown'
+      })).filter(tenant => tenant.name !== 'Unknown');
     }
 
     // Fallback to apartment tenants
     if (!apartmentDetails?.tenants) return [];
     if (Array.isArray(apartmentDetails.tenants)) {
-      return apartmentDetails.tenants.map(t => t.name || t);
+      return apartmentDetails.tenants.map(t => ({
+        id: t.id,
+        name: t.name || t
+      }));
     }
     if (typeof apartmentDetails.tenants === 'string') {
-      return apartmentDetails.tenants.split(',').map(t => t.trim()).filter(t => t);
+      return apartmentDetails.tenants.split(',').map((t, index) => ({
+        id: `legacy-${index}`,
+        name: t.trim()
+      })).filter(t => t.name);
     }
     return [];
   };
 
   const getCurrentContractData = () => {
     if (selectedContract === 'current') {
-      return contracts.find(c => c.is_current);
+      return contracts.find(c => c.is_current || c.status === 'active');
     }
     if (selectedContract === 'all') {
       return null; // No specific contract when viewing all
@@ -337,7 +385,7 @@ function PaymentScreen({ showNotification }) {
     const monthlyRent = targetContract.monthly_rent || 0;
     const now = new Date();
 
-    const isActive = targetContract.is_current;
+    const isActive = targetContract.is_current || targetContract.status === 'active';
     const isExpired = contractEndDate && now > contractEndDate;
 
     const effectiveEndDate = contractEndDate || now;
@@ -361,13 +409,20 @@ function PaymentScreen({ showNotification }) {
     };
   };
 
+  // Navigate to tenant details
+  const navigateToTenant = (tenantId) => {
+    if (tenantId && !tenantId.toString().startsWith('legacy-')) {
+      navigate(`/tenants/${tenantId}`);
+    }
+  };
+
   // Form handlers
   const resetIndividualPaymentForm = () => {
     const tenants = getCurrentTenants();
     const currentContract = getCurrentContractData();
     setIndividualPaymentForm({
       amount: '',
-      tenant_name: tenants[0] || '',
+      tenant_name: tenants[0]?.name || '',
       payment_method: 'bank_transfer',
       payment_date: new Date().toISOString().split('T')[0],
       payment_type: 'rent',
@@ -383,7 +438,7 @@ function PaymentScreen({ showNotification }) {
     const currentContract = getCurrentContractData();
     setPaymentForm({
       amount: '',
-      paidBy: tenants[0] || '',
+      paidBy: tenants[0]?.name || '',
       paidFor: [],
       paymentMethod: 'bank_transfer',
       paymentDate: new Date().toISOString().split('T')[0],
@@ -573,7 +628,7 @@ function PaymentScreen({ showNotification }) {
   };
 
   const getContractStatusColor = (contract) => {
-    if (contract.is_current) return 'success';
+    if (contract.is_current || contract.status === 'active') return 'success';
     const now = new Date();
     const endDate = contract.end_date ? new Date(contract.end_date) : null;
     if (endDate && now > endDate) return 'default';
@@ -672,7 +727,7 @@ function PaymentScreen({ showNotification }) {
                                 {contract.contract_number}
                               </Typography>
                               <Chip
-                                label={contract.is_current ? 'CURRENT' : contract.end_date && new Date(contract.end_date) < new Date() ? 'ENDED' : 'ACTIVE'}
+                                label={contract.is_current || contract.status === 'active' ? 'CURRENT' : contract.end_date && new Date(contract.end_date) < new Date() ? 'ENDED' : 'ACTIVE'}
                                 size="small"
                                 color={getContractStatusColor(contract)}
                               />
@@ -775,11 +830,35 @@ function PaymentScreen({ showNotification }) {
                           </Box>
                         </Grid>
                         <Grid item xs={12} sm={6}>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                             <PersonIcon fontSize="small" color="action" />
-                            <Typography variant="body2">
-                              {tenants.join(', ') || 'No tenants assigned'}
-                            </Typography>
+                            <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                              {tenants.map((tenant, idx) => (
+                                <Tooltip key={idx} title="View tenant details">
+                                  <Chip
+                                    label={tenant.name}
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => navigateToTenant(tenant.id)}
+                                    onDelete={tenant.id && !tenant.id.toString().startsWith('legacy-') ?
+                                      () => navigateToTenant(tenant.id) : undefined
+                                    }
+                                    deleteIcon={<VisibilityIcon />}
+                                    sx={{
+                                      cursor: tenant.id && !tenant.id.toString().startsWith('legacy-') ? 'pointer' : 'default',
+                                      '&:hover': {
+                                        backgroundColor: tenant.id && !tenant.id.toString().startsWith('legacy-') ? 'primary.light' : 'inherit'
+                                      }
+                                    }}
+                                  />
+                                </Tooltip>
+                              ))}
+                              {tenants.length === 0 && (
+                                <Typography variant="body2" color="text.secondary">
+                                  No tenants assigned
+                                </Typography>
+                              )}
+                            </Box>
                           </Box>
                         </Grid>
                       </Grid>
@@ -788,7 +867,7 @@ function PaymentScreen({ showNotification }) {
 
                   <Box>
                     <Typography variant="body2" color="text.secondary">
-                      Tenants: {tenants.join(', ') || 'No tenants'}
+                      Tenants: {tenants.map(t => t.name).join(', ') || 'No tenants'}
                     </Typography>
                   </Box>
                 </Grid>
@@ -947,9 +1026,9 @@ function PaymentScreen({ showNotification }) {
                                   {contract.contract_number}
                                 </Typography>
                                 <Chip
-                                  label={contract.is_current ? 'CURRENT' : 'PAST'}
+                                  label={contract.is_current || contract.status === 'active' ? 'CURRENT' : 'PAST'}
                                   size="small"
-                                  color={contract.is_current ? 'success' : 'default'}
+                                  color={contract.is_current || contract.status === 'active' ? 'success' : 'default'}
                                 />
                               </Box>
                               <Typography variant="caption" color="text.secondary" display="block">
@@ -965,6 +1044,29 @@ function PaymentScreen({ showNotification }) {
                                   variant="outlined"
                                 />
                               </Box>
+                              {/* Tenants for this contract with navigation */}
+                              {contract.tenants && contract.tenants.length > 0 && (
+                                <Box sx={{ mt: 1, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+                                  {contract.tenants.map((ct, idx) => (
+                                    <Tooltip key={idx} title="View tenant details">
+                                      <Chip
+                                        label={ct.tenant?.name || 'Unknown'}
+                                        size="small"
+                                        variant="outlined"
+                                        onClick={() => navigateToTenant(ct.tenant?.id)}
+                                        onDelete={ct.tenant?.id ? () => navigateToTenant(ct.tenant.id) : undefined}
+                                        deleteIcon={<VisibilityIcon />}
+                                        sx={{
+                                          cursor: ct.tenant?.id ? 'pointer' : 'default',
+                                          '&:hover': {
+                                            backgroundColor: ct.tenant?.id ? 'primary.light' : 'inherit'
+                                          }
+                                        }}
+                                      />
+                                    </Tooltip>
+                                  ))}
+                                </Box>
+                              )}
                             </Card>
                           </Grid>
                         );
@@ -1015,17 +1117,47 @@ function PaymentScreen({ showNotification }) {
                         <TableRow key={payment.id} hover>
                           <TableCell>{formatDate(payment.paymentDate)}</TableCell>
                           <TableCell>{payment.month} {payment.year}</TableCell>
-                          <TableCell>{payment.paidBy || 'N/A'}</TableCell>
                           <TableCell>
-                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                              {(payment.paidFor || []).map((tenant, idx) => (
+                            {payment.paidBy ? (
+                              <Tooltip title="View tenant details">
                                 <Chip
-                                  key={idx}
-                                  label={tenant}
+                                  label={payment.paidBy}
                                   size="small"
                                   variant="outlined"
-                                  sx={{ fontSize: '0.75rem' }}
+                                  onClick={() => {
+                                    const tenant = tenants.find(t => t.name === payment.paidBy);
+                                    if (tenant && tenant.id) {
+                                      navigateToTenant(tenant.id);
+                                    }
+                                  }}
+                                  sx={{ cursor: 'pointer' }}
                                 />
+                              </Tooltip>
+                            ) : 'N/A'}
+                          </TableCell>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                              {(payment.paidFor || []).map((tenantName, idx) => (
+                                <Tooltip key={idx} title="View tenant details">
+                                  <Chip
+                                    label={tenantName}
+                                    size="small"
+                                    variant="outlined"
+                                    onClick={() => {
+                                      const tenant = tenants.find(t => t.name === tenantName);
+                                      if (tenant && tenant.id) {
+                                        navigateToTenant(tenant.id);
+                                      }
+                                    }}
+                                    sx={{
+                                      fontSize: '0.75rem',
+                                      cursor: 'pointer',
+                                      '&:hover': {
+                                        backgroundColor: 'primary.light'
+                                      }
+                                    }}
+                                  />
+                                </Tooltip>
                               ))}
                             </Box>
                           </TableCell>
@@ -1146,8 +1278,8 @@ function PaymentScreen({ showNotification }) {
                     onChange={(e) => setIndividualPaymentForm({ ...individualPaymentForm, tenant_name: e.target.value })}
                   >
                     {tenants.map((tenant) => (
-                      <MenuItem key={tenant} value={tenant}>
-                        {tenant}
+                      <MenuItem key={tenant.id} value={tenant.name}>
+                        {tenant.name}
                       </MenuItem>
                     ))}
                   </Select>
@@ -1257,8 +1389,8 @@ function PaymentScreen({ showNotification }) {
                     onChange={(e) => setPaymentForm({ ...paymentForm, paidBy: e.target.value })}
                   >
                     {tenants.map((tenant) => (
-                      <MenuItem key={tenant} value={tenant}>
-                        {tenant}
+                      <MenuItem key={tenant.id} value={tenant.name}>
+                        {tenant.name}
                       </MenuItem>
                     ))}
                   </Select>
@@ -1281,9 +1413,9 @@ function PaymentScreen({ showNotification }) {
                     )}
                   >
                     {tenants.map((tenant) => (
-                      <MenuItem key={tenant} value={tenant}>
-                        <Checkbox checked={paymentForm.paidFor.indexOf(tenant) > -1} />
-                        <ListItemText primary={tenant} />
+                      <MenuItem key={tenant.id} value={tenant.name}>
+                        <Checkbox checked={paymentForm.paidFor.indexOf(tenant.name) > -1} />
+                        <ListItemText primary={tenant.name} />
                       </MenuItem>
                     ))}
                   </Select>

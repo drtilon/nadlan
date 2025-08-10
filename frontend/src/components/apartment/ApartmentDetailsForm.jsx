@@ -15,6 +15,7 @@ import {
 import {
   Home as HomeIcon,
   Person as PersonIcon,
+  People as PeopleIcon,
   Description as DescriptionIcon,
   Delete as DeleteIcon,
   Save as SaveIcon,
@@ -141,7 +142,7 @@ const ApartmentDetailsForm = ({
               />
             </Box>
           </Grid>
-          <Grid item xs={12} sm={6}>
+          <Grid item xs={12} sm={6} md={4}>
             <Box>
               <Typography variant="body1" sx={{ mb: 1 }}>Number of Rooms *</Typography>
               <TextField
@@ -157,7 +158,7 @@ const ApartmentDetailsForm = ({
               />
             </Box>
           </Grid>
-          <Grid item xs={12} sm={6}>
+          <Grid item xs={12} sm={6} md={4}>
             <Box>
               <Typography variant="body1" sx={{ mb: 1 }}>Size (sq meters) *</Typography>
               <TextField
@@ -170,6 +171,24 @@ const ApartmentDetailsForm = ({
                 variant="outlined"
                 InputLabelProps={{ shrink: true }}
                 placeholder="0"
+              />
+            </Box>
+          </Grid>
+          <Grid item xs={12} sm={6} md={4}>
+            <Box>
+              <Typography variant="body1" sx={{ mb: 1 }}>Maximum Occupancy *</Typography>
+              <TextField
+                fullWidth
+                type="number"
+                name="maxOccupancy"
+                value={formData.maxOccupancy === 0 ? '' : formData.maxOccupancy}
+                onChange={(e) => handleChange(e, true)}
+                required
+                variant="outlined"
+                InputLabelProps={{ shrink: true }}
+                placeholder="0"
+                inputProps={{ min: 1, max: 50 }}
+                helperText="Maximum number of people allowed"
               />
             </Box>
           </Grid>
@@ -238,6 +257,41 @@ const ApartmentDetailsForm = ({
             </Typography>
             {tenantSelection}
           </Grid>
+
+          {/* Occupancy Information */}
+          {formData.maxOccupancy > 0 && tenantData.length > 0 && (
+            <Grid item xs={12}>
+              <Box
+                sx={{
+                  p: 2,
+                  border: '1px solid',
+                  borderColor: tenantData.length > formData.maxOccupancy ? 'error.main' :
+                              tenantData.length === formData.maxOccupancy ? 'warning.main' : 'success.main',
+                  borderRadius: 1,
+                  bgcolor: tenantData.length > formData.maxOccupancy ? 'error.50' :
+                           tenantData.length === formData.maxOccupancy ? 'warning.50' : 'success.50'
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <PeopleIcon sx={{
+                    color: tenantData.length > formData.maxOccupancy ? 'error.main' :
+                           tenantData.length === formData.maxOccupancy ? 'warning.main' : 'success.main'
+                  }} />
+                  <Typography variant="subtitle2" fontWeight={600}>
+                    Occupancy Status: {tenantData.length}/{formData.maxOccupancy}
+                  </Typography>
+                </Box>
+                <Typography variant="body2" color="text.secondary">
+                  {tenantData.length > formData.maxOccupancy
+                    ? 'Warning: Number of tenants exceeds maximum occupancy!'
+                    : tenantData.length === formData.maxOccupancy
+                    ? 'Apartment is at full capacity'
+                    : `${formData.maxOccupancy - tenantData.length} space(s) available`
+                  }
+                </Typography>
+              </Box>
+            </Grid>
+          )}
 
           {/* Contract Details */}
           <Grid item xs={12} sx={{ mt: 2 }}>

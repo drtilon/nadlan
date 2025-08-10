@@ -58,6 +58,7 @@ class Apartment(db.Model):
     address = db.Column(db.String(255), nullable=False)
     rooms = db.Column(db.Integer, nullable=False)
     size = db.Column(db.Float, nullable=False)
+    maxOccupancy = db.Column(db.Integer, nullable=False, default=1)  # NEW FIELD
 
     # Foreign key to landlords table
     landlord_id = db.Column(db.Integer, db.ForeignKey("landlords.id"), nullable=True)
@@ -108,6 +109,13 @@ class Apartment(db.Model):
 
             # Add contract periods count
             result["contract_periods_count"] = len(self.contract_periods)
+
+        # Add occupancy information
+        current_tenant_count = len(self.tenants) if self.tenants else 0
+        result["current_tenant_count"] = current_tenant_count
+        result["occupancy_ratio"] = f"{current_tenant_count}/{self.maxOccupancy}"
+        result["is_full"] = current_tenant_count >= self.maxOccupancy
+        result["occupancy_percentage"] = (current_tenant_count / self.maxOccupancy * 100) if self.maxOccupancy > 0 else 0
 
         return result
 

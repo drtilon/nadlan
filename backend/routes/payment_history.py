@@ -1,7 +1,8 @@
+# routes/payment_history.py - FIXED VERSION
 from flask import Blueprint, request, jsonify, current_app
 from .auth import token_required
 from extentions import db
-from models.models import Apartment, Payment
+from models.models import Apartment, Payment, Tenant
 from datetime import datetime
 import json
 
@@ -21,12 +22,12 @@ def get_payment_history(apartment_id):
 
         # Get optional year filter from query params
         year_filter = request.args.get('year', type=int)
-        
+
         # Query payments, optionally filtered by year
         query = Payment.query.filter_by(apartment_id=apartment_id)
         if year_filter:
             query = query.filter_by(year=year_filter)
-        
+
         payments = query.all()
         history = []
 

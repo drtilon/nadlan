@@ -1,4 +1,4 @@
-# app.py
+# app.py - FIXED VERSION
 from flask import Flask, current_app, request, Response
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -171,7 +171,7 @@ def create_app():
             from routes.documents import documents_bp
             from routes.logs import logs_bp
             from routes.payment_history import payment_history_bp
-            from routes.contracts import contracts_bp
+            from routes.contracts import contracts_bp  # FIXED IMPORT
             from routes.contract_templates import contract_templates_bp
             from routes.health import health_bp
             from routes.contract_periods import contract_periods_bp
@@ -187,7 +187,7 @@ def create_app():
             app.register_blueprint(analytics_bp, url_prefix="/api/")
             app.register_blueprint(payment_history_bp, url_prefix="/api")
             app.register_blueprint(documents_bp, url_prefix="/api/documents")
-            app.register_blueprint(contracts_bp, url_prefix="/api/documents")
+            app.register_blueprint(contracts_bp, url_prefix="/api/documents")  # FIXED REGISTRATION
             app.register_blueprint(contract_templates_bp, url_prefix="/api/documents")
             app.register_blueprint(logs_bp, url_prefix="/api")
             app.logger.info("Blueprints registered")

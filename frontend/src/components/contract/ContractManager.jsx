@@ -19,7 +19,6 @@ import {
   DialogContent,
   DialogActions,
   TextField,
-  LinearProgress,
   Grid,
   Card,
   CardContent,
@@ -39,7 +38,7 @@ import {
   Close as CloseIcon,
   Refresh as RefreshIcon
 } from '@mui/icons-material';
-import api from '../../utils/api';
+import api from '../utils/api';
 
 function ContractManager({ showNotification }) {
   const [apartments, setApartments] = useState([]);
@@ -79,10 +78,10 @@ function ContractManager({ showNotification }) {
       const response = await api.get('/list');
       setApartments(response.data || []);
       setFilteredApartments(response.data || []);
-      setLoading(false);
     } catch (error) {
       console.error('Error fetching apartments:', error);
       showNotification('Failed to load apartments', 'error');
+    } finally {
       setLoading(false);
     }
   };
@@ -91,19 +90,17 @@ function ContractManager({ showNotification }) {
   const fetchContracts = async (apartmentId) => {
     setLoading(true);
     try {
-      // Assuming there's an API endpoint to fetch contracts for an apartment
       const response = await api.get(`/documents/contracts/${apartmentId}`);
       setContracts(response.data || []);
 
       // Find and set the selected apartment object
       const selected = apartments.find(apt => apt.id === apartmentId);
       setSelectedApartment(selected || null);
-
-      setLoading(false);
     } catch (error) {
       console.error('Error fetching contracts:', error);
       showNotification('Failed to load contracts', 'error');
       setContracts([]);
+    } finally {
       setLoading(false);
     }
   };
@@ -152,7 +149,6 @@ function ContractManager({ showNotification }) {
       formData.append('apartmentId', selectedApartment.id);
       formData.append('notes', contractNotes);
 
-      // Assuming there's an API endpoint to upload contracts
       await api.post('/documents/upload', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
@@ -187,6 +183,7 @@ function ContractManager({ showNotification }) {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
 
     } catch (error) {
       console.error('Error downloading contract:', error);
@@ -241,6 +238,24 @@ function ContractManager({ showNotification }) {
       hour: '2-digit',
       minute: '2-digit'
     });
+  };
+
+  // Get tenant names for display
+  const getTenantNames = (apartment) => {
+    if (!apartment.tenants) return 'No tenants';
+
+    if (typeof apartment.tenants === 'string') {
+      return apartment.tenants;
+    }
+
+    if (Array.isArray(apartment.tenants)) {
+      return apartment.tenants
+        .map(t => t.name || `${t.firstName || ''} ${t.lastName || ''}`.trim())
+        .filter(name => name)
+        .join(', ') || 'No tenants';
+    }
+
+    return 'No tenants';
   };
 
   return (
@@ -311,13 +326,7 @@ function ContractManager({ showNotification }) {
                           {apartment.address}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
-                          {apartment.tenants && (
-                            typeof apartment.tenants === 'string'
-                              ? apartment.tenants
-                              : Array.isArray(apartment.tenants)
-                                ? apartment.tenants.map(t => t.name || `${t.firstName} ${t.lastName}`).join(', ')
-                                : 'No tenants'
-                          )}
+                          {getTenantNames(apartment)}
                         </Typography>
                       </CardContent>
                     </Card>
@@ -382,7 +391,7 @@ function ContractManager({ showNotification }) {
                             <TableCell>{formatFileSize(contract.fileSize)}</TableCell>
                             <TableCell>
                               <Chip
-                                label={contract.fileType}
+                                label={contract.fileType || 'Unknown'}
                                 size="small"
                                 variant="outlined"
                               />
@@ -493,7 +502,7 @@ function ContractManager({ showNotification }) {
             }}
           >
             <input
-              accept="application/pdf,.doc,.docx"
+              accept="application/pdf,.doc,.docx,.txt,.jpg,.jpeg,.png"
               id="contained-button-file"
               multiple
               type="file"
@@ -511,7 +520,7 @@ function ContractManager({ showNotification }) {
             </label>
 
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Supported formats: PDF, DOC, DOCX
+              Supported formats: PDF, DOC, DOCX, TXT, JPG, JPEG, PNG
             </Typography>
 
             {selectedFiles.length > 0 && (
@@ -596,6 +605,14 @@ function ContractManager({ showNotification }) {
                     <Typography variant="subtitle2">File Size:</Typography>
                     <Typography variant="body2">{formatFileSize(selectedContract.fileSize)}</Typography>
                   </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="subtitle2">File Type:</Typography>
+                    <Typography variant="body2">{selectedContract.fileType || 'Unknown'}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="subtitle2">Apartment:</Typography>
+                    <Typography variant="body2">{selectedApartment?.address}</Typography>
+                  </Grid>
                   <Grid item xs={12}>
                     <Typography variant="subtitle2">Notes:</Typography>
                     <Typography variant="body2">{selectedContract.notes || 'No notes'}</Typography>
@@ -605,7 +622,7 @@ function ContractManager({ showNotification }) {
 
               <Divider sx={{ my: 2 }} />
 
-              {/* Contract preview iframe - would need to be implemented based on backend support */}
+              {/* Contract preview area */}
               <Box
                 sx={{
                   height: '60vh',
@@ -614,24 +631,43 @@ function ContractManager({ showNotification }) {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  flexDirection: 'column'
+                  flexDirection: 'column',
+                  backgroundColor: 'grey.50'
                 }}
               >
                 <DescriptionIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
-                <Typography variant="body1" mb={2}>
-                  Preview not available. Use the buttons below to download the file.
+                <Typography variant="body1" mb={2} color="text.secondary">
+                  Preview not available for this file type.
+                </Typography>
+                <Typography variant="body2" mb={3} color="text.secondary">
+                  Use the download button to view the full document.
                 </Typography>
                 <Button
                   variant="contained"
                   startIcon={<DownloadIcon />}
                   onClick={() => handleDownloadContract(selectedContract)}
                 >
-                  Download
+                  Download File
                 </Button>
               </Box>
             </>
           )}
         </DialogContent>
+
+        <DialogActions>
+          <Button onClick={() => setViewDialogOpen(false)}>
+            Close
+          </Button>
+          {selectedContract && (
+            <Button
+              variant="contained"
+              startIcon={<DownloadIcon />}
+              onClick={() => handleDownloadContract(selectedContract)}
+            >
+              Download
+            </Button>
+          )}
+        </DialogActions>
       </Dialog>
     </Paper>
   );

@@ -7,90 +7,74 @@ Usage:
     python3 production_migration.py
 
 Prerequisites:
-    pip install mysql-connector-python
+    pip install pymysql
 
 Environment Variables:
-    DB_HOST=your_production_host
-    DB_USER=your_db_user
-    DB_PASSWORD=your_db_password
-    DB_NAME=your_database_name
-    DB_PORT=3306
+    None required - configuration is hardcoded from docker-compose settings
 """
 
-import os
 import sys
-import mysql.connector
-from mysql.connector import Error
+import pymysql
 from datetime import datetime
 import logging
 import subprocess
+import os
 
 # Configure logging
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
+    format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(f"production_migration_{timestamp}.log"),
-        logging.StreamHandler(sys.stdout),
-    ],
+        logging.FileHandler(f'production_migration_{timestamp}.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 logger = logging.getLogger(__name__)
 
-
 class ProductionMigration:
     def __init__(self):
-        """Initialize with production environment variables"""
+        """Initialize with hardcoded production configuration from docker-compose"""
         self.db_config = {
-            "host": os.environ.get("DB_HOST", "localhost"),
-            "user": os.environ.get("DB_USER"),
-            "password": os.environ.get("DB_PASSWORD"),
-            "database": os.environ.get("DB_NAME"),
-            "port": int(os.environ.get("DB_PORT", 3306)),
-            "charset": "utf8mb4",
+            'host': 'mysql',
+            'user': 'myuser',
+            'password': 'mypassword',
+            'database': 'mydatabase',
+            'port': 3306,
+            'charset': 'utf8mb4'
         }
         self.conn = None
         self.backup_file = None
 
-        # Validate required environment variables
-        required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME"]
-        missing = [var for var in required_vars if not os.environ.get(var)]
-        if missing:
-            raise ValueError(f"Missing required environment variables: {missing}")
-
     def create_backup(self):
         """Create a complete database backup before migration"""
         try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             self.backup_file = f"backup_before_50mb_migration_{timestamp}.sql"
 
             # Create mysqldump command
             cmd = [
-                "mysqldump",
-                f"--host={self.db_config['host']}",
-                f"--port={self.db_config['port']}",
-                f"--user={self.db_config['user']}",
-                f"--password={self.db_config['password']}",
-                "--single-transaction",
-                "--routines",
-                "--triggers",
-                "--lock-tables=false",
-                "--add-drop-database",
-                self.db_config["database"],
+                'mysqldump',
+                f'--host={self.db_config["host"]}',
+                f'--port={self.db_config["port"]}',
+                f'--user={self.db_config["user"]}',
+                f'--password={self.db_config["password"]}',
+                '--single-transaction',
+                '--routines',
+                '--triggers',
+                '--lock-tables=false',
+                '--add-drop-database',
+                self.db_config['database']
             ]
 
             logger.info(f"Creating backup: {self.backup_file}")
-            with open(self.backup_file, "w") as f:
-                result = subprocess.run(
-                    cmd, stdout=f, stderr=subprocess.PIPE, text=True
-                )
+            with open(self.backup_file, 'w') as f:
+                result = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, text=True)
 
             if result.returncode == 0:
                 backup_size = os.path.getsize(self.backup_file)
                 if backup_size > 1000:  # At least 1KB
-                    logger.info(
-                        f"✅ Backup created: {self.backup_file} ({backup_size:,} bytes)"
-                    )
+                    logger.info(f"✅ Backup created: {self.backup_file} ({backup_size:,} bytes)")
                     return True
                 else:
                     logger.error(f"❌ Backup file too small: {backup_size} bytes")
@@ -106,18 +90,16 @@ class ProductionMigration:
     def connect(self):
         """Connect to production database"""
         try:
-            self.conn = mysql.connector.connect(**self.db_config)
-            logger.info(
-                f"✅ Connected to {self.db_config['host']}:{self.db_config['port']}"
-            )
+            self.conn = pymysql.connect(**self.db_config)
+            logger.info(f"✅ Connected to {self.db_config['host']}:{self.db_config['port']}")
             return True
-        except Error as e:
+        except pymysql.Error as e:
             logger.error(f"❌ Connection failed: {e}")
             return False
 
     def close(self):
         """Close database connection"""
-        if self.conn and self.conn.is_connected():
+        if self.conn:
             self.conn.close()
 
     def column_exists(self, table_name, column_name):
@@ -126,14 +108,14 @@ class ProductionMigration:
             cursor = self.conn.cursor()
             cursor.execute(f"""
                 SELECT COUNT(*) FROM information_schema.COLUMNS
-                WHERE TABLE_SCHEMA = '{self.db_config["database"]}'
+                WHERE TABLE_SCHEMA = '{self.db_config['database']}'
                 AND TABLE_NAME = '{table_name}'
                 AND COLUMN_NAME = '{column_name}'
             """)
             result = cursor.fetchone()[0]
             cursor.close()
             return result > 0
-        except Error:
+        except pymysql.Error:
             return False
 
     def safe_execute(self, sql, description):
@@ -145,11 +127,9 @@ class ProductionMigration:
             cursor.close()
             logger.info(f"✅ {description}")
             return True
-        except Error as e:
+        except pymysql.Error as e:
             error_msg = str(e)
-            if any(
-                ignore in error_msg for ignore in ["Duplicate column", "already exists"]
-            ):
+            if any(ignore in error_msg for ignore in ["Duplicate column", "already exists"]):
                 logger.info(f"ℹ️ {description} (already exists)")
                 return True
             else:
@@ -170,7 +150,7 @@ class ProductionMigration:
                 except:
                     counts[table] = 0
             cursor.close()
-        except Error as e:
+        except pymysql.Error as e:
             logger.error(f"Error getting row counts: {e}")
 
         return counts
@@ -179,9 +159,7 @@ class ProductionMigration:
         """Run the complete production migration"""
         logger.info("🏭 STARTING PRODUCTION DATABASE MIGRATION")
         logger.info("=" * 60)
-        logger.info(
-            f"Target: {self.db_config['host']}:{self.db_config['port']}/{self.db_config['database']}"
-        )
+        logger.info(f"Target: {self.db_config['host']}:{self.db_config['port']}/{self.db_config['database']}")
         logger.info(f"User: {self.db_config['user']}")
 
         # Step 1: Create backup
@@ -208,131 +186,45 @@ class ProductionMigration:
 
         migrations = [
             # Apartments table enhancements
-            (
-                "ALTER TABLE apartments ADD COLUMN maxOccupancy INT DEFAULT 4",
-                "Added maxOccupancy to apartments",
-            ),
-            (
-                "ALTER TABLE apartments ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
-                "Added created_at to apartments",
-            ),
-            (
-                "ALTER TABLE apartments ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
-                "Added updated_at to apartments",
-            ),
+            ("ALTER TABLE apartments ADD COLUMN maxOccupancy INT DEFAULT 4", "Added maxOccupancy to apartments"),
+            ("ALTER TABLE apartments ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP", "Added created_at to apartments"),
+            ("ALTER TABLE apartments ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP", "Added updated_at to apartments"),
+
             # Tenants table enhancements
-            (
-                "ALTER TABLE tenants ADD COLUMN bornOn VARCHAR(50) NULL",
-                "Added bornOn to tenants",
-            ),
-            (
-                "ALTER TABLE tenants ADD COLUMN refundIban VARCHAR(255) NULL",
-                "Added refundIban to tenants",
-            ),
-            (
-                "ALTER TABLE tenants ADD COLUMN moveInDate DATE NULL",
-                "Added moveInDate to tenants",
-            ),
-            (
-                "ALTER TABLE tenants ADD COLUMN moveOutDate DATE NULL",
-                "Added moveOutDate to tenants",
-            ),
-            (
-                "ALTER TABLE tenants ADD COLUMN deposit DECIMAL(10,2) NULL",
-                "Added deposit to tenants",
-            ),
-            (
-                "ALTER TABLE tenants ADD COLUMN rentAmount DECIMAL(10,2) NULL",
-                "Added rentAmount to tenants",
-            ),
-            (
-                "ALTER TABLE tenants ADD COLUMN notes TEXT NULL",
-                "Added notes to tenants",
-            ),
-            (
-                "ALTER TABLE tenants ADD COLUMN isActive BOOLEAN DEFAULT TRUE",
-                "Added isActive to tenants",
-            ),
-            (
-                "ALTER TABLE tenants ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
-                "Added created_at to tenants",
-            ),
-            (
-                "ALTER TABLE tenants ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
-                "Added updated_at to tenants",
-            ),
+            ("ALTER TABLE tenants ADD COLUMN bornOn VARCHAR(50) NULL", "Added bornOn to tenants"),
+            ("ALTER TABLE tenants ADD COLUMN refundIban VARCHAR(255) NULL", "Added refundIban to tenants"),
+            ("ALTER TABLE tenants ADD COLUMN moveInDate DATE NULL", "Added moveInDate to tenants"),
+            ("ALTER TABLE tenants ADD COLUMN moveOutDate DATE NULL", "Added moveOutDate to tenants"),
+            ("ALTER TABLE tenants ADD COLUMN deposit DECIMAL(10,2) NULL", "Added deposit to tenants"),
+            ("ALTER TABLE tenants ADD COLUMN rentAmount DECIMAL(10,2) NULL", "Added rentAmount to tenants"),
+            ("ALTER TABLE tenants ADD COLUMN notes TEXT NULL", "Added notes to tenants"),
+            ("ALTER TABLE tenants ADD COLUMN isActive BOOLEAN DEFAULT TRUE", "Added isActive to tenants"),
+            ("ALTER TABLE tenants ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP", "Added created_at to tenants"),
+            ("ALTER TABLE tenants ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP", "Added updated_at to tenants"),
+
             # Payments table enhancements
-            (
-                "ALTER TABLE payments ADD COLUMN amount FLOAT NULL",
-                "Added amount to payments",
-            ),
-            (
-                "ALTER TABLE payments ADD COLUMN tenant_name VARCHAR(255) NULL",
-                "Added tenant_name to payments",
-            ),
-            (
-                "ALTER TABLE payments ADD COLUMN payment_type VARCHAR(50) DEFAULT 'rent'",
-                "Added payment_type to payments",
-            ),
-            (
-                "ALTER TABLE payments ADD COLUMN paymentDate DATETIME NULL",
-                "Added paymentDate to payments",
-            ),
-            (
-                "ALTER TABLE payments ADD COLUMN paymentMethod VARCHAR(50) DEFAULT 'bank_transfer'",
-                "Added paymentMethod to payments",
-            ),
-            (
-                "ALTER TABLE payments ADD COLUMN notes TEXT NULL",
-                "Added notes to payments",
-            ),
+            ("ALTER TABLE payments ADD COLUMN amount FLOAT NULL", "Added amount to payments"),
+            ("ALTER TABLE payments ADD COLUMN tenant_name VARCHAR(255) NULL", "Added tenant_name to payments"),
+            ("ALTER TABLE payments ADD COLUMN payment_type VARCHAR(50) DEFAULT 'rent'", "Added payment_type to payments"),
+            ("ALTER TABLE payments ADD COLUMN paymentDate DATETIME NULL", "Added paymentDate to payments"),
+            ("ALTER TABLE payments ADD COLUMN paymentMethod VARCHAR(50) DEFAULT 'bank_transfer'", "Added paymentMethod to payments"),
+            ("ALTER TABLE payments ADD COLUMN notes TEXT NULL", "Added notes to payments"),
             ("ALTER TABLE payments ADD COLUMN year INT NULL", "Added year to payments"),
-            (
-                "ALTER TABLE payments ADD COLUMN extraPayments TEXT NULL",
-                "Added extraPayments to payments",
-            ),
-            (
-                "ALTER TABLE payments ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
-                "Added created_at to payments",
-            ),
-            (
-                "ALTER TABLE payments ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
-                "Added updated_at to payments",
-            ),
-            (
-                "ALTER TABLE payments MODIFY COLUMN month VARCHAR(50) NOT NULL",
-                "Extended month column length",
-            ),
+            ("ALTER TABLE payments ADD COLUMN extraPayments TEXT NULL", "Added extraPayments to payments"),
+            ("ALTER TABLE payments ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP", "Added created_at to payments"),
+            ("ALTER TABLE payments ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP", "Added updated_at to payments"),
+            ("ALTER TABLE payments MODIFY COLUMN month VARCHAR(50) NOT NULL", "Extended month column length"),
+
             # Users table enhancements
-            (
-                "ALTER TABLE users ADD COLUMN is_approved BOOLEAN DEFAULT FALSE",
-                "Added is_approved to users",
-            ),
-            (
-                "ALTER TABLE users ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
-                "Added created_at to users",
-            ),
-            (
-                "ALTER TABLE users ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
-                "Added updated_at to users",
-            ),
+            ("ALTER TABLE users ADD COLUMN is_approved BOOLEAN DEFAULT FALSE", "Added is_approved to users"),
+            ("ALTER TABLE users ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP", "Added created_at to users"),
+            ("ALTER TABLE users ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP", "Added updated_at to users"),
+
             # Contracts table - CRITICAL 50MB support
-            (
-                "ALTER TABLE contracts MODIFY COLUMN file_size BIGINT",
-                "🎯 ENABLED 50MB file support",
-            ),
-            (
-                "ALTER TABLE contracts ADD COLUMN created_by INT NULL",
-                "Added created_by to contracts",
-            ),
-            (
-                "ALTER TABLE contracts ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP",
-                "Added created_at to contracts",
-            ),
-            (
-                "ALTER TABLE contracts ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP",
-                "Added updated_at to contracts",
-            ),
+            ("ALTER TABLE contracts MODIFY COLUMN file_size BIGINT", "🎯 ENABLED 50MB file support"),
+            ("ALTER TABLE contracts ADD COLUMN created_by INT NULL", "Added created_by to contracts"),
+            ("ALTER TABLE contracts ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP", "Added created_at to contracts"),
+            ("ALTER TABLE contracts ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP", "Added updated_at to contracts"),
         ]
 
         success_count = 0
@@ -346,22 +238,10 @@ class ProductionMigration:
         logger.info("\n🔄 STEP 5: Synchronizing data...")
 
         sync_operations = [
-            (
-                "UPDATE users SET is_approved = approved WHERE approved IS NOT NULL",
-                "Synced user approval status",
-            ),
-            (
-                "UPDATE tenants SET bornOn = dob WHERE bornOn IS NULL AND dob IS NOT NULL",
-                "Synced birthdate fields",
-            ),
-            (
-                "UPDATE payments SET year = YEAR(NOW()) WHERE year IS NULL",
-                "Set default payment years",
-            ),
-            (
-                "UPDATE contracts SET created_by = uploaded_by WHERE created_by IS NULL AND uploaded_by IS NOT NULL",
-                "Synced contract creators",
-            ),
+            ("UPDATE users SET is_approved = approved WHERE approved IS NOT NULL", "Synced user approval status"),
+            ("UPDATE tenants SET bornOn = dob WHERE bornOn IS NULL AND dob IS NOT NULL", "Synced birthdate fields"),
+            ("UPDATE payments SET year = YEAR(NOW()) WHERE year IS NULL", "Set default payment years"),
+            ("UPDATE contracts SET created_by = uploaded_by WHERE created_by IS NULL AND uploaded_by IS NOT NULL", "Synced contract creators"),
         ]
 
         for sql, description in sync_operations:
@@ -373,18 +253,18 @@ class ProductionMigration:
             cursor = self.conn.cursor()
             cursor.execute(f"""
                 SELECT DATA_TYPE FROM information_schema.COLUMNS
-                WHERE TABLE_SCHEMA = '{self.db_config["database"]}'
+                WHERE TABLE_SCHEMA = '{self.db_config['database']}'
                 AND TABLE_NAME = 'contracts' AND COLUMN_NAME = 'file_size'
             """)
             result = cursor.fetchone()
             cursor.close()
 
-            if result and result[0].upper() == "BIGINT":
+            if result and result[0].upper() == 'BIGINT':
                 logger.info("🎯 ✅ VERIFIED: 50MB file upload support enabled!")
             else:
                 logger.error(f"❌ File size verification failed: {result}")
                 return False
-        except Exception as e:
+        except pymysql.Error as e:
             logger.error(f"❌ Verification error: {e}")
             return False
 
@@ -419,26 +299,14 @@ class ProductionMigration:
 
         return True
 
-
 def main():
     """Main function for production migration"""
     print("🏭 PRODUCTION DATABASE MIGRATION FOR 50MB SUPPORT")
     print("=" * 60)
 
-    # Environment validation
-    required_vars = ["DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME"]
-    missing = [var for var in required_vars if not os.environ.get(var)]
-
-    if missing:
-        print("❌ Missing required environment variables:")
-        for var in missing:
-            print(f"   export {var}=your_value")
-        print("\nSet these variables and run again.")
-        return 1
-
-    print(f"Target: {os.environ.get('DB_HOST')}:{os.environ.get('DB_PORT', 3306)}")
-    print(f"Database: {os.environ.get('DB_NAME')}")
-    print(f"User: {os.environ.get('DB_USER')}")
+    print(f"Target: { 'mysql' }:{ 3306 }")
+    print(f"Database: { 'mydatabase' }")
+    print(f"User: { 'myuser' }")
     print()
     print("⚠️ IMPORTANT:")
     print("- Automatic backup will be created")
@@ -450,7 +318,7 @@ def main():
     # Confirm execution
     try:
         confirm = input("Proceed with production migration? (yes/no): ").strip().lower()
-        if confirm not in ["yes", "y"]:
+        if confirm not in ['yes', 'y']:
             print("Migration cancelled.")
             return 0
     except (EOFError, KeyboardInterrupt):
@@ -475,7 +343,6 @@ def main():
         logger.error(f"Critical error: {e}")
         print(f"\n💥 Critical error: {e}")
         return 1
-
 
 if __name__ == "__main__":
     exit_code = main()

@@ -21,14 +21,14 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: 'http://flask_backend:5001',
+        target: 'http://backend:5001',
         changeOrigin: true,
         secure: false
       }
     }
   },
 
-  // BUILD OPTIMIZATIONS FOR MUI PROJECT
+  // PRODUCTION BUILD OPTIMIZATIONS
   build: {
     // Use faster minifier
     minify: 'esbuild',
@@ -39,7 +39,7 @@ export default defineConfig({
     // Modern target
     target: 'esnext',
 
-    // Optimize chunk splitting for MUI
+    // Optimize chunk splitting for MUI v5
     rollupOptions: {
       output: {
         manualChunks: {
@@ -49,14 +49,14 @@ export default defineConfig({
           // Router
           'router': ['react-router-dom'],
 
-          // MUI core (split these heavy libraries)
+          // MUI v5 core
           'mui-core': [
             '@mui/material',
             '@emotion/react',
             '@emotion/styled'
           ],
 
-          // MUI icons (usually very large)
+          // MUI icons (tree-shaken properly in v5)
           'mui-icons': ['@mui/icons-material'],
 
           // MUI date pickers
@@ -84,7 +84,7 @@ export default defineConfig({
     drop: process.env.NODE_ENV === 'production' ? ['console', 'debugger'] : [],
   },
 
-  // Pre-bundle dependencies (important for MUI)
+  // OPTIMIZED FOR MUI v5 - much better than v6
   optimizeDeps: {
     include: [
       'react',
@@ -92,14 +92,10 @@ export default defineConfig({
       'react-router-dom',
       '@mui/material',
       '@emotion/react',
-      '@emotion/styled',
-      'axios'
+      '@emotion/styled'
     ],
-    // Exclude heavy dependencies from pre-bundling
-    exclude: [
-      '@mui/icons-material',
-      '@mui/x-date-pickers'
-    ]
+    // MUI v5 handles icons much better - no need to exclude
+    force: true
   },
 
   // Define environment variables

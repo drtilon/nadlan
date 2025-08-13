@@ -19,7 +19,7 @@ import {
   Button,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
-import api from '../utils/api';
+import api from '../../utils/api';
 
 function UsersList({ showNotification }) {
   const [users, setUsers] = useState([]);

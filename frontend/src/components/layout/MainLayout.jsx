@@ -57,7 +57,7 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 
-import { getUserData } from '../utils/api';
+import { getUserData } from '../../utils/api';
 
 function MainLayout({ onLogout }) {
   const drawerWidth = 260;

@@ -21,7 +21,7 @@ import {
   LockOutlined as LockIcon,
   Login as LoginIcon
 } from '@mui/icons-material';
-import api, { setAuthToken, setUserData } from '../utils/api';
+import api, { setAuthToken, setUserData } from '../../utils/api';
 
 function LoginPage({ showNotification }) {
   const [credentials, setCredentials] = useState({ username: '', password: '' });

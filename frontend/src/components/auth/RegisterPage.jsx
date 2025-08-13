@@ -22,7 +22,7 @@ import {
   ArrowBack as ArrowBackIcon,
   PersonAddAlt as PersonAddIcon
 } from '@mui/icons-material';
-import api from '../utils/api';
+import api from '../../utils/api';
 
 function RegisterPage({ showNotification }) {
   const [formData, setFormData] = useState({ username: '', password: '', confirmPassword: '' });

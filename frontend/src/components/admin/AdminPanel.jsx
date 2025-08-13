@@ -49,7 +49,7 @@ import {
   FilterList as FilterIcon,
   Lock as LockIcon
 } from '@mui/icons-material';
-import api from '../utils/api';
+import api from '../../utils/api';
 import PasswordChangeDialog from './PasswordChangeDialog';
 // TODO do thsi or handleTabChange
 function AdminPanel({ showNotification }) {

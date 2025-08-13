@@ -78,7 +78,7 @@ import {
   KeyboardArrowLeft,
   KeyboardArrowRight
 } from '@mui/icons-material';
-import api from '../utils/api';
+import api from '../../utils/api';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import AnalyticsIcon from '@mui/icons-material/Analytics';
 

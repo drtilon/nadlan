@@ -1,4 +1,4 @@
-// components/TenantsPanel.jsx
+// src/components/LandlordsPanel.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -29,119 +29,119 @@ import {
   Delete as DeleteIcon,
   Search as SearchIcon,
   Refresh as RefreshIcon,
-  PersonAdd as PersonAddIcon,
+  Business as BusinessIcon,
   Home as HomeIcon,
   Phone as PhoneIcon,
   Email as EmailIcon,
   Person as PersonIcon,
   Visibility as ViewIcon,
-  CreditCard as IbanIcon,
-  Cake as BirthdayIcon
+  LocationOn as LocationIcon,
+  AccountBalance as BankIcon
 } from '@mui/icons-material';
-import api from '../utils/api';
-import TenantDetails from './TenantDetails';
-import EnhancedTenantForm from './EnhancedTenantForm';
-import Pagination from './common/Pagination';
+import { useNavigate } from 'react-router-dom';
+import api from '../../utils/api';
+import LandlordDetails from './LandlordDetails';
+import EnhancedLandlordForm from './EnhancedLandlordForm';
+import Pagination from '../common/Pagination';
 
-function TenantsPanel({ showNotification }) {
-  const [tenants, setTenants] = useState([]);
-  const [apartments, setApartments] = useState([]);
+function LandlordsPanel({ showNotification }) {
+  const [landlords, setLandlords] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [openDialog, setOpenDialog] = useState(false);
-  const [editingTenant, setEditingTenant] = useState(null);
+  const [editingLandlord, setEditingLandlord] = useState(null);
   const [formData, setFormData] = useState({
+    company_name: '',
     name: '',
     email: '',
     phone: '',
-    bornOn: '',
-    refundIban: '',
-    apartment_id: ''
+    iban: '',
+    company_address: '',
+    notes: ''
   });
-  const [filteredTenants, setFilteredTenants] = useState([]);
+  const [filteredLandlords, setFilteredLandlords] = useState([]);
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
-  const [tenantToDelete, setTenantToDelete] = useState(null);
-  const [selectedTenant, setSelectedTenant] = useState(null);
+  const [landlordToDelete, setLandlordToDelete] = useState(null);
+  const [selectedLandlord, setSelectedLandlord] = useState(null);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [paginatedTenants, setPaginatedTenants] = useState([]);
+  const [paginatedLandlords, setPaginatedLandlords] = useState([]);
 
-  // Fetch tenants and apartments data
+  const navigate = useNavigate();
+
+  // Fetch landlords data
   useEffect(() => {
     fetchData();
   }, []);
 
-  // Filter tenants based on search query
+  // Filter landlords based on search query
   useEffect(() => {
     if (!searchQuery) {
-      setFilteredTenants(tenants);
+      setFilteredLandlords(landlords);
     } else {
       const query = searchQuery.toLowerCase();
-      const filtered = tenants.filter(tenant =>
-        tenant.name.toLowerCase().includes(query) ||
-        (tenant.email && tenant.email.toLowerCase().includes(query)) ||
-        (tenant.phone && tenant.phone.toLowerCase().includes(query)) ||
-        (tenant.apartment_address && tenant.apartment_address.toLowerCase().includes(query)) ||
-        (tenant.bornOn && tenant.bornOn.includes(query)) ||
-        (tenant.refundIban && tenant.refundIban.toLowerCase().includes(query))
+      const filtered = landlords.filter(landlord =>
+        landlord.name.toLowerCase().includes(query) ||
+        landlord.company_name.toLowerCase().includes(query) ||
+        (landlord.email && landlord.email.toLowerCase().includes(query)) ||
+        (landlord.phone && landlord.phone.toLowerCase().includes(query)) ||
+        (landlord.company_address && landlord.company_address.toLowerCase().includes(query))
       );
-      setFilteredTenants(filtered);
+      setFilteredLandlords(filtered);
     }
     // Reset to first page when search changes
     setCurrentPage(1);
-  }, [searchQuery, tenants]);
+  }, [searchQuery, landlords]);
 
-  // Update paginated tenants when filtered tenants or pagination settings change
+  // Update paginated landlords when filtered landlords or pagination settings change
   useEffect(() => {
     const startIndex = (currentPage - 1) * itemsPerPage;
     const endIndex = startIndex + itemsPerPage;
-    setPaginatedTenants(filteredTenants.slice(startIndex, endIndex));
-  }, [filteredTenants, currentPage, itemsPerPage]);
+    setPaginatedLandlords(filteredLandlords.slice(startIndex, endIndex));
+  }, [filteredLandlords, currentPage, itemsPerPage]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Fetch tenants
-      const tenantsResponse = await api.get('/tenants/list');
-      setTenants(tenantsResponse.data);
-      setFilteredTenants(tenantsResponse.data);
-
-      // Fetch apartments for dropdown
-      const apartmentsResponse = await api.get('/list');
-      setApartments(apartmentsResponse.data);
+      // Fetch landlords
+      const landlordsResponse = await api.get('/landlords/list');
+      setLandlords(landlordsResponse.data);
+      setFilteredLandlords(landlordsResponse.data);
     } catch (error) {
       console.error('Error fetching data:', error);
-      showNotification('Error loading tenant data', 'error');
+      showNotification('Error loading landlord data', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleOpenDialog = (tenant = null) => {
-    if (tenant) {
+  const handleOpenDialog = (landlord = null) => {
+    if (landlord) {
       // Edit mode
-      setEditingTenant(tenant);
+      setEditingLandlord(landlord);
       setFormData({
-        name: tenant.name || '',
-        email: tenant.email || '',
-        phone: tenant.phone || '',
-        bornOn: tenant.bornOn || '',
-        refundIban: tenant.refundIban || '',
-        apartment_id: tenant.apartment_id || ''
+        company_name: landlord.company_name || '',
+        name: landlord.name || '',
+        email: landlord.email || '',
+        phone: landlord.phone || '',
+        iban: landlord.iban || '',
+        company_address: landlord.company_address || '',
+        notes: landlord.notes || ''
       });
     } else {
       // Add mode
-      setEditingTenant(null);
+      setEditingLandlord(null);
       setFormData({
+        company_name: '',
         name: '',
         email: '',
         phone: '',
-        bornOn: '',
-        refundIban: '',
-        apartment_id: ''
+        iban: '',
+        company_address: '',
+        notes: ''
       });
     }
     setOpenDialog(true);
@@ -153,76 +153,62 @@ function TenantsPanel({ showNotification }) {
   };
 
   const handleSubmit = async () => {
-    if (!formData.name) {
-      showNotification('Tenant name is required', 'error');
+    if (!formData.company_name || !formData.name) {
+      showNotification('Company name and landlord name are required', 'error');
       return;
     }
 
     setFormSubmitting(true);
     try {
-      if (editingTenant) {
-        // Update existing tenant
-        await api.put(`/tenants/${editingTenant.id}`, formData);
-        showNotification('Tenant updated successfully', 'success');
+      if (editingLandlord) {
+        // Update existing landlord
+        await api.put(`/landlords/${editingLandlord.id}`, formData);
+        showNotification('Landlord updated successfully', 'success');
       } else {
-        // Add new tenant
-        await api.post('/tenants/add', formData);
-        showNotification('Tenant added successfully', 'success');
+        // Add new landlord
+        await api.post('/landlords/add', formData);
+        showNotification('Landlord added successfully', 'success');
       }
 
       fetchData();
       handleCloseDialog();
     } catch (error) {
-      console.error('Error saving tenant:', error);
-      showNotification('Error saving tenant data', 'error');
+      console.error('Error saving landlord:', error);
+      showNotification('Error saving landlord data', 'error');
       setFormSubmitting(false);
     }
   };
 
-  const openDeleteConfirmation = (tenant) => {
-    setTenantToDelete(tenant);
+  const openDeleteConfirmation = (landlord) => {
+    setLandlordToDelete(landlord);
     setConfirmDeleteOpen(true);
   };
 
-  const handleDeleteTenant = async () => {
-    if (!tenantToDelete) return;
+  const handleDeleteLandlord = async () => {
+    if (!landlordToDelete) return;
 
     setFormSubmitting(true);
     try {
-      await api.delete(`/tenants/${tenantToDelete.id}`);
-      showNotification('Tenant deleted successfully', 'success');
+      await api.delete(`/landlords/${landlordToDelete.id}`);
+      showNotification('Landlord deleted successfully', 'success');
       fetchData();
       setConfirmDeleteOpen(false);
     } catch (error) {
-      console.error('Error deleting tenant:', error);
-      showNotification('Error deleting tenant', 'error');
+      console.error('Error deleting landlord:', error);
+      if (error.response && error.response.status === 400) {
+        showNotification('Cannot delete landlord with associated apartments', 'error');
+      } else {
+        showNotification('Error deleting landlord', 'error');
+      }
     } finally {
       setFormSubmitting(false);
-      setTenantToDelete(null);
+      setLandlordToDelete(null);
     }
   };
 
-  // Handle view tenant details
-  const handleViewTenant = (tenant) => {
-    setSelectedTenant(tenant.id);
-  };
-
-  // Get apartment address by ID
-  const getApartmentAddress = (apartmentId) => {
-    const apartment = apartments.find(apt => apt.id === apartmentId);
-    return apartment ? apartment.address : 'Not Assigned';
-  };
-
-  // Format date for display
-  const formatDate = (dateString) => {
-    if (!dateString) return '';
-
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString();
-    } catch (e) {
-      return dateString;
-    }
+  // Handle view landlord details
+  const handleViewLandlord = (landlord) => {
+    setSelectedLandlord(landlord.id);
   };
 
   // Handle pagination
@@ -234,12 +220,12 @@ function TenantsPanel({ showNotification }) {
     setItemsPerPage(newItemsPerPage);
   };
 
-  // If a tenant is selected, show tenant details
-  if (selectedTenant) {
+  // If a landlord is selected, show landlord details
+  if (selectedLandlord) {
     return (
-      <TenantDetails
-        tenantId={selectedTenant}
-        onBack={() => setSelectedTenant(null)}
+      <LandlordDetails
+        landlordId={selectedLandlord}
+        onBack={() => setSelectedLandlord(null)}
         showNotification={showNotification}
       />
     );
@@ -250,21 +236,21 @@ function TenantsPanel({ showNotification }) {
       <Paper elevation={3} sx={{ p: 3 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
           <Typography variant="h4" component="h1" sx={{ display: 'flex', alignItems: 'center' }}>
-            <PersonIcon sx={{ mr: 1 }} /> Tenant Management
+            <BusinessIcon sx={{ mr: 1 }} /> Landlord Management
           </Typography>
           <Button
             variant="contained"
             color="primary"
-            startIcon={<PersonAddIcon />}
+            startIcon={<AddIcon />}
             onClick={() => handleOpenDialog()}
           >
-            Add New Tenant
+            Add New Landlord
           </Button>
         </Box>
 
         <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
           <TextField
-            placeholder="Search tenants..."
+            placeholder="Search landlords..."
             variant="outlined"
             size="small"
             value={searchQuery}
@@ -294,9 +280,9 @@ function TenantsPanel({ showNotification }) {
           </Box>
         ) : (
           <>
-            {filteredTenants.length === 0 ? (
+            {filteredLandlords.length === 0 ? (
               <Alert severity="info" sx={{ mt: 2 }}>
-                No tenants found. Add tenants using the button above.
+                No landlords found. Add landlords using the button above.
               </Alert>
             ) : (
               <>
@@ -304,85 +290,67 @@ function TenantsPanel({ showNotification }) {
                   <Table>
                     <TableHead sx={{ bgcolor: 'primary.light' }}>
                       <TableRow>
-                        <TableCell>Tenant Name</TableCell>
+                        <TableCell>Company Name</TableCell>
+                        <TableCell>Landlord Name</TableCell>
                         <TableCell>Contact Information</TableCell>
-                        <TableCell>Personal Details</TableCell>
-                        <TableCell>Assigned Property</TableCell>
+                        <TableCell>Properties</TableCell>
                         <TableCell align="right">Actions</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {paginatedTenants.map((tenant) => (
+                      {paginatedLandlords.map((landlord) => (
                         <TableRow
-                          key={tenant.id}
+                          key={landlord.id}
                           hover
                           sx={{
                             cursor: 'pointer',
                             '&:hover': { bgcolor: 'action.hover' }
                           }}
-                          onClick={() => handleViewTenant(tenant)}
+                          onClick={() => handleViewLandlord(landlord)}
                         >
                           <TableCell>
                             <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                              <PersonIcon sx={{ mr: 1, color: 'primary.main' }} />
+                              <BusinessIcon sx={{ mr: 1, color: 'primary.main' }} />
                               <Typography variant="subtitle1">
-                                {tenant.name}
+                                {landlord.company_name}
                               </Typography>
                             </Box>
                           </TableCell>
                           <TableCell>
+                            <Typography variant="body1">{landlord.name}</Typography>
+                          </TableCell>
+                          <TableCell>
                             <Stack spacing={1}>
-                              {tenant.email && (
+                              {landlord.email && (
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                   <EmailIcon fontSize="small" color="action" />
-                                  <Typography variant="body2">{tenant.email}</Typography>
+                                  <Typography variant="body2">{landlord.email}</Typography>
                                 </Box>
                               )}
-                              {tenant.phone && (
+                              {landlord.phone && (
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                   <PhoneIcon fontSize="small" color="action" />
-                                  <Typography variant="body2">{tenant.phone}</Typography>
+                                  <Typography variant="body2">{landlord.phone}</Typography>
                                 </Box>
                               )}
-                            </Stack>
-                          </TableCell>
-                          <TableCell>
-                            <Stack spacing={1}>
-                              {tenant.bornOn && (
+                              {landlord.company_address && (
                                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                  <BirthdayIcon fontSize="small" color="action" />
-                                  <Typography variant="body2">
-                                    {formatDate(tenant.bornOn)}
-                                  </Typography>
-                                </Box>
-                              )}
-                              {tenant.refundIban && (
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                  <IbanIcon fontSize="small" color="action" />
-                                  <Typography variant="body2">
-                                    {tenant.refundIban}
+                                  <LocationIcon fontSize="small" color="action" />
+                                  <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+                                    {landlord.company_address}
                                   </Typography>
                                 </Box>
                               )}
                             </Stack>
                           </TableCell>
                           <TableCell>
-                            {tenant.apartment_id ? (
-                              <Chip
-                                icon={<HomeIcon />}
-                                label={getApartmentAddress(tenant.apartment_id)}
-                                color="primary"
-                                variant="outlined"
-                                size="small"
-                              />
-                            ) : (
-                              <Chip
-                                label="Not Assigned"
-                                color="default"
-                                variant="outlined"
-                                size="small"
-                              />
-                            )}
+                            <Chip
+                              icon={<HomeIcon />}
+                              label={`${landlord.apartment_count || 0} properties`}
+                              color="primary"
+                              variant="outlined"
+                              size="small"
+                            />
                           </TableCell>
                           <TableCell align="right" onClick={(e) => e.stopPropagation()}>
                             <Tooltip title="View Details">
@@ -390,33 +358,34 @@ function TenantsPanel({ showNotification }) {
                                 color="info"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleViewTenant(tenant);
+                                  handleViewLandlord(landlord);
                                 }}
                                 size="small"
                               >
                                 <ViewIcon />
                               </IconButton>
                             </Tooltip>
-                            <Tooltip title="Edit Tenant">
+                            <Tooltip title="Edit Landlord">
                               <IconButton
                                 color="primary"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleOpenDialog(tenant);
+                                  handleOpenDialog(landlord);
                                 }}
                                 size="small"
                               >
                                 <EditIcon />
                               </IconButton>
                             </Tooltip>
-                            <Tooltip title="Delete Tenant">
+                            <Tooltip title="Delete Landlord">
                               <IconButton
                                 color="error"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  openDeleteConfirmation(tenant);
+                                  openDeleteConfirmation(landlord);
                                 }}
                                 size="small"
+                                disabled={landlord.apartment_count > 0}
                               >
                                 <DeleteIcon />
                               </IconButton>
@@ -430,7 +399,7 @@ function TenantsPanel({ showNotification }) {
 
                 {/* Pagination component */}
                 <Pagination
-                  totalItems={filteredTenants.length}
+                  totalItems={filteredLandlords.length}
                   itemsPerPage={itemsPerPage}
                   currentPage={currentPage}
                   onPageChange={handlePageChange}
@@ -442,7 +411,7 @@ function TenantsPanel({ showNotification }) {
         )}
       </Paper>
 
-      {/* Add/Edit Tenant Dialog */}
+      {/* Add/Edit Landlord Dialog */}
       <Dialog
         open={openDialog}
         onClose={handleCloseDialog}
@@ -450,13 +419,12 @@ function TenantsPanel({ showNotification }) {
         fullWidth
       >
         <DialogTitle>
-          {editingTenant ? 'Edit Tenant' : 'Add New Tenant'}
+          {editingLandlord ? 'Edit Landlord' : 'Add New Landlord'}
         </DialogTitle>
-        <EnhancedTenantForm
+        <EnhancedLandlordForm
           formData={formData}
           setFormData={setFormData}
-          editingTenant={editingTenant}
-          apartments={apartments}
+          editingLandlord={editingLandlord}
           formSubmitting={formSubmitting}
           handleCloseDialog={handleCloseDialog}
           handleSubmit={handleSubmit}
@@ -471,7 +439,7 @@ function TenantsPanel({ showNotification }) {
         <DialogTitle>Confirm Deletion</DialogTitle>
         <Box sx={{ px: 3, pb: 3 }}>
           <Typography>
-            Are you sure you want to delete the tenant "{tenantToDelete?.name}"?
+            Are you sure you want to delete the landlord "{landlordToDelete?.name}"?
             This action cannot be undone.
           </Typography>
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 3, gap: 2 }}>
@@ -483,7 +451,7 @@ function TenantsPanel({ showNotification }) {
               Cancel
             </Button>
             <Button
-              onClick={handleDeleteTenant}
+              onClick={handleDeleteLandlord}
               color="error"
               variant="contained"
               disabled={formSubmitting}
@@ -498,4 +466,4 @@ function TenantsPanel({ showNotification }) {
   );
 }
 
-export default TenantsPanel;
+export default LandlordsPanel;

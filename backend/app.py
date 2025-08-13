@@ -45,8 +45,8 @@ def create_app():
         app = Flask(__name__)
         app.config.from_object(Config)
 
-        # Set file upload limits - INCREASED for larger files
-        app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size (increased from 50MB)
+        # Set file upload limits - UPDATED to 50MB
+        app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
         app.config['UPLOAD_FOLDER'] = os.path.join(app.root_path, 'uploads')
 
         # Additional configuration for better file handling
@@ -125,10 +125,10 @@ def create_app():
         except Exception as e:
             app.logger.error(f"Error initializing CORS: {e}")
 
-        # Add error handler for file too large
+        # Add error handler for file too large - UPDATED to 50MB
         @app.errorhandler(413)
         def too_large(e):
-            return {"error": "File too large. Maximum file size is 100MB."}, 413
+            return {"error": "File too large. Maximum file size is 50MB."}, 413
 
         # Add error handler for request entity too large (Nginx/server level)
         @app.errorhandler(400)
@@ -174,7 +174,9 @@ def create_app():
             from routes.contracts import contracts_bp
             from routes.contract_templates import contract_templates_bp
             from routes.health import health_bp
+            from routes.contract_periods import contract_periods_bp
 
+            app.register_blueprint(contract_periods_bp, url_prefix="/api")
             app.register_blueprint(health_bp, url_prefix="/api")
             app.register_blueprint(auth_bp, url_prefix="/api/auth")
             app.register_blueprint(adminPanel_bp, url_prefix="/api/adminPanel")

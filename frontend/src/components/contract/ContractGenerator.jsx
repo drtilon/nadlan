@@ -36,7 +36,7 @@ import {
   Warning as WarningIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import api from '../utils/api';
+import api from '../../utils/api';
 import ContractTemplatesManager from './ContractTemplatesManager';
 
 function ContractGenerator({ showNotification }) {

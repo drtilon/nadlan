@@ -61,13 +61,13 @@ function ContractManager({ showNotification }) {
 
   // Filter apartments based on search query
   useEffect(() => {
-    if (searchQuery) {
+    if (searchQuery && Array.isArray(apartments)) {
       const filtered = apartments.filter(apt =>
-        apt.address.toLowerCase().includes(searchQuery.toLowerCase())
+        apt.address && apt.address.toLowerCase().includes(searchQuery.toLowerCase())
       );
       setFilteredApartments(filtered);
     } else {
-      setFilteredApartments(apartments);
+      setFilteredApartments(Array.isArray(apartments) ? apartments : []);
     }
   }, [searchQuery, apartments]);
 
@@ -76,11 +76,18 @@ function ContractManager({ showNotification }) {
     setLoading(true);
     try {
       const response = await api.get('/list');
-      setApartments(response.data || []);
-      setFilteredApartments(response.data || []);
+      console.log('Apartments API response:', response.data); // Debug log
+
+      // Ensure we always have an array
+      const apartmentsData = Array.isArray(response.data) ? response.data : [];
+      setApartments(apartmentsData);
+      setFilteredApartments(apartmentsData);
     } catch (error) {
       console.error('Error fetching apartments:', error);
       showNotification('Failed to load apartments', 'error');
+      // Set empty arrays on error
+      setApartments([]);
+      setFilteredApartments([]);
     } finally {
       setLoading(false);
     }
@@ -107,6 +114,7 @@ function ContractManager({ showNotification }) {
 
   // Handle apartment selection
   const handleApartmentSelect = (apartmentId) => {
+    console.log('Selected apartment ID:', apartmentId); // Debug log
     fetchContracts(apartmentId);
   };
 
@@ -304,7 +312,7 @@ function ContractManager({ showNotification }) {
                 <Box display="flex" justifyContent="center" my={4}>
                   <CircularProgress />
                 </Box>
-              ) : filteredApartments.length > 0 ? (
+              ) : Array.isArray(filteredApartments) && filteredApartments.length > 0 ? (
                 <Box sx={{ maxHeight: '400px', overflow: 'auto' }}>
                   {filteredApartments.map((apartment) => (
                     <Card
@@ -323,7 +331,7 @@ function ContractManager({ showNotification }) {
                     >
                       <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
                         <Typography fontWeight={selectedApartment?.id === apartment.id ? 'bold' : 'normal'}>
-                          {apartment.address}
+                          {apartment.address || 'Unknown Address'}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
                           {getTenantNames(apartment)}
@@ -333,7 +341,9 @@ function ContractManager({ showNotification }) {
                   ))}
                 </Box>
               ) : (
-                <Alert severity="info">No properties found</Alert>
+                <Alert severity="info">
+                  {loading ? 'Loading properties...' : 'No properties found'}
+                </Alert>
               )}
             </CardContent>
           </Card>

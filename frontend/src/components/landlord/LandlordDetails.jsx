@@ -41,7 +41,7 @@ import {
   PieChart as PieChartIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import api from '../utils/api';
+import api from '../../utils/api';
 
 function LandlordDetails({ landlordId, onBack, showNotification }) {
   const [landlord, setLandlord] = useState(null);

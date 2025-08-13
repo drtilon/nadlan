@@ -74,7 +74,7 @@ import {
   ArrowDownward as ArrowDownwardIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import api, { getUserData } from '../utils/api';
+import api, { getUserData } from '../../utils/api';
 import {
   BarChart,
   Bar,

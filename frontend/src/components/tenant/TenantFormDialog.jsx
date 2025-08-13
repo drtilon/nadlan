@@ -20,7 +20,7 @@ import {
   Save as SaveIcon,
   PersonAdd as PersonAddIcon
 } from '@mui/icons-material';
-import api from '../utils/api';
+import api from '../../utils/api';
 
 function TenantFormDialog({ open, onClose, onSave, showNotification }) {
   const [formData, setFormData] = useState({

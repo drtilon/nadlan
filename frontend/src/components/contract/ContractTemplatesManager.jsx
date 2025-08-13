@@ -35,7 +35,7 @@ import {
   Description as DescriptionIcon,
   Check as CheckIcon,
 } from '@mui/icons-material';
-import api from '../utils/api';
+import api from '../../utils/api';
 
 function ContractTemplatesManager({ showNotification, onTemplatesUpdated }) {
   const [templates, setTemplates] = useState([]);

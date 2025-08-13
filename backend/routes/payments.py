@@ -646,17 +646,24 @@ def get_available_payment_years(apartment_id):
 @token_required
 def get_apartment_details(apartment_id):
     """
-    Returns details of the apartment.
+    Returns details of the apartment - FIXED to prevent circular references.
     """
     try:
         apartment = Apartment.query.get(apartment_id)
         if not apartment:
             return jsonify({"message": "Apartment not found"}), 404
-        return jsonify(apartment.to_dict()), 200
+
+        # Use the fixed to_dict method with controlled includes
+        apartment_data = apartment.to_dict(
+            include_landlord=True,
+            include_tenants=True,
+            include_contract_periods=False  # Prevent deep nesting
+        )
+
+        return jsonify(apartment_data), 200
     except Exception as e:
         current_app.logger.error(f"Error getting apartment details: {e}")
         return jsonify({"message": "Error getting apartment details", "error": str(e)}), 500
-
 @payments_bp.route("/payments/<int:apartment_id>/years", methods=["GET"])
 @token_required
 def get_payment_years(apartment_id):

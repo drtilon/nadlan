@@ -39,10 +39,10 @@ import {
   AccountBalance as BankIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import api from '../utils/api';
+import api from '../../utils/api';
 import LandlordDetails from './LandlordDetails';
 import EnhancedLandlordForm from './EnhancedLandlordForm';
-import Pagination from './common/Pagination';
+import Pagination from '../common/Pagination';
 
 function LandlordsPanel({ showNotification }) {
   const [landlords, setLandlords] = useState([]);

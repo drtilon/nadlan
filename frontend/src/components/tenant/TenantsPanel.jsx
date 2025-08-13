@@ -1,5 +1,6 @@
-// components/TenantsPanel.jsx
+// components/TenantsPanel.jsx - COMPLETE FIXED VERSION
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Container,
   Paper,
@@ -38,12 +39,13 @@ import {
   CreditCard as IbanIcon,
   Cake as BirthdayIcon
 } from '@mui/icons-material';
-import api from '../utils/api';
-import TenantDetails from './TenantDetails';
+import api from '../../utils/api';
 import EnhancedTenantForm from './EnhancedTenantForm';
-import Pagination from './common/Pagination';
+import Pagination from '../common/Pagination';
 
 function TenantsPanel({ showNotification }) {
+  const navigate = useNavigate();
+
   const [tenants, setTenants] = useState([]);
   const [apartments, setApartments] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -62,7 +64,6 @@ function TenantsPanel({ showNotification }) {
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [tenantToDelete, setTenantToDelete] = useState(null);
-  const [selectedTenant, setSelectedTenant] = useState(null);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -109,12 +110,26 @@ function TenantsPanel({ showNotification }) {
       setTenants(tenantsResponse.data);
       setFilteredTenants(tenantsResponse.data);
 
-      // Fetch apartments for dropdown
+      // FIXED: Handle the new apartment API response structure
       const apartmentsResponse = await api.get('/list');
-      setApartments(apartmentsResponse.data);
+
+      // Check if the response has the new paginated structure
+      if (apartmentsResponse.data && apartmentsResponse.data.apartments) {
+        // New structure: { apartments: [...], pagination: {...} }
+        setApartments(apartmentsResponse.data.apartments);
+      } else if (Array.isArray(apartmentsResponse.data)) {
+        // Old structure: [apartment1, apartment2, ...]
+        setApartments(apartmentsResponse.data);
+      } else {
+        // Fallback: set empty array to prevent errors
+        console.warn('Unexpected apartments API response structure:', apartmentsResponse.data);
+        setApartments([]);
+      }
     } catch (error) {
       console.error('Error fetching data:', error);
       showNotification('Error loading tenant data', 'error');
+      // Set apartments to empty array on error to prevent crashes
+      setApartments([]);
     } finally {
       setLoading(false);
     }
@@ -202,13 +217,18 @@ function TenantsPanel({ showNotification }) {
     }
   };
 
-  // Handle view tenant details
+  // FIXED: Handle view tenant details with React Router
   const handleViewTenant = (tenant) => {
-    setSelectedTenant(tenant.id);
+    navigate(`/tenants/${tenant.id}`);
   };
 
-  // Get apartment address by ID
+  // FIXED: Get apartment address by ID with safety checks
   const getApartmentAddress = (apartmentId) => {
+    // Safety check: ensure apartments is an array
+    if (!apartments || !Array.isArray(apartments)) {
+      return 'Not Assigned';
+    }
+
     const apartment = apartments.find(apt => apt.id === apartmentId);
     return apartment ? apartment.address : 'Not Assigned';
   };
@@ -233,17 +253,6 @@ function TenantsPanel({ showNotification }) {
   const handleItemsPerPageChange = (newItemsPerPage) => {
     setItemsPerPage(newItemsPerPage);
   };
-
-  // If a tenant is selected, show tenant details
-  if (selectedTenant) {
-    return (
-      <TenantDetails
-        tenantId={selectedTenant}
-        onBack={() => setSelectedTenant(null)}
-        showNotification={showNotification}
-      />
-    );
-  }
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>

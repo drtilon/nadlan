@@ -19,7 +19,7 @@ import {
   Lock as LockIcon,
   Close as CloseIcon
 } from '@mui/icons-material';
-import api from '../utils/api';
+import api from '../../utils/api';
 
 function PasswordChangeDialog({ open, onClose, userId, username, showNotification }) {
   const [password, setPassword] = useState('');

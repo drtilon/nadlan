@@ -94,9 +94,9 @@ def upload_contract():
         files = request.files.getlist("files")
         uploaded_contracts = []
 
-        # INCREASED file size limits for 32MB+ files
-        MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB per file (reasonable limit per file)
-        MAX_TOTAL_SIZE = 100 * 1024 * 1024  # 100MB for all files combined (increased from 50MB)
+        # Reduced file size limits for better reliability
+        MAX_FILE_SIZE = 50 * 1024 * 1024
+        MAX_TOTAL_SIZE = 50 * 1024 * 1024
 
         # Check total size of all files
         total_size = 0
@@ -108,7 +108,7 @@ def upload_contract():
 
         if total_size > MAX_TOTAL_SIZE:
             return jsonify({
-                "message": f"Total file size ({get_file_size_mb(total_size)}MB) exceeds maximum allowed size (100MB)"
+                "message": f"Total file size ({get_file_size_mb(total_size)}MB) exceeds maximum allowed size (50MB)"
             }), 413
 
         for file in files:
@@ -120,7 +120,7 @@ def upload_contract():
 
                 if file_size > MAX_FILE_SIZE:
                     return jsonify({
-                        "message": f"File '{file.filename}' ({get_file_size_mb(file_size)}MB) exceeds maximum file size (50MB)"
+                        "message": f"File '{file.filename}' ({get_file_size_mb(file_size)}MB) exceeds maximum file size (25MB)"
                     }), 413
 
                 # Skip empty files

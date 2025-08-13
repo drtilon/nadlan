@@ -43,7 +43,7 @@ import {
   Apartment as ApartmentIcon,
   Close as CloseIcon
 } from '@mui/icons-material';
-import api from '../utils/api';
+import api from '../../utils/api';
 
 function ContractManager({ showNotification }) {
   const [contracts, setContracts] = useState([]);

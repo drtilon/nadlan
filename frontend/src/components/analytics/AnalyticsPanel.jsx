@@ -58,7 +58,7 @@ import {
 } from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import PropTypes from 'prop-types';
-import api from '../utils/api';
+import api from '../../utils/api';
 
 const COLORS = {
   primary: '#3b82f6',

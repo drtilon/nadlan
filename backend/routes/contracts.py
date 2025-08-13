@@ -1,18 +1,15 @@
+# routes/contracts.py - FIXED VERSION
 import os
 import uuid
 from datetime import datetime
 from flask import Blueprint, request, jsonify, current_app, send_file, g
 from werkzeug.utils import secure_filename
-from models.models import Apartment
+from models.models import Apartment, Contract
 from extentions import db
 from .auth import token_required, role_required
 import json
 
-# Define new model for Contract
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, Text
-from models.models import Contract
-
-# Create a blueprint for contract management routes
+# Create a blueprint for contract management routes - FIXED BLUEPRINT NAME
 contracts_bp = Blueprint("contracts_bp", __name__)
 
 
@@ -120,7 +117,7 @@ def upload_contract():
 
                 if file_size > MAX_FILE_SIZE:
                     return jsonify({
-                        "message": f"File '{file.filename}' ({get_file_size_mb(file_size)}MB) exceeds maximum file size (25MB)"
+                        "message": f"File '{file.filename}' ({get_file_size_mb(file_size)}MB) exceeds maximum file size (50MB)"
                     }), 413
 
                 # Skip empty files
@@ -268,7 +265,6 @@ def delete_contract(contract_id):
         return jsonify({"message": "Error deleting contract", "error": str(e)}), 500
 
 
-# Optional: Update contract details
 @contracts_bp.route("/contracts/<int:contract_id>", methods=["PUT"])
 @token_required
 def update_contract(contract_id):
@@ -303,7 +299,6 @@ def update_contract(contract_id):
         return jsonify({"message": "Error updating contract", "error": str(e)}), 500
 
 
-# Get contract details
 @contracts_bp.route("/contracts/details/<int:contract_id>", methods=["GET"])
 @token_required
 def get_contract_details(contract_id):
@@ -335,7 +330,6 @@ def get_contract_details(contract_id):
         ), 500
 
 
-# Search contracts across all apartments
 @contracts_bp.route("/contracts/search", methods=["GET"])
 @token_required
 def search_contracts():

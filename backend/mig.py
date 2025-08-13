@@ -1,16 +1,10 @@
 #!/usr/bin/env python3
 """
-PRODUCTION-SAFE DATABASE MIGRATION SCRIPT
-Migrates database schema for 50MB upload support with proper backups and safety checks
+PRODUCTION-SAFE DATABASE MIGRATION SCRIPT (Modified for containers)
+Migrates database schema for 50MB upload support
 
 Usage:
-    python3 production_migration.py
-
-Prerequisites:
-    pip install pymysql
-
-Environment Variables:
-    None required - configuration is hardcoded from docker-compose settings
+    python3 mig_modified.py [--skip-backup]
 """
 
 import sys
@@ -33,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class ProductionMigration:
-    def __init__(self):
+    def __init__(self, skip_backup=False):
         """Initialize with hardcoded production configuration from docker-compose"""
         self.db_config = {
             'host': 'mysql',
@@ -45,16 +39,44 @@ class ProductionMigration:
         }
         self.conn = None
         self.backup_file = None
+        self.skip_backup = skip_backup
 
     def create_backup(self):
         """Create a complete database backup before migration"""
+        if self.skip_backup:
+            logger.warning("⚠️ SKIPPING BACKUP AS REQUESTED")
+            return True
+
+        # First try to find mysqldump
+        mysqldump_paths = [
+            'mysqldump',
+            '/usr/bin/mysqldump',
+            '/usr/local/bin/mysqldump',
+            '/usr/local/mysql/bin/mysqldump'
+        ]
+
+        mysqldump_cmd = None
+        for path in mysqldump_paths:
+            try:
+                result = subprocess.run([path, '--version'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    mysqldump_cmd = path
+                    logger.info(f"Found mysqldump at: {path}")
+                    break
+            except:
+                continue
+
+        if not mysqldump_cmd:
+            logger.warning("⚠️ mysqldump not found. Trying alternative backup method...")
+            return self.create_sql_backup()
+
         try:
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             self.backup_file = f"backup_before_50mb_migration_{timestamp}.sql"
 
             # Create mysqldump command
             cmd = [
-                'mysqldump',
+                mysqldump_cmd,
                 f'--host={self.db_config["host"]}',
                 f'--port={self.db_config["port"]}',
                 f'--user={self.db_config["user"]}',
@@ -85,6 +107,65 @@ class ProductionMigration:
 
         except Exception as e:
             logger.error(f"❌ Backup error: {e}")
+            return self.create_sql_backup()
+
+    def create_sql_backup(self):
+        """Alternative backup method using SQL commands"""
+        try:
+            logger.info("Using SQL-based backup method...")
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            self.backup_file = f"backup_tables_{timestamp}.sql"
+
+            conn = pymysql.connect(**self.db_config)
+            cursor = conn.cursor()
+
+            # Get all tables
+            cursor.execute("SHOW TABLES")
+            tables = [row[0] for row in cursor.fetchall()]
+
+            with open(self.backup_file, 'w') as f:
+                f.write(f"-- Backup created on {datetime.now()}\n")
+                f.write(f"-- Database: {self.db_config['database']}\n\n")
+
+                for table in tables:
+                    # Get CREATE TABLE statement
+                    cursor.execute(f"SHOW CREATE TABLE {table}")
+                    create_stmt = cursor.fetchone()[1]
+                    f.write(f"\n-- Table: {table}\n")
+                    f.write(f"DROP TABLE IF EXISTS {table};\n")
+                    f.write(f"{create_stmt};\n\n")
+
+                    # Get data
+                    cursor.execute(f"SELECT * FROM {table}")
+                    rows = cursor.fetchall()
+                    if rows:
+                        cursor.execute(f"SHOW COLUMNS FROM {table}")
+                        columns = [col[0] for col in cursor.fetchall()]
+
+                        for row in rows:
+                            values = []
+                            for val in row:
+                                if val is None:
+                                    values.append('NULL')
+                                elif isinstance(val, (int, float)):
+                                    values.append(str(val))
+                                else:
+                                    # Escape single quotes
+                                    val = str(val).replace("'", "''")
+                                    values.append(f"'{val}'")
+
+                            insert_stmt = f"INSERT INTO {table} ({','.join(columns)}) VALUES ({','.join(values)});"
+                            f.write(f"{insert_stmt}\n")
+
+            cursor.close()
+            conn.close()
+
+            backup_size = os.path.getsize(self.backup_file)
+            logger.info(f"✅ SQL backup created: {self.backup_file} ({backup_size:,} bytes)")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ SQL backup error: {e}")
             return False
 
     def connect(self):
@@ -165,8 +246,13 @@ class ProductionMigration:
         # Step 1: Create backup
         logger.info("\n📦 STEP 1: Creating backup...")
         if not self.create_backup():
-            logger.error("❌ MIGRATION ABORTED: Backup failed")
-            return False
+            if not self.skip_backup:
+                logger.error("❌ MIGRATION ABORTED: Backup failed")
+                logger.info("\n💡 TIP: You can run with --skip-backup flag to proceed without backup")
+                logger.info("   Or install mysql-client: apt-get update && apt-get install -y default-mysql-client")
+                return False
+            else:
+                logger.warning("⚠️ Proceeding without backup as requested")
 
         # Step 2: Connect to database
         logger.info("\n🔗 STEP 2: Connecting to database...")
@@ -294,25 +380,35 @@ class ProductionMigration:
         logger.info("✅ 50MB file upload support enabled")
         logger.info("✅ Enhanced payment system added")
         logger.info("✅ All existing data preserved")
-        logger.info(f"✅ Backup available: {self.backup_file}")
+        if self.backup_file:
+            logger.info(f"✅ Backup available: {self.backup_file}")
         logger.info("=" * 60)
 
         return True
 
 def main():
     """Main function for production migration"""
+    # Check for command line arguments
+    skip_backup = '--skip-backup' in sys.argv
+
     print("🏭 PRODUCTION DATABASE MIGRATION FOR 50MB SUPPORT")
     print("=" * 60)
 
-    print(f"Target: { 'mysql' }:{ 3306 }")
-    print(f"Database: { 'mydatabase' }")
-    print(f"User: { 'myuser' }")
+    print(f"Target: mysql:3306")
+    print(f"Database: mydatabase")
+    print(f"User: myuser")
     print()
+
+    if skip_backup:
+        print("⚠️ WARNING: Running with --skip-backup flag")
+        print("No backup will be created!")
+    else:
+        print("✅ Automatic backup will be created")
+
     print("⚠️ IMPORTANT:")
-    print("- Automatic backup will be created")
     print("- All existing data will be preserved")
     print("- Migration adds 50MB file upload support")
-    print("- Process is safe and reversible")
+    print("- Process is safe and reversible (if backup enabled)")
     print()
 
     # Confirm execution
@@ -327,7 +423,7 @@ def main():
 
     # Run migration
     try:
-        migrator = ProductionMigration()
+        migrator = ProductionMigration(skip_backup=skip_backup)
 
         if migrator.run_migration():
             print("\n🎊 MIGRATION SUCCESSFUL!")
@@ -336,7 +432,8 @@ def main():
             return 0
         else:
             print("\n💥 MIGRATION FAILED!")
-            print(f"Restore from backup: {migrator.backup_file}")
+            if migrator.backup_file:
+                print(f"Restore from backup: {migrator.backup_file}")
             return 1
 
     except Exception as e:

@@ -1,374 +1,482 @@
-import os
-import uuid
-from datetime import datetime
-from flask import Blueprint, request, jsonify, current_app, send_file, g
-from werkzeug.utils import secure_filename
-from models.models import Apartment
-from extentions import db
-from .auth import token_required, role_required
+# routes/analytics.py - COMPLETELY FIXED VERSION
 import json
+from datetime import datetime, timedelta
+from calendar import monthrange
+from flask import Blueprint, jsonify, current_app, g
+from models.models import Apartment, Payment, Tenant
+from .auth import token_required, role_required
+from sqlalchemy import func, extract, desc, or_, and_
+from itertools import groupby
+from operator import itemgetter
+from extentions import db
+from decimal import Decimal
 
-# Define new model for Contract
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, Text
-from models.models import Contract
-
-# Create a blueprint for contract management routes
-contracts_bp = Blueprint("contracts_bp", __name__)
-
-
-# Make sure the upload directory exists
-def ensure_upload_dir():
-    upload_dir = os.path.join(current_app.root_path, "uploads", "contracts")
-    if not os.path.exists(upload_dir):
-        os.makedirs(upload_dir)
-    return upload_dir
+analytics_bp = Blueprint("analytics_bp", __name__)
 
 
-# Helper function to check allowed file extensions
-def allowed_file(filename):
-    ALLOWED_EXTENSIONS = {"pdf", "doc", "docx", "txt", "jpg", "jpeg", "png"}
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-def get_file_size_mb(size_bytes):
-    """Convert bytes to MB for display"""
-    return round(size_bytes / (1024 * 1024), 2)
-
-
-@contracts_bp.route("/contracts/<int:apartment_id>", methods=["GET"])
+# ADMIN ONLY ANALYTICS ENDPOINTS - THESE REQUIRE ADMIN ROLE
+@analytics_bp.route("/analytics/summary", methods=["GET"])
 @token_required
-def get_contracts(apartment_id):
+@role_required("admin")  # ADMIN ONLY
+def get_analytics_summary():
     """
-    Get all contracts for a specific apartment
+    Returns a summary of key metrics including total apartments, occupancy rate,
+    total rent collected, and pending payments.
+    ADMIN ONLY ENDPOINT
     """
     try:
-        # Check if apartment exists
-        apartment = Apartment.query.get(apartment_id)
-        if not apartment:
-            return jsonify({"message": "Apartment not found"}), 404
+        # This endpoint should only be accessible to admins
+        total_apartments = Apartment.query.count()
 
-        # Get all contracts for this apartment
-        contracts = Contract.query.filter_by(apartment_id=apartment_id).all()
+        if total_apartments == 0:
+            return jsonify({
+                "total_apartments": 0,
+                "occupied_apartments": 0,
+                "vacant_apartments": 0,
+                "occupancy_rate": 0,
+                "total_monthly_rent": 0,
+                "collected_this_month": 0,
+                "pending_payments": 0,
+                "overdue_payments": 0
+            }), 200
 
-        # Convert contracts to dict format
-        contracts_data = [contract.to_dict() for contract in contracts]
+        # Occupancy statistics
+        occupied_apartments = Apartment.query.filter(or_(
+            Apartment.status == 'occupied',
+            Apartment.status == 'משוכר',
+            Apartment.status == 'Rented'
+        )).count()
 
-        return jsonify(contracts_data), 200
+        vacant_apartments = total_apartments - occupied_apartments
+        occupancy_rate = (occupied_apartments / total_apartments) * 100 if total_apartments > 0 else 0
+
+        # Financial statistics
+        total_monthly_rent = db.session.query(func.sum(Apartment.rent)).scalar() or 0
+
+        # Current month payment statistics - FIXED: Use paymentDate not payment_date
+        current_month = datetime.now().month
+        current_year = datetime.now().year
+
+        collected_this_month = db.session.query(func.sum(Payment.amount)).filter(
+            extract('month', Payment.paymentDate) == current_month,
+            extract('year', Payment.paymentDate) == current_year,
+            Payment.status == 'paid'
+        ).scalar() or 0
+
+        pending_payments = Payment.query.filter(Payment.status == 'pending').count()
+
+        # Overdue payments
+        overdue_payments = Payment.query.filter(
+            Payment.status.in_(['pending', 'not_paid']),
+            Payment.paymentDate < datetime.now() - timedelta(days=30)
+        ).count()
+
+        return jsonify({
+            "total_apartments": total_apartments,
+            "occupied_apartments": occupied_apartments,
+            "vacant_apartments": vacant_apartments,
+            "occupancy_rate": round(occupancy_rate, 2),
+            "total_monthly_rent": float(total_monthly_rent),
+            "collected_this_month": float(collected_this_month),
+            "pending_payments": pending_payments,
+            "overdue_payments": overdue_payments
+        }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error fetching contracts: {e}")
-        return jsonify({"message": "Error fetching contracts", "error": str(e)}), 500
+        current_app.logger.error(f"Error getting analytics summary: {e}")
+        return jsonify({"message": "Error getting analytics summary", "error": str(e)}), 500
 
 
-@contracts_bp.route("/upload", methods=["POST"])
+@analytics_bp.route("/analytics/payment-trends", methods=["GET"])
 @token_required
-def upload_contract():
+@role_required("admin")  # ADMIN ONLY
+def get_payment_trends():
     """
-    Upload one or more contract files for an apartment
+    Returns payment collection trends for the last 12 months including expected vs collected amounts.
+    ADMIN ONLY ENDPOINT
     """
     try:
-        # Check if files are included in the request
-        if "files" not in request.files:
-            return jsonify({"message": "No files provided"}), 400
+        # Get all payments for processing - FIXED: Use correct field names
+        all_payments = Payment.query.filter(Payment.paymentDate.isnot(None)).all()
 
-        # Get apartment ID from form data
-        apartment_id = request.form.get("apartmentId")
-        if not apartment_id:
-            return jsonify({"message": "Apartment ID is required"}), 400
+        # Prepare monthly data
+        months = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+        ]
 
-        # Check if apartment exists
-        apartment = Apartment.query.get(apartment_id)
-        if not apartment:
-            return jsonify({"message": "Apartment not found"}), 404
+        # Get current month index (0-based)
+        current_month_idx = datetime.now().month - 1
 
-        # Get notes from form data
-        notes = request.form.get("notes", "")
+        # Reorder months to show the last 12 months
+        last_12_months = months[current_month_idx:] + months[:current_month_idx]
 
-        # Get user ID from token (if available)
-        user_id = getattr(g, "user_id", None)
+        # Initialize monthly data structure
+        monthly_data = {}
+        for month in last_12_months:
+            monthly_data[month] = {
+                "expected": 0,
+                "collected": 0,
+                "count": {"paid": 0, "partial": 0, "not_paid": 0}
+            }
 
-        # Ensure upload directory exists
-        upload_dir = ensure_upload_dir()
+        # Process payments by month - FIXED: Use correct field names
+        for payment in all_payments:
+            if hasattr(payment, 'month') and payment.month in monthly_data:
+                month = payment.month
 
-        # Process each uploaded file
-        files = request.files.getlist("files")
-        uploaded_contracts = []
+                # Get expected amount from apartment rent
+                apartment = Apartment.query.get(payment.apartment_id)
+                expected_amount = float(apartment.rent) if apartment and apartment.rent else 0
+                monthly_data[month]["expected"] += expected_amount
 
-        # Reduced file size limits for better reliability
-        MAX_FILE_SIZE = 50 * 1024 * 1024
-        MAX_TOTAL_SIZE = 50 * 1024 * 1024
+                # Collected amount - FIXED: Use amount if available, otherwise calculate from tenants
+                if hasattr(payment, 'amount') and payment.amount:
+                    collected_amount = float(payment.amount)
+                else:
+                    # Calculate from tenants JSON
+                    try:
+                        tenants_data = json.loads(payment.tenants) if payment.tenants else []
+                        collected_amount = sum(float(tenant.get('amountPaid', 0)) for tenant in tenants_data)
+                    except:
+                        collected_amount = 0
 
-        # Check total size of all files
-        total_size = 0
-        for file in files:
-            file.seek(0, os.SEEK_END)
-            file_size = file.tell()
-            file.seek(0)
-            total_size += file_size
+                monthly_data[month]["collected"] += collected_amount
 
-        if total_size > MAX_TOTAL_SIZE:
-            return jsonify({
-                "message": f"Total file size ({get_file_size_mb(total_size)}MB) exceeds maximum allowed size (50MB)"
-            }), 413
+                # Count payment status
+                status = payment.status.lower() if payment.status else "not_paid"
+                if status in ["paid", "completed"]:
+                    monthly_data[month]["count"]["paid"] += 1
+                elif status in ["partial", "partially_paid"]:
+                    monthly_data[month]["count"]["partial"] += 1
+                else:
+                    monthly_data[month]["count"]["not_paid"] += 1
 
-        for file in files:
-            if file and file.filename and allowed_file(file.filename):
-                # Check individual file size
-                file.seek(0, os.SEEK_END)
-                file_size = file.tell()
-                file.seek(0)
+        # Format for chart data
+        chart_data = []
+        for month in last_12_months:
+            chart_data.append({
+                "month": month,
+                "expected": monthly_data[month]["expected"],
+                "collected": monthly_data[month]["collected"],
+                "paid": monthly_data[month]["count"]["paid"],
+                "partial": monthly_data[month]["count"]["partial"],
+                "not_paid": monthly_data[month]["count"]["not_paid"],
+            })
 
-                if file_size > MAX_FILE_SIZE:
-                    return jsonify({
-                        "message": f"File '{file.filename}' ({get_file_size_mb(file_size)}MB) exceeds maximum file size (25MB)"
-                    }), 413
+        return jsonify(chart_data), 200
 
-                # Skip empty files
-                if file_size == 0:
-                    current_app.logger.warning(f"Skipping empty file: {file.filename}")
-                    continue
+    except Exception as e:
+        current_app.logger.error(f"Error getting payment trends: {e}")
+        return jsonify({"message": "Error getting payment trends", "error": str(e)}), 500
 
-                # Secure the filename and generate a unique name
-                original_filename = secure_filename(file.filename)
-                if not original_filename:
-                    current_app.logger.warning(f"Invalid filename, skipping file")
-                    continue
 
-                filename_parts = os.path.splitext(original_filename)
-                unique_filename = (
-                    f"{filename_parts[0]}_{uuid.uuid4().hex}{filename_parts[1]}"
-                )
+@analytics_bp.route("/analytics/apartment-metrics", methods=["GET"])
+@token_required
+@role_required("admin")  # ADMIN ONLY
+def get_apartment_metrics():
+    """
+    Returns metrics for individual apartments including occupancy status,
+    rent collection, and net profit calculations.
+    ADMIN ONLY ENDPOINT
+    """
+    try:
+        apartments = Apartment.query.all()
+        apartment_metrics = []
 
-                # Create file path
-                file_path = os.path.join(upload_dir, unique_filename)
+        for apartment in apartments:
+            # Calculate metrics for each apartment - FIXED: Use correct field names
+            if hasattr(Payment, 'amount'):
+                # Use individual payment amounts
+                total_payments = db.session.query(func.sum(Payment.amount)).filter(
+                    Payment.apartment_id == apartment.id,
+                    Payment.status.in_(['paid', 'completed'])
+                ).scalar() or 0
+            else:
+                # Calculate from tenants JSON
+                payments = Payment.query.filter(
+                    Payment.apartment_id == apartment.id,
+                    Payment.status.in_(['paid', 'completed'])
+                ).all()
 
-                try:
-                    # Save the file in chunks to handle large files better
-                    with open(file_path, 'wb') as f:
-                        chunk_size = 8192  # 8KB chunks
-                        while True:
-                            chunk = file.read(chunk_size)
-                            if not chunk:
-                                break
-                            f.write(chunk)
-
-                    # Verify file was saved successfully
-                    if not os.path.exists(file_path):
-                        current_app.logger.error(f"File was not saved successfully: {file_path}")
+                total_payments = 0
+                for payment in payments:
+                    try:
+                        if payment.tenants:
+                            tenants_data = json.loads(payment.tenants)
+                            total_payments += sum(float(tenant.get('amountPaid', 0)) for tenant in tenants_data)
+                    except:
                         continue
 
-                    # Get actual file size after saving
-                    actual_file_size = os.path.getsize(file_path)
-                    file_extension = os.path.splitext(original_filename)[1].lstrip(".")
+            # Get recent payment status - FIXED: Use paymentDate not payment_date
+            recent_payment = Payment.query.filter(
+                Payment.apartment_id == apartment.id
+            ).order_by(Payment.paymentDate.desc()).first()
 
-                    # Create contract record in database
-                    contract = Contract(
-                        apartment_id=apartment_id,
-                        file_path=file_path,
-                        file_name=original_filename,
-                        file_size=actual_file_size,
-                        file_type=file_extension,
-                        notes=notes,
-                        uploaded_by=user_id,
-                    )
+            payment_status = recent_payment.status if recent_payment else "no_payments"
 
-                    db.session.add(contract)
-                    uploaded_contracts.append(contract)
+            apartment_metrics.append({
+                "id": apartment.id,
+                "address": apartment.address,
+                "rent": float(apartment.rent or 0),
+                "status": apartment.status,
+                "total_collected": float(total_payments),
+                "payment_status": payment_status,
+                "tenant_name": getattr(apartment, 'current_tenant_name', None),
+                "contract_end_date": apartment.contractEndDate.isoformat() if apartment.contractEndDate else None
+            })
 
-                    current_app.logger.info(f"Successfully saved file: {original_filename} ({get_file_size_mb(actual_file_size)}MB)")
-
-                except Exception as file_error:
-                    current_app.logger.error(f"Error saving file {original_filename}: {file_error}")
-                    # Clean up partially saved file if it exists
-                    if os.path.exists(file_path):
-                        try:
-                            os.remove(file_path)
-                        except:
-                            pass
-                    continue
-
-            elif file and file.filename:
-                return jsonify({"message": f"Invalid file type: {file.filename}. Allowed types: PDF, DOC, DOCX, TXT, JPG, JPEG, PNG"}), 400
-
-        if not uploaded_contracts:
-            return jsonify({"message": "No valid files were uploaded"}), 400
-
-        # Commit changes to database
-        db.session.commit()
-
-        return jsonify(
-            {
-                "message": f"{len(uploaded_contracts)} contract(s) uploaded successfully",
-                "contracts": [contract.to_dict() for contract in uploaded_contracts],
-            }
-        ), 201
+        return jsonify(apartment_metrics), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error uploading contracts: {e}")
-        db.session.rollback()
-        return jsonify({"message": "Error uploading contracts", "error": str(e)}), 500
+        current_app.logger.error(f"Error getting apartment metrics: {e}")
+        return jsonify({"message": "Error getting apartment metrics", "error": str(e)}), 500
 
 
-@contracts_bp.route("/download/<int:contract_id>", methods=["GET"])
+@analytics_bp.route("/analytics/expense-breakdown", methods=["GET"])
 @token_required
-def download_contract(contract_id):
+@role_required("admin")  # ADMIN ONLY
+def get_expense_breakdown():
     """
-    Download a specific contract file
+    Returns expense breakdown by category for the last 12 months.
+    ADMIN ONLY ENDPOINT
     """
     try:
-        # Find the contract in the database
-        contract = Contract.query.get(contract_id)
-        if not contract:
-            return jsonify({"message": "Contract not found"}), 404
+        # Get all payments for processing
+        all_payments = Payment.query.all()
 
-        # Check if file exists
-        if not os.path.exists(contract.file_path):
-            return jsonify({"message": "Contract file not found on server"}), 404
+        # Prepare monthly data
+        months = [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+        ]
 
-        # Return the file
-        return send_file(
-            contract.file_path, download_name=contract.file_name, as_attachment=True
-        )
+        # Get current month index (0-based)
+        current_month_idx = datetime.now().month - 1
+
+        # Reorder months to show the last 12 months
+        last_12_months = months[current_month_idx:] + months[:current_month_idx]
+
+        # Initialize data
+        expense_data = []
+
+        for month in last_12_months:
+            month_payments = [p for p in all_payments if hasattr(p, 'month') and p.month == month]
+
+            # Sum up expenses for the month
+            internet_total = sum(float(p.internet or 0) for p in month_payments if hasattr(p, 'internet'))
+            electricity_total = sum(float(p.electricity or 0) for p in month_payments if hasattr(p, 'electricity'))
+            other_total = sum(float(p.other or 0) for p in month_payments if hasattr(p, 'other'))
+
+            expense_data.append({
+                "month": month,
+                "internet": internet_total,
+                "electricity": electricity_total,
+                "other": other_total,
+                "total": internet_total + electricity_total + other_total,
+            })
+
+        return jsonify(expense_data), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error downloading contract: {e}")
-        return jsonify({"message": "Error downloading contract", "error": str(e)}), 500
+        current_app.logger.error(f"Error getting expense analytics: {e}")
+        return jsonify({"message": "Error getting expense analytics", "error": str(e)}), 500
 
 
-@contracts_bp.route("/contracts/<int:contract_id>", methods=["DELETE"])
+# FIXED: Add the missing tenant-payments endpoint
+@analytics_bp.route("/analytics/tenant-payments", methods=["GET"])
 @token_required
-def delete_contract(contract_id):
+@role_required("admin")  # ADMIN ONLY
+def get_tenant_payment_analytics():
     """
-    Delete a specific contract
+    Get tenant payment analytics
+    ADMIN ONLY ENDPOINT
     """
     try:
-        # Find the contract in the database
-        contract = Contract.query.get(contract_id)
-        if not contract:
-            return jsonify({"message": "Contract not found"}), 404
+        # Get all tenants with their payment history
+        tenants = Tenant.query.all()
+        tenant_payment_data = []
 
-        # First delete the file from storage
-        if os.path.exists(contract.file_path):
-            try:
-                os.remove(contract.file_path)
-                current_app.logger.info(f"Deleted file: {contract.file_path}")
-            except Exception as file_error:
-                current_app.logger.error(f"Error deleting file {contract.file_path}: {file_error}")
-                # Continue with database deletion even if file deletion fails
+        for tenant in tenants:
+            # Get payments for this tenant's apartment
+            if tenant.apartment_id:
+                payments = Payment.query.filter(
+                    Payment.apartment_id == tenant.apartment_id,
+                    Payment.status.in_(['paid', 'completed'])
+                ).all()
 
-        # Then delete the database record
-        db.session.delete(contract)
-        db.session.commit()
+                total_paid = 0
+                payment_count = len(payments)
 
-        return jsonify({"message": "Contract deleted successfully"}), 200
+                for payment in payments:
+                    # Check if tenant is in this payment
+                    try:
+                        if payment.tenants:
+                            tenants_data = json.loads(payment.tenants)
+                            for tenant_data in tenants_data:
+                                if tenant_data.get('name') == tenant.name:
+                                    total_paid += float(tenant_data.get('amountPaid', 0))
+                    except:
+                        continue
+
+                tenant_payment_data.append({
+                    "tenant_id": tenant.id,
+                    "tenant_name": tenant.name,
+                    "apartment_id": tenant.apartment_id,
+                    "total_paid": total_paid,
+                    "payment_count": payment_count,
+                    "average_payment": round(total_paid / payment_count, 2) if payment_count > 0 else 0
+                })
+
+        return jsonify(tenant_payment_data), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error deleting contract: {e}")
-        db.session.rollback()
-        return jsonify({"message": "Error deleting contract", "error": str(e)}), 500
+        current_app.logger.error(f"Error getting tenant payment analytics: {e}")
+        return jsonify({"message": "Error getting tenant payment analytics", "error": str(e)}), 500
 
 
-# Optional: Update contract details
-@contracts_bp.route("/contracts/<int:contract_id>", methods=["PUT"])
+# USER ANALYTICS ENDPOINTS - Available to all users but filtered by their access
+@analytics_bp.route("/user-analytics/summary", methods=["GET"])
 @token_required
-def update_contract(contract_id):
+def get_user_analytics_summary():
     """
-    Update contract metadata (notes)
+    Get analytics summary for regular users (filtered by their access)
+    Available to all authenticated users
     """
     try:
-        # Get request data
-        data = request.get_json()
-        if not data:
-            return jsonify({"message": "No data provided"}), 400
+        user_role = g.user.get("role", "limited")
+        user_id = g.user.get("sub")
 
-        # Find the contract in the database
-        contract = Contract.query.get(contract_id)
-        if not contract:
-            return jsonify({"message": "Contract not found"}), 404
+        # Filter query based on user role
+        if user_role != "admin":
+            # Regular users see all properties but with limited data
+            # You can add filtering based on your business logic
+            base_query = Apartment.query
+        else:
+            # Admins see all
+            base_query = Apartment.query
 
-        # Update notes field
-        if "notes" in data:
-            contract.notes = data["notes"]
+        total_properties = base_query.count()
 
-        # Commit changes
-        db.session.commit()
+        if total_properties == 0:
+            return jsonify({
+                "total_properties": 0,
+                "occupied": 0,
+                "vacant": 0,
+                "occupancy_rate": 0,
+                "expiring_soon": 0,
+                "total_rent": 0 if user_role == "admin" else None
+            }), 200
 
-        return jsonify(
-            {"message": "Contract updated successfully", "contract": contract.to_dict()}
-        ), 200
+        occupied = base_query.filter(or_(
+            Apartment.status == 'occupied',
+            Apartment.status == 'משוכר',
+            Apartment.status == 'Rented'
+        )).count()
 
-    except Exception as e:
-        current_app.logger.error(f"Error updating contract: {e}")
-        db.session.rollback()
-        return jsonify({"message": "Error updating contract", "error": str(e)}), 500
+        vacant = base_query.filter(or_(
+            Apartment.status == 'vacant',
+            Apartment.status == 'פנוי',
+            Apartment.status == 'Available'
+        )).count()
 
+        # Contracts expiring in next 30 days
+        thirty_days_later = datetime.now().date() + timedelta(days=30)
+        expiring_soon = base_query.filter(
+            and_(
+                Apartment.contractEndDate.isnot(None),
+                Apartment.contractEndDate <= thirty_days_later,
+                Apartment.contractEndDate >= datetime.now().date()
+            )
+        ).count()
 
-# Get contract details
-@contracts_bp.route("/contracts/details/<int:contract_id>", methods=["GET"])
-@token_required
-def get_contract_details(contract_id):
-    """
-    Get detailed information about a specific contract
-    """
-    try:
-        # Find the contract in the database
-        contract = Contract.query.get(contract_id)
-        if not contract:
-            return jsonify({"message": "Contract not found"}), 404
-
-        # Get apartment details
-        apartment = Apartment.query.get(contract.apartment_id)
-
-        # Create extended contract details
-        contract_details = contract.to_dict()
-        contract_details["apartment"] = {
-            "id": apartment.id,
-            "address": apartment.address,
+        # Total rent (only for admins)
+        result = {
+            "total_properties": total_properties,
+            "occupied": occupied,
+            "vacant": vacant,
+            "occupancy_rate": round((occupied / total_properties * 100) if total_properties > 0 else 0, 2),
+            "expiring_soon": expiring_soon
         }
 
-        return jsonify(contract_details), 200
+        if user_role == "admin":
+            total_rent = base_query.with_entities(func.sum(Apartment.rent)).scalar() or 0
+            result["total_rent"] = float(total_rent)
+
+        return jsonify(result), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error getting contract details: {e}")
-        return jsonify(
-            {"message": "Error getting contract details", "error": str(e)}
-        ), 500
+        current_app.logger.error(f"Error getting user analytics summary: {e}")
+        return jsonify({"message": "Error getting analytics summary", "error": str(e)}), 500
 
 
-# Search contracts across all apartments
-@contracts_bp.route("/contracts/search", methods=["GET"])
+@analytics_bp.route("/user-analytics/properties", methods=["GET"])
 @token_required
-def search_contracts():
+def get_user_property_analytics():
     """
-    Search for contracts across all apartments based on filename or notes
+    Get property analytics for regular users (filtered by their access)
+    Available to all authenticated users
     """
     try:
-        query = request.args.get("q", "")
-        if not query:
-            return jsonify([]), 200
+        user_role = g.user.get("role", "limited")
+        user_id = g.user.get("sub")
 
-        # Search for contracts matching the query
-        contracts = Contract.query.filter(
-            (Contract.file_name.ilike(f"%{query}%"))
-            | (Contract.notes.ilike(f"%{query}%"))
-        ).all()
+        # Filter query based on user role
+        base_query = Apartment.query
 
-        # Convert contracts to dict format
-        contracts_data = []
-        for contract in contracts:
-            contract_dict = contract.to_dict()
+        # Property status distribution
+        status_distribution = base_query.with_entities(
+            Apartment.status,
+            func.count(Apartment.id).label('count')
+        ).group_by(Apartment.status).all()
 
-            # Add apartment address
-            apartment = Apartment.query.get(contract.apartment_id)
-            contract_dict["apartmentAddress"] = (
-                apartment.address if apartment else "Unknown"
-            )
+        property_data = []
+        for status, count in status_distribution:
+            property_data.append({
+                "status": status,
+                "count": count
+            })
 
-            contracts_data.append(contract_dict)
-
-        return jsonify(contracts_data), 200
+        return jsonify({
+            "property_distribution": property_data
+        }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error searching contracts: {e}")
-        return jsonify({"message": "Error searching contracts", "error": str(e)}), 500
+        current_app.logger.error(f"Error getting user property analytics: {e}")
+        return jsonify({"message": "Error getting property analytics", "error": str(e)}), 500
 
+
+@analytics_bp.route("/user-analytics/tenants", methods=["GET"])
+@token_required
+def get_user_tenant_analytics():
+    """
+    Get tenant analytics for regular users
+    Available to all authenticated users
+    """
+    try:
+        user_role = g.user.get("role", "limited")
+        user_id = g.user.get("sub")
+
+        # Get all tenants
+        total_tenants = Tenant.query.count()
+
+        # Get tenants with upcoming lease expiry (next 30 days)
+        thirty_days_later = datetime.now().date() + timedelta(days=30)
+
+        # Count apartments with expiring contracts (as proxy for tenant leases)
+        expiring_leases = Apartment.query.filter(
+            and_(
+                Apartment.contractEndDate.isnot(None),
+                Apartment.contractEndDate <= thirty_days_later,
+                Apartment.contractEndDate >= datetime.now().date()
+            )
+        ).count()
+
+        return jsonify({
+            "total_tenants": total_tenants,
+            "expiring_leases": expiring_leases
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error getting user tenant analytics: {e}")
+        return jsonify({"message": "Error getting tenant analytics", "error": str(e)}), 500

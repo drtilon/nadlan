@@ -1,4 +1,4 @@
-// Professional MainLayout.jsx with sophisticated design
+// Complete Fixed MainLayout.jsx with proper access controls
 import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -96,7 +96,7 @@ function MainLayout({ onLogout }) {
     setMobileOpen(!mobileOpen);
   };
 
-  // Navigation items
+  // FIXED Navigation items with proper role-based access control
   const navItems = [
     { id: 1, title: 'Properties', icon: <HomeIcon />, path: 'dashboard', adminOnly: false },
     { id: 3, title: 'Tenants', icon: <PersonIcon />, path: 'tenants', adminOnly: false },
@@ -107,30 +107,31 @@ function MainLayout({ onLogout }) {
       title: 'Contracts',
       icon: <DescriptionIcon />,
       hasChildren: true,
-      adminOnly: false, // Changed from true to false - now available to all users
+      adminOnly: false,
       children: [
         { id: 61, title: 'Generate Contract', icon: <DriveFileRenameOutlineIcon />, path: 'contracts/generate' },
         { id: 62, title: 'Contract Manager', icon: <FileOpenIcon />, path: 'contracts/manage' },
       ]
     },
-    userIsAdmin ? {
+    // FIXED: Proper analytics menu based on user role
+    ...(userIsAdmin ? [{
       id: 7,
       title: 'Analytics',
       icon: <InsightsIcon />,
       hasChildren: true,
       adminOnly: false,
       children: [
-        { id: 71, title: 'Admin Analytics', icon: <BarChartIcon />, path: 'analytics' },
-        { id: 72, title: 'Property Dashboard', icon: <TrendingUpIcon />, path: 'user-analytics' }
+        { id: 71, title: 'Admin Analytics', icon: <BarChartIcon />, path: 'analytics', adminOnly: true },
+        { id: 72, title: 'Property Dashboard', icon: <TrendingUpIcon />, path: 'user-analytics', adminOnly: false }
       ]
-    } : {
+    }] : [{
       id: 7,
       title: 'Analytics',
       icon: <InsightsIcon />,
       path: 'user-analytics',
       hasChildren: false,
       adminOnly: false
-    },
+    }]),
     { id: 8, title: 'Admin Panel', icon: <AdminPanelSettingsIcon />, path: 'admin', adminOnly: true },
     { id: 9, title: 'System Logs', icon: <AssessmentIcon />, path: 'logs', adminOnly: true },
   ];
@@ -309,45 +310,49 @@ function MainLayout({ onLogout }) {
 
                   <Collapse
                     in={item.title === 'Contracts' ? contractsMenuOpen : analyticsMenuOpen}
-                    timeout={200}
+                    timeout="auto"
                     unmountOnExit
                   >
-                    <List component="div" disablePadding sx={{ pl: 2 }}>
-                      {item.children && item.children.map(child => (
-                        <ListItem key={child.id} disablePadding sx={{ mb: 0.5 }}>
-                          <ListItemButton
-                            onClick={() => navigateTo(child.path)}
-                            sx={{
-                              borderRadius: 1,
-                              py: 1,
-                              px: 1.5,
-                              backgroundColor: location.pathname.includes(child.path)
-                                ? '#eff6ff'
-                                : 'transparent',
-                              '&:hover': {
-                                backgroundColor: '#f9fafb'
-                              }
-                            }}
-                          >
-                            <ListItemIcon sx={{
-                              minWidth: 36,
-                              color: location.pathname.includes(child.path)
-                                ? '#2563eb'
-                                : '#9ca3af'
-                            }}>
-                              {child.icon}
-                            </ListItemIcon>
-                            <ListItemText
-                              primary={child.title}
-                              primaryTypographyProps={{
-                                fontWeight: location.pathname.includes(child.path) ? 600 : 400,
-                                fontSize: '0.85rem',
-                                color: '#4b5563'
+                    <List component="div" disablePadding>
+                      {item.children
+                        .filter(child => !child.adminOnly || userIsAdmin) // FIXED: Filter children by admin access
+                        .map((child) => (
+                          <ListItem key={child.id} disablePadding sx={{ pl: 2 }}>
+                            <ListItemButton
+                              onClick={() => navigateTo(child.path)}
+                              sx={{
+                                borderRadius: 1,
+                                py: 1,
+                                px: 1.5,
+                                ml: 2,
+                                backgroundColor: isActivePath(child.path)
+                                  ? '#eff6ff'
+                                  : 'transparent',
+                                borderLeft: isActivePath(child.path) ? '3px solid #2563eb' : '3px solid transparent',
+                                '&:hover': {
+                                  backgroundColor: '#f9fafb'
+                                }
                               }}
-                            />
-                          </ListItemButton>
-                        </ListItem>
-                      ))}
+                            >
+                              <ListItemIcon sx={{
+                                minWidth: 32,
+                                color: isActivePath(child.path)
+                                  ? '#2563eb'
+                                  : '#6b7280'
+                              }}>
+                                {child.icon}
+                              </ListItemIcon>
+                              <ListItemText
+                                primary={child.title}
+                                primaryTypographyProps={{
+                                  fontWeight: isActivePath(child.path) ? 600 : 500,
+                                  fontSize: '0.85rem',
+                                  color: '#374151'
+                                }}
+                              />
+                            </ListItemButton>
+                          </ListItem>
+                        ))}
                     </List>
                   </Collapse>
                 </React.Fragment>
@@ -428,77 +433,75 @@ function MainLayout({ onLogout }) {
           width: { lg: `calc(100% - ${drawerWidth}px)` },
           ml: { lg: `${drawerWidth}px` },
           backgroundColor: '#ffffff',
-          borderBottom: '1px solid #e0e0e0',
           color: '#1a1a1a',
+          borderBottom: '1px solid #e0e0e0',
+          boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)'
         }}
       >
-        <Toolbar sx={{ minHeight: '64px !important', px: 3 }}>
+        <Toolbar sx={{ minHeight: '64px !important', justifyContent: 'space-between' }}>
+          {/* Mobile Menu Button */}
           <IconButton
             color="inherit"
-            aria-label="open drawer"
             edge="start"
             onClick={handleDrawerToggle}
-            sx={{
-              mr: 2,
-              display: { lg: 'none' },
-              color: '#6b7280'
-            }}
+            sx={{ mr: 2, display: { lg: 'none' } }}
           >
             <MenuIcon />
           </IconButton>
 
-          <Typography
-            variant="h6"
-            noWrap
-            component="div"
-            sx={{
-              display: { xs: 'block', lg: 'none' },
-              fontWeight: 600,
-              color: '#1a1a1a'
-            }}
-          >
-            Shefa UG
+          {/* Page Title */}
+          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1, fontWeight: 500 }}>
+            {currentPath === 'dashboard' ? 'Properties' :
+             currentPath === 'user-analytics' ? 'Property Dashboard' :
+             currentPath === 'analytics' ? 'Admin Analytics' :
+             currentPath.charAt(0).toUpperCase() + currentPath.slice(1)}
           </Typography>
 
-          <Box sx={{ flexGrow: 1 }} />
-
-          {/* Professional Action Buttons */}
+          {/* Right side buttons */}
           <Stack direction="row" spacing={1} alignItems="center">
+            {/* Notifications */}
+            <Tooltip title="Notifications">
+              <IconButton
+                color="inherit"
+                onClick={handleNotificationMenuOpen}
+                sx={{
+                  p: 1,
+                  '&:hover': { backgroundColor: alpha('#000', 0.04) }
+                }}
+              >
+                <Badge badgeContent={notifications.length} color="error">
+                  <NotificationsIcon sx={{ fontSize: '1.25rem' }} />
+                </Badge>
+              </IconButton>
+            </Tooltip>
+
+            {/* User Menu */}
             <Button
               onClick={handleUserMenuOpen}
-              sx={{
-                ml: 2,
-                p: 1,
-                borderRadius: 1,
-                border: '1px solid #e5e7eb',
-                backgroundColor: '#ffffff',
-                color: '#374151',
-                textTransform: 'none',
-                '&:hover': {
-                  backgroundColor: '#f9fafb',
-                  borderColor: '#d1d5db'
-                }
-              }}
               startIcon={
                 <Avatar
                   sx={{
-                    width: 28,
-                    height: 28,
+                    width: 32,
+                    height: 32,
                     backgroundColor: '#2563eb',
-                    fontSize: '0.75rem',
-                    fontWeight: 600
+                    fontSize: '0.875rem'
                   }}
                 >
                   {userName.charAt(0).toUpperCase()}
                 </Avatar>
               }
-              endIcon={<KeyboardArrowDownIcon sx={{ fontSize: '1rem' }} />}
+              endIcon={<KeyboardArrowDownIcon />}
+              sx={{
+                color: '#374151',
+                textTransform: 'none',
+                '&:hover': { backgroundColor: alpha('#000', 0.04) }
+              }}
             >
-              <Box sx={{ display: { xs: 'none', md: 'block' }, textAlign: 'left' }}>
-                <Typography variant="body2" fontWeight={500} sx={{ lineHeight: 1.2 }}>
+              <Box sx={{ textAlign: 'left', ml: 1 }}>
+                <Typography variant="body2" fontWeight={500}>
                   {userName}
                 </Typography>
-                <Typography variant="caption" color="#6b7280" sx={{ lineHeight: 1 }}>
+                <Typography variant="caption" color="#6b7280">
                   {userIsAdmin ? 'Admin' : 'User'}
                 </Typography>
               </Box>

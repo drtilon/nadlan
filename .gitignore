@@ -25,6 +25,11 @@ backend.txt
 frontend.txt
 logs/
 
+backend/uploads/contracts/
+backend/uploads/templates/
+
+nginx/ssl/
+
 # OS Generated Files
 .DS_Store
 Thumbs.db

@@ -95,8 +95,8 @@ def upload_contract():
         uploaded_contracts = []
 
         # Reduced file size limits for better reliability
-        MAX_FILE_SIZE = 25 * 1024 * 1024  # 25MB per file (reduced from 50MB)
-        MAX_TOTAL_SIZE = 50 * 1024 * 1024  # 50MB for all files combined (reduced from 100MB)
+        MAX_FILE_SIZE = 50 * 1024 * 1024
+        MAX_TOTAL_SIZE = 50 * 1024 * 1024
 
         # Check total size of all files
         total_size = 0

@@ -946,3 +946,75 @@ def create_new_payment_period(apartment_id: int) -> Tuple[Response, int]:
         )
 
         return jsonify({"message": "Error creating new payment period", "error": str(e)}), 500
+@apartments_bp.route("/apartments/all", methods=["GET"])
+@token_required
+def get_all_apartments() -> Tuple[Response, int]:
+    """
+    Get all apartments without pagination - for contract manager and similar use cases.
+    Returns simplified apartment data optimized for dropdowns and selection lists.
+    """
+    try:
+        # Get optional search parameter
+        search = request.args.get("search", "").strip()
+
+        # Build base query - get only essential fields for performance
+        query = db.session.query(
+            Apartment.id,
+            Apartment.address,
+            Apartment.status
+        )
+
+        # Add user-specific filtering (if not admin)
+        role = g.user.get("role", "limited")
+        if role != "admin":
+            # Add user-specific filtering logic here if needed
+            pass
+
+        # Apply search filter if provided
+        if search:
+            query = query.filter(Apartment.address.ilike(f"%{search}%"))
+
+        # Order by address for consistent sorting
+        query = query.order_by(asc(Apartment.address))
+
+        # Execute query
+        apartments = query.all()
+
+        # Convert to simplified format
+        apartments_data = []
+        for apt in apartments:
+            # Get basic tenant info for display
+            tenants = Tenant.query.filter_by(apartment_id=apt.id).all()
+            tenant_names = []
+
+            for tenant in tenants:
+                if tenant.name:
+                    tenant_names.append(tenant.name)
+                elif hasattr(tenant, 'first_name') and hasattr(tenant, 'last_name'):
+                    full_name = f"{tenant.first_name or ''} {tenant.last_name or ''}".strip()
+                    if full_name:
+                        tenant_names.append(full_name)
+
+            apartments_data.append({
+                'id': apt.id,
+                'address': apt.address,
+                'status': apt.status,
+                'tenants': ', '.join(tenant_names) if tenant_names else 'No tenants'
+            })
+
+        # Log the activity
+        ActivityLogger.log_activity(
+            action="list_all",
+            entity_type="apartment",
+            details={
+                "total_count": len(apartments_data),
+                "search": search if search else None,
+                "endpoint": "/apartments/all"
+            }
+        )
+
+        return jsonify(apartments_data), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error listing all apartments: {e}")
+        return jsonify({"message": "Error listing apartments", "error": str(e)}), 500

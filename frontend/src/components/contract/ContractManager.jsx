@@ -78,7 +78,11 @@ function ContractManager({ showNotification }) {
   const fetchApartments = async () => {
     setLoading(true);
     try {
-      // First, get the first page to know total count
+      // Option 1: Use the new /apartments/all endpoint (if implemented)
+      // const response = await api.get('/apartments/all');
+      // const apartmentsData = response.data || [];
+
+      // Option 2: Use pagination to get all apartments (current implementation)
       const firstResponse = await api.get('/list?page=0&limit=100');
       console.log('Apartments API response:', firstResponse.data);
 

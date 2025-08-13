@@ -1,23 +1,20 @@
 version: '3.8'
 
 services:
-  # Simplified nginx - Cloudflare handles SSL
   nginx:
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
-      # SSL volume removed - Cloudflare handles SSL
     ports:
       - "80:80"
-      # Port 443 removed - Cloudflare handles HTTPS
+      # Remove port 443 since we don't use HTTPS
+    restart: unless-stopped
 
   backend:
+    restart: unless-stopped
     environment:
       - FLASK_ENV=production
 
   frontend:
+    restart: unless-stopped
     environment:
-      - VITE_HOST=0.0.0.0
-      - VITE_PORT=3001
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
+      - NODE_ENV=production

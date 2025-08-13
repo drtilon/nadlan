@@ -38,7 +38,7 @@ import {
   Close as CloseIcon,
   Refresh as RefreshIcon
 } from '@mui/icons-material';
-import api from '../../utils/api';
+import api from '../utils/api';
 
 function ContractManager({ showNotification }) {
   const [apartments, setApartments] = useState([]);
@@ -61,13 +61,16 @@ function ContractManager({ showNotification }) {
 
   // Filter apartments based on search query
   useEffect(() => {
-    if (searchQuery && Array.isArray(apartments)) {
-      const filtered = apartments.filter(apt =>
-        apt.address && apt.address.toLowerCase().includes(searchQuery.toLowerCase())
+    // Ensure apartments is always an array before filtering
+    const apartmentsArray = Array.isArray(apartments) ? apartments : [];
+
+    if (searchQuery) {
+      const filtered = apartmentsArray.filter(apt =>
+        apt && apt.address && apt.address.toLowerCase().includes(searchQuery.toLowerCase())
       );
       setFilteredApartments(filtered);
     } else {
-      setFilteredApartments(Array.isArray(apartments) ? apartments : []);
+      setFilteredApartments(apartmentsArray);
     }
   }, [searchQuery, apartments]);
 
@@ -75,13 +78,38 @@ function ContractManager({ showNotification }) {
   const fetchApartments = async () => {
     setLoading(true);
     try {
-      const response = await api.get('/list');
-      console.log('Apartments API response:', response.data); // Debug log
+      // First, get the first page to know total count
+      const firstResponse = await api.get('/list?page=0&limit=100');
+      console.log('Apartments API response:', firstResponse.data);
 
-      // Ensure we always have an array
-      const apartmentsData = Array.isArray(response.data) ? response.data : [];
-      setApartments(apartmentsData);
-      setFilteredApartments(apartmentsData);
+      let allApartments = firstResponse.data?.apartments || [];
+      const totalItems = firstResponse.data?.pagination?.totalItems || firstResponse.data?.total || 0;
+
+      // If there are more apartments than what we got, fetch all pages
+      if (totalItems > allApartments.length) {
+        const totalPages = Math.ceil(totalItems / 100);
+        const additionalRequests = [];
+
+        // Create requests for remaining pages
+        for (let page = 1; page < totalPages; page++) {
+          additionalRequests.push(api.get(`/list?page=${page}&limit=100`));
+        }
+
+        // Fetch all remaining pages
+        const additionalResponses = await Promise.all(additionalRequests);
+
+        // Combine all apartments
+        additionalResponses.forEach(response => {
+          if (response.data?.apartments) {
+            allApartments = [...allApartments, ...response.data.apartments];
+          }
+        });
+      }
+
+      console.log('Total apartments loaded:', allApartments.length);
+
+      setApartments(allApartments);
+      setFilteredApartments(allApartments);
     } catch (error) {
       console.error('Error fetching apartments:', error);
       showNotification('Failed to load apartments', 'error');
@@ -255,7 +283,7 @@ function ContractManager({ showNotification }) {
 
   // Get tenant names for display
   const getTenantNames = (apartment) => {
-    if (!apartment.tenants) return 'No tenants';
+    if (!apartment || !apartment.tenants) return 'No tenants';
 
     if (typeof apartment.tenants === 'string') {
       return apartment.tenants;
@@ -263,13 +291,19 @@ function ContractManager({ showNotification }) {
 
     if (Array.isArray(apartment.tenants)) {
       return apartment.tenants
-        .map(t => t.name || `${t.firstName || ''} ${t.lastName || ''}`.trim())
+        .map(t => t && (t.name || `${t.firstName || ''} ${t.lastName || ''}`.trim()))
         .filter(name => name)
         .join(', ') || 'No tenants';
     }
 
     return 'No tenants';
   };
+
+  // Debug: Log current state
+  console.log('Current apartments state:', apartments);
+  console.log('Is apartments array?', Array.isArray(apartments));
+  console.log('Filtered apartments:', filteredApartments);
+  console.log('Is filtered apartments array?', Array.isArray(filteredApartments));
 
   return (
     <Paper elevation={3} sx={{ p: 3, mb: 3 }}>

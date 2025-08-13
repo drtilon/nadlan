@@ -44,7 +44,7 @@ function ContractManager({ showNotification }) {
   const [apartments, setApartments] = useState([]);
   const [selectedApartment, setSelectedApartment] = useState(null);
   const [contracts, setContracts] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -97,11 +97,16 @@ function ContractManager({ showNotification }) {
   const fetchContracts = async (apartmentId) => {
     setLoading(true);
     try {
+      console.log('Fetching contracts for apartment:', apartmentId); // Debug log
       const response = await api.get(`/documents/contracts/${apartmentId}`);
-      setContracts(response.data || []);
+      console.log('Contracts API response:', response.data); // Debug log
+
+      // Ensure we always have an array
+      const contractsData = Array.isArray(response.data) ? response.data : [];
+      setContracts(contractsData);
 
       // Find and set the selected apartment object
-      const selected = apartments.find(apt => apt.id === apartmentId);
+      const selected = Array.isArray(apartments) ? apartments.find(apt => apt.id === apartmentId) : null;
       setSelectedApartment(selected || null);
     } catch (error) {
       console.error('Error fetching contracts:', error);

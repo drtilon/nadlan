@@ -5,22 +5,22 @@ import { Box, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogCont
 import { ThemeProvider } from '@mui/material/styles';
 
 // Components
-import LoginPage from './components/LoginPage';
-import RegisterPage from './components/RegisterPage';
-import ApartmentList from './components/ApartmentList';
-import ApartmentForm from './components/ApartmentForm';
-import PaymentScreen from './components/PaymentScreen';
-import AdminPanel from './components/AdminPanel';
-import AnalyticsPanel from './components/AnalyticsPanel';
-import TenantsPanel from './components/TenantsPanel';
-import LandlordsPanel from './components/LandlordsPanel';
-import ContractGenerator from './components/ContractGenerator';
-import ContractManager from './components/ContractManager';
-import LogsViewer from './components/LogsViewer';
-import MainLayout from './components/MainLayout';
-import TenantDetails from './components/TenantDetails';
-import LandlordDetails from './components/LandlordDetails';
-import UserAnalyticsPanel from './components/UserAnalyticsPanel';
+import LoginPage from './components/auth/LoginPage';
+import RegisterPage from './components/auth/RegisterPage';
+import ApartmentList from './components/apartment/ApartmentList';
+import ApartmentForm from './components/apartment/ApartmentForm';
+import PaymentScreen from './components/payment/PaymentScreen';
+import AdminPanel from './components/admin/AdminPanel';
+import AnalyticsPanel from './components/analytics/AnalyticsPanel'; // ADMIN Analytics Panel
+import TenantsPanel from './components/tenant/TenantsPanel';
+import LandlordsPanel from './components/landlord/LandlordsPanel';
+import ContractGenerator from './components/contract/ContractGenerator';
+import ContractManager from './components/contract/ContractManager';
+import LogsViewer from './components/analytics/LogsViewer';
+import MainLayout from './components/layout/MainLayout';
+import TenantDetails from './components/tenant/TenantDetails';
+import LandlordDetails from './components/landlord/LandlordDetails';
+import UserAnalyticsPanel from './components/analytics/UserAnalyticsPanel'; // FIXED: User Analytics Panel
 // Utils and theme
 import theme from './theme';
 import { setAuthToken, verifyToken, getUserData } from './utils/api';

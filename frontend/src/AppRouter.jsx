@@ -1,37 +1,36 @@
-// Fixed AppRouter.jsx with correct component imports
+// Updated AppRouter.jsx with admin access to UserAnalyticsPanel
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Box, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 import { ThemeProvider } from '@mui/material/styles';
 
 // Components
-import LoginPage from './components/auth/LoginPage';
-import RegisterPage from './components/auth/RegisterPage';
-import ApartmentList from './components/apartment/ApartmentList';
-import ApartmentForm from './components/apartment/ApartmentForm';
-import PaymentScreen from './components/payment/PaymentScreen';
-import AdminPanel from './components/admin/AdminPanel';
-import AnalyticsPanel from './components/analytics/AnalyticsPanel'; // ADMIN Analytics Panel
-import TenantsPanel from './components/tenant/TenantsPanel';
-import LandlordsPanel from './components/landlord/LandlordsPanel';
-import ContractGenerator from './components/contract/ContractGenerator';
-import ContractManager from './components/contract/ContractManager';
-import LogsViewer from './components/analytics/LogsViewer';
-import MainLayout from './components/layout/MainLayout';
-import TenantDetails from './components/tenant/TenantDetails';
-import LandlordDetails from './components/landlord/LandlordDetails';
-import UserAnalyticsPanel from './components/analytics/UserAnalyticsPanel'; // FIXED: User Analytics Panel
-
+import LoginPage from './components/LoginPage';
+import RegisterPage from './components/RegisterPage';
+import ApartmentList from './components/ApartmentList';
+import ApartmentForm from './components/ApartmentForm';
+import PaymentScreen from './components/PaymentScreen';
+import AdminPanel from './components/AdminPanel';
+import AnalyticsPanel from './components/AnalyticsPanel';
+import TenantsPanel from './components/TenantsPanel';
+import LandlordsPanel from './components/LandlordsPanel';
+import ContractGenerator from './components/ContractGenerator';
+import ContractManager from './components/ContractManager';
+import LogsViewer from './components/LogsViewer';
+import MainLayout from './components/MainLayout';
+import TenantDetails from './components/TenantDetails';
+import LandlordDetails from './components/LandlordDetails';
+import UserAnalyticsPanel from './components/UserAnalyticsPanel';
 // Utils and theme
 import theme from './theme';
 import { setAuthToken, verifyToken, getUserData } from './utils/api';
 import sessionManager from './utils/SessionManager';
 
-// FIXED: Enhanced Protected Route wrapper component
-const ProtectedRoute = ({ children, adminOnly = false, allowedRoles = [] }) => {
+// Protected Route wrapper component
+const ProtectedRoute = ({ children, adminOnly = false }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthorized, setIsAuthorized] = useState(false);
-  const [isChecking, setIsChecking] = useState(true);
+  const [isChecking, setIsChecking] = useState(true); // Add this state to track checking process
   const navigate = useNavigate();
   const location = useLocation();
   const authCheckInProgress = useRef(false);
@@ -40,7 +39,7 @@ const ProtectedRoute = ({ children, adminOnly = false, allowedRoles = [] }) => {
     const checkAuth = async () => {
       if (authCheckInProgress.current) return;
       authCheckInProgress.current = true;
-      setIsChecking(true);
+      setIsChecking(true); // Start checking
 
       try {
         // Check if token exists
@@ -69,10 +68,6 @@ const ProtectedRoute = ({ children, adminOnly = false, allowedRoles = [] }) => {
           const isAdmin = userData && userData.role === 'admin';
           setIsAuthorized(isAdmin);
           console.log("Is user authorized as admin:", isAdmin);
-        } else if (isValid && allowedRoles.length > 0) {
-          const userData = getUserData();
-          const userRole = userData?.role || 'user';
-          setIsAuthorized(allowedRoles.includes(userRole));
         } else {
           setIsAuthorized(true);
         }
@@ -82,12 +77,12 @@ const ProtectedRoute = ({ children, adminOnly = false, allowedRoles = [] }) => {
         setIsAuthorized(false);
       } finally {
         authCheckInProgress.current = false;
-        setIsChecking(false);
+        setIsChecking(false); // Finished checking
       }
     };
 
     checkAuth();
-  }, [adminOnly, allowedRoles]);
+  }, [adminOnly]);
 
   // Show loading only while actively checking auth
   if (isChecking) {
@@ -294,7 +289,7 @@ const AppRouterContainer = () => {
             />
           } />
 
-          {/* Apartment Management Routes */}
+          {/* Apartment Management Routes - Admin Only */}
           <Route path="apartments/add" element={
             <ProtectedRoute adminOnly={false}>
               <ApartmentForm
@@ -315,14 +310,13 @@ const AppRouterContainer = () => {
             </ProtectedRoute>
           } />
 
-          {/* FIXED: Analytics Panel Routes with correct components */}
+          {/* Analytics Panel Routes */}
           <Route path="analytics" element={
             <ProtectedRoute adminOnly={true}>
               <AnalyticsPanel showNotification={showNotification} />
             </ProtectedRoute>
           } />
 
-          {/* FIXED: User Analytics Panel - Uses the correct UserAnalyticsPanel component */}
           <Route path="user-analytics" element={
             <ProtectedRoute>
               <UserAnalyticsPanel showNotification={showNotification} />

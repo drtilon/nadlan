@@ -1,6 +1,6 @@
-# routes/auth_routes.py
+# routes/auth_routes.py - FIXED VERSION with rate limiting
 import os
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, g
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import create_access_token, create_refresh_token, get_jwt_identity, jwt_required
 from flask_limiter import Limiter
@@ -14,12 +14,12 @@ from activity_logger import ActivityLogger
 auth_bp = Blueprint("auth_bp", __name__)
 bcrypt = Bcrypt()
 
-# Rate limiter to prevent brute-force login attempts
+# Rate limiter to prevent excessive requests
 limiter = Limiter(key_func=get_remote_address)
 
 
 @auth_bp.route("/login", methods=["POST"])
-@limiter.limit("5 per minute")  # 5 login attempts per minute per IP
+@limiter.limit("10 per minute")  # Increased from 5 to 10 for better UX
 def login():
     data = request.json
     username = data.get("username")
@@ -27,8 +27,8 @@ def login():
 
     if not username or not password:
         ActivityLogger.log_login(
-            username=username or "unknown", 
-            success=False, 
+            username=username or "unknown",
+            success=False,
             details={"reason": "Missing username or password"}
         )
         return jsonify({"message": "Missing username or password"}), 400
@@ -37,16 +37,16 @@ def login():
     user = User.query.filter_by(username=username).first()
     if not user:
         ActivityLogger.log_login(
-            username=username, 
-            success=False, 
+            username=username,
+            success=False,
             details={"reason": "Invalid username"}
         )
         return jsonify({"message": "Invalid username or password"}), 401
 
     if not user.is_approved:
         ActivityLogger.log_login(
-            username=username, 
-            success=False, 
+            username=username,
+            success=False,
             details={"reason": "Account not approved", "user_id": user.id}
         )
         return jsonify({"message": "Your account is pending admin approval."}), 403
@@ -68,8 +68,8 @@ def login():
 
         # Log successful login
         ActivityLogger.log_login(
-            username=username, 
-            success=True, 
+            username=username,
+            success=True,
             details={"user_id": user.id, "role": role, "ip": request.remote_addr}
         )
 
@@ -89,14 +89,15 @@ def login():
 
     # Log failed login attempt
     ActivityLogger.log_login(
-        username=username, 
-        success=False, 
+        username=username,
+        success=False,
         details={"reason": "Invalid password", "user_id": user.id if user else None}
     )
     return jsonify({"message": "Invalid username or password"}), 401
 
 
 @auth_bp.route("/register", methods=["POST"])
+@limiter.limit("3 per minute")  # Rate limit registration
 def register():
     data = request.json
     username = data.get("username")
@@ -132,8 +133,8 @@ def register():
         entity_type="user",
         entity_id=new_user.id,
         details={
-            "username": username, 
-            "role": role, 
+            "username": username,
+            "role": role,
             "is_approved": is_approved,
             "ip": request.remote_addr
         }
@@ -146,13 +147,37 @@ def register():
 
 
 @auth_bp.route("/verify", methods=["GET"])
+@limiter.limit("60 per minute")  # Allow more frequent verification but limit abuse
 @token_required
 def verify_token():
     """
-    Simple endpoint to verify if the current token is valid.
-    Token_required decorator will return 401 if token is invalid.
+    OPTIMIZED endpoint to verify if the current token is valid.
+    Returns minimal data to reduce response size and processing time.
     """
-    return jsonify({"message": "Token is valid", "status": "success"}), 200
+    try:
+        # Get user info from token (already validated by @token_required)
+        user_info = g.user
+
+        # Return minimal user info to prevent excessive data transfer
+        response_data = {
+            "valid": True,
+            "user": {
+                "id": user_info.get("id"),
+                "username": user_info.get("sub"),
+                "role": user_info.get("role")
+            }
+        }
+
+        # Add cache headers to reduce unnecessary requests
+        response = jsonify(response_data)
+        response.headers['Cache-Control'] = 'private, max-age=300'  # Cache for 5 minutes
+        response.headers['ETag'] = f'"{user_info.get("id")}-{user_info.get("role")}"'
+
+        return response, 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error in token verification: {e}")
+        return jsonify({"valid": False, "message": "Token verification failed"}), 401
 
 
 @auth_bp.route("/logout", methods=["POST"])
@@ -160,12 +185,33 @@ def verify_token():
 def logout():
     """
     Endpoint for client-side logout.
-    Note: JWT can't be invalidated server-side without tracking, 
+    Note: JWT can't be invalidated server-side without tracking,
     but we can log the logout event.
     """
     current_user = get_jwt_identity()
-    
+
     # Log logout event
     ActivityLogger.log_logout(username=current_user)
-    
+
     return jsonify({"message": "Logged out successfully"}), 200
+
+
+# Add a health check endpoint that doesn't require authentication
+@auth_bp.route("/health", methods=["GET"])
+@limiter.limit("30 per minute")
+def auth_health():
+    """Simple health check for auth service"""
+    try:
+        # Quick database connectivity check
+        db.session.execute("SELECT 1")
+        return jsonify({
+            "status": "healthy",
+            "service": "auth",
+            "timestamp": int(time.time())
+        }), 200
+    except Exception as e:
+        return jsonify({
+            "status": "unhealthy",
+            "service": "auth",
+            "error": str(e)
+        }), 500

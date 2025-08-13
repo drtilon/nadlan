@@ -1,4 +1,4 @@
-// Complete Fixed MainLayout.jsx with proper access controls
+// Professional MainLayout.jsx with sophisticated design
 import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -57,7 +57,7 @@ import BarChartIcon from '@mui/icons-material/BarChart';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 
-import { getUserData } from '../../utils/api';
+import { getUserData } from '../utils/api';
 
 function MainLayout({ onLogout }) {
   const drawerWidth = 260;
@@ -96,7 +96,7 @@ function MainLayout({ onLogout }) {
     setMobileOpen(!mobileOpen);
   };
 
-  // FIXED Navigation items with proper role-based access control
+  // Navigation items
   const navItems = [
     { id: 1, title: 'Properties', icon: <HomeIcon />, path: 'dashboard', adminOnly: false },
     { id: 3, title: 'Tenants', icon: <PersonIcon />, path: 'tenants', adminOnly: false },
@@ -107,31 +107,30 @@ function MainLayout({ onLogout }) {
       title: 'Contracts',
       icon: <DescriptionIcon />,
       hasChildren: true,
-      adminOnly: false,
+      adminOnly: false, // Changed from true to false - now available to all users
       children: [
         { id: 61, title: 'Generate Contract', icon: <DriveFileRenameOutlineIcon />, path: 'contracts/generate' },
         { id: 62, title: 'Contract Manager', icon: <FileOpenIcon />, path: 'contracts/manage' },
       ]
     },
-    // FIXED: Proper analytics menu based on user role
-    ...(userIsAdmin ? [{
+    userIsAdmin ? {
       id: 7,
       title: 'Analytics',
       icon: <InsightsIcon />,
       hasChildren: true,
       adminOnly: false,
       children: [
-        { id: 71, title: 'Admin Analytics', icon: <BarChartIcon />, path: 'analytics', adminOnly: true },
-        { id: 72, title: 'Property Dashboard', icon: <TrendingUpIcon />, path: 'user-analytics', adminOnly: false }
+        { id: 71, title: 'Admin Analytics', icon: <BarChartIcon />, path: 'analytics' },
+        { id: 72, title: 'Property Dashboard', icon: <TrendingUpIcon />, path: 'user-analytics' }
       ]
-    }] : [{
+    } : {
       id: 7,
       title: 'Analytics',
       icon: <InsightsIcon />,
       path: 'user-analytics',
       hasChildren: false,
       adminOnly: false
-    }]),
+    },
     { id: 8, title: 'Admin Panel', icon: <AdminPanelSettingsIcon />, path: 'admin', adminOnly: true },
     { id: 9, title: 'System Logs', icon: <AssessmentIcon />, path: 'logs', adminOnly: true },
   ];
@@ -310,49 +309,45 @@ function MainLayout({ onLogout }) {
 
                   <Collapse
                     in={item.title === 'Contracts' ? contractsMenuOpen : analyticsMenuOpen}
-                    timeout="auto"
+                    timeout={200}
                     unmountOnExit
                   >
-                    <List component="div" disablePadding>
-                      {item.children
-                        .filter(child => !child.adminOnly || userIsAdmin) // FIXED: Filter children by admin access
-                        .map((child) => (
-                          <ListItem key={child.id} disablePadding sx={{ pl: 2 }}>
-                            <ListItemButton
-                              onClick={() => navigateTo(child.path)}
-                              sx={{
-                                borderRadius: 1,
-                                py: 1,
-                                px: 1.5,
-                                ml: 2,
-                                backgroundColor: isActivePath(child.path)
-                                  ? '#eff6ff'
-                                  : 'transparent',
-                                borderLeft: isActivePath(child.path) ? '3px solid #2563eb' : '3px solid transparent',
-                                '&:hover': {
-                                  backgroundColor: '#f9fafb'
-                                }
+                    <List component="div" disablePadding sx={{ pl: 2 }}>
+                      {item.children && item.children.map(child => (
+                        <ListItem key={child.id} disablePadding sx={{ mb: 0.5 }}>
+                          <ListItemButton
+                            onClick={() => navigateTo(child.path)}
+                            sx={{
+                              borderRadius: 1,
+                              py: 1,
+                              px: 1.5,
+                              backgroundColor: location.pathname.includes(child.path)
+                                ? '#eff6ff'
+                                : 'transparent',
+                              '&:hover': {
+                                backgroundColor: '#f9fafb'
+                              }
+                            }}
+                          >
+                            <ListItemIcon sx={{
+                              minWidth: 36,
+                              color: location.pathname.includes(child.path)
+                                ? '#2563eb'
+                                : '#9ca3af'
+                            }}>
+                              {child.icon}
+                            </ListItemIcon>
+                            <ListItemText
+                              primary={child.title}
+                              primaryTypographyProps={{
+                                fontWeight: location.pathname.includes(child.path) ? 600 : 400,
+                                fontSize: '0.85rem',
+                                color: '#4b5563'
                               }}
-                            >
-                              <ListItemIcon sx={{
-                                minWidth: 32,
-                                color: isActivePath(child.path)
-                                  ? '#2563eb'
-                                  : '#6b7280'
-                              }}>
-                                {child.icon}
-                              </ListItemIcon>
-                              <ListItemText
-                                primary={child.title}
-                                primaryTypographyProps={{
-                                  fontWeight: isActivePath(child.path) ? 600 : 500,
-                                  fontSize: '0.85rem',
-                                  color: '#374151'
-                                }}
-                              />
-                            </ListItemButton>
-                          </ListItem>
-                        ))}
+                            />
+                          </ListItemButton>
+                        </ListItem>
+                      ))}
                     </List>
                   </Collapse>
                 </React.Fragment>
@@ -433,75 +428,77 @@ function MainLayout({ onLogout }) {
           width: { lg: `calc(100% - ${drawerWidth}px)` },
           ml: { lg: `${drawerWidth}px` },
           backgroundColor: '#ffffff',
-          color: '#1a1a1a',
           borderBottom: '1px solid #e0e0e0',
-          boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06)'
+          color: '#1a1a1a',
         }}
       >
-        <Toolbar sx={{ minHeight: '64px !important', justifyContent: 'space-between' }}>
-          {/* Mobile Menu Button */}
+        <Toolbar sx={{ minHeight: '64px !important', px: 3 }}>
           <IconButton
             color="inherit"
+            aria-label="open drawer"
             edge="start"
             onClick={handleDrawerToggle}
-            sx={{ mr: 2, display: { lg: 'none' } }}
+            sx={{
+              mr: 2,
+              display: { lg: 'none' },
+              color: '#6b7280'
+            }}
           >
             <MenuIcon />
           </IconButton>
 
-          {/* Page Title */}
-          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1, fontWeight: 500 }}>
-            {currentPath === 'dashboard' ? 'Properties' :
-             currentPath === 'user-analytics' ? 'Property Dashboard' :
-             currentPath === 'analytics' ? 'Admin Analytics' :
-             currentPath.charAt(0).toUpperCase() + currentPath.slice(1)}
+          <Typography
+            variant="h6"
+            noWrap
+            component="div"
+            sx={{
+              display: { xs: 'block', lg: 'none' },
+              fontWeight: 600,
+              color: '#1a1a1a'
+            }}
+          >
+            Shefa UG
           </Typography>
 
-          {/* Right side buttons */}
-          <Stack direction="row" spacing={1} alignItems="center">
-            {/* Notifications */}
-            <Tooltip title="Notifications">
-              <IconButton
-                color="inherit"
-                onClick={handleNotificationMenuOpen}
-                sx={{
-                  p: 1,
-                  '&:hover': { backgroundColor: alpha('#000', 0.04) }
-                }}
-              >
-                <Badge badgeContent={notifications.length} color="error">
-                  <NotificationsIcon sx={{ fontSize: '1.25rem' }} />
-                </Badge>
-              </IconButton>
-            </Tooltip>
+          <Box sx={{ flexGrow: 1 }} />
 
-            {/* User Menu */}
+          {/* Professional Action Buttons */}
+          <Stack direction="row" spacing={1} alignItems="center">
             <Button
               onClick={handleUserMenuOpen}
+              sx={{
+                ml: 2,
+                p: 1,
+                borderRadius: 1,
+                border: '1px solid #e5e7eb',
+                backgroundColor: '#ffffff',
+                color: '#374151',
+                textTransform: 'none',
+                '&:hover': {
+                  backgroundColor: '#f9fafb',
+                  borderColor: '#d1d5db'
+                }
+              }}
               startIcon={
                 <Avatar
                   sx={{
-                    width: 32,
-                    height: 32,
+                    width: 28,
+                    height: 28,
                     backgroundColor: '#2563eb',
-                    fontSize: '0.875rem'
+                    fontSize: '0.75rem',
+                    fontWeight: 600
                   }}
                 >
                   {userName.charAt(0).toUpperCase()}
                 </Avatar>
               }
-              endIcon={<KeyboardArrowDownIcon />}
-              sx={{
-                color: '#374151',
-                textTransform: 'none',
-                '&:hover': { backgroundColor: alpha('#000', 0.04) }
-              }}
+              endIcon={<KeyboardArrowDownIcon sx={{ fontSize: '1rem' }} />}
             >
-              <Box sx={{ textAlign: 'left', ml: 1 }}>
-                <Typography variant="body2" fontWeight={500}>
+              <Box sx={{ display: { xs: 'none', md: 'block' }, textAlign: 'left' }}>
+                <Typography variant="body2" fontWeight={500} sx={{ lineHeight: 1.2 }}>
                   {userName}
                 </Typography>
-                <Typography variant="caption" color="#6b7280">
+                <Typography variant="caption" color="#6b7280" sx={{ lineHeight: 1 }}>
                   {userIsAdmin ? 'Admin' : 'User'}
                 </Typography>
               </Box>

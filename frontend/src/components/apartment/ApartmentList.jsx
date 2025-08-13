@@ -29,11 +29,13 @@ import {
   Select,
   Stack
 } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
 
 // Icons
 import EditIcon from '@mui/icons-material/Edit';
 import HomeIcon from '@mui/icons-material/Home';
 import PersonIcon from '@mui/icons-material/Person';
+import People from '@mui/icons-material/People';
 import PaymentIcon from '@mui/icons-material/Payment';
 import SearchIcon from '@mui/icons-material/Search';
 import BedIcon from '@mui/icons-material/Bed';
@@ -90,6 +92,9 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   const userData = getUserData();
   const isAdmin = userData && userData.role === 'admin';
 
+  // Navigation hook
+  const navigate = useNavigate();
+
   // Fetch apartments with pagination
   const fetchApartments = useCallback(async (page = 1, size = pageSize, search = '', sort = sortBy, refresh = false) => {
     if (refresh) {
@@ -131,7 +136,12 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
           // Get current tenants from contract periods
           tenants: getCurrentTenants(apartment),
           // Calculate expiry status
-          expiryStatus: getExpiryStatus(getContractEndDate(apartment))
+          expiryStatus: getExpiryStatus(getContractEndDate(apartment)),
+          // Add occupancy data (should come from backend but ensure it exists)
+          maxOccupancy: apartment.maxOccupancy || 1,
+          current_tenant_count: apartment.current_tenant_count || getCurrentTenants(apartment).length,
+          occupancy_ratio: apartment.occupancy_ratio || `${getCurrentTenants(apartment).length}/${apartment.maxOccupancy || 1}`,
+          is_full: apartment.is_full || getCurrentTenants(apartment).length >= (apartment.maxOccupancy || 1)
         }));
 
         setDisplayedApartments(processedApartments);
@@ -305,6 +315,19 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     }
   }, [displayedApartments, showNotification]);
 
+  // Handle tenant navigation - FIXED VERSION
+  const handleGoToTenant = (tenantId) => {
+    // Close any open dialogs first
+    setContractDialogOpen(false);
+    setDetailsOpen(false);
+
+    // Show navigation notification
+    showNotification('Navigating to tenant details...', 'info');
+
+    // Navigate to tenant details page
+    navigate(`/tenants/${tenantId}`);
+  };
+
   // Initial load
   useEffect(() => {
     fetchApartments(1, pageSize, '', sortBy);
@@ -337,6 +360,16 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   const totalPages = Math.ceil(totalCount / pageSize);
   const startIndex = (currentPage - 1) * pageSize + 1;
   const endIndex = Math.min(currentPage * pageSize, totalCount);
+
+  // Get sort display text
+  const getSortDisplayText = (sortBy) => {
+    switch (sortBy) {
+      case 'expiry': return 'Expiry';
+      case 'alphabetical': return 'A-Z';
+      case 'occupancy': return 'Occupancy';
+      default: return 'Default';
+    }
+  };
 
   if (isLoading && !isRefreshing) {
     return (
@@ -467,7 +500,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             borderColor: 'divider'
           }}
         >
-          Sort: {sortBy === 'expiry' ? 'Expiry' : 'A-Z'}
+          Sort: {getSortDisplayText(sortBy)}
         </Button>
 
         <Menu
@@ -504,6 +537,18 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
             <ListItemText>
               Alphabetical (A-Z)
               {sortBy === 'alphabetical' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}
+            </ListItemText>
+          </MenuItem>
+          <MenuItem
+            onClick={() => handleSortChange('occupancy')}
+            selected={sortBy === 'occupancy'}
+          >
+            <ListItemIcon>
+              <People fontSize="small" />
+            </ListItemIcon>
+            <ListItemText>
+              By Occupancy Level
+              {sortBy === 'occupancy' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}
             </ListItemText>
           </MenuItem>
         </Menu>
@@ -555,13 +600,24 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         </Box>
       </Box>
 
-      {/* Expiry Status Summary */}
+      {/* Sorting Status Summary */}
       {sortBy === 'expiry' && (
         <Box sx={{ mb: 3 }}>
           <Alert severity="info" sx={{ borderRadius: 1 }}>
             <Typography variant="body2">
               Properties are sorted by contract expiry: <strong style={{ color: '#d32f2f' }}>Expired</strong> contracts first,
               then <strong style={{ color: '#ed6c02' }}>expiring within 30 days</strong>, followed by valid contracts.
+            </Typography>
+          </Alert>
+        </Box>
+      )}
+
+      {sortBy === 'occupancy' && (
+        <Box sx={{ mb: 3 }}>
+          <Alert severity="info" sx={{ borderRadius: 1 }}>
+            <Typography variant="body2">
+              Properties are sorted by occupancy level: <strong style={{ color: '#d32f2f' }}>Full capacity</strong> first,
+              then by highest occupancy percentage.
             </Typography>
           </Alert>
         </Box>
@@ -614,6 +670,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
                   onGoToPayments={onGoToPayments}
                   onGenerateContract={handleGenerateContract}
                   onOpenDetails={openDetails}
+                  onGoToTenant={handleGoToTenant}
                   isAdmin={isAdmin}
                 />
               </Grid>
@@ -658,6 +715,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         onGenerateContract={handleGenerateContract}
         onExtendContract={openExtendContractDialog}
         onOpenContractManagement={() => setContractDialogOpen(true)}
+        onGoToTenant={handleGoToTenant}
         isAdmin={isAdmin}
       />
 
@@ -680,6 +738,7 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         apartment={selectedApartment}
         showNotification={showNotification}
         onContractChange={() => fetchApartments(currentPage, pageSize, searchTerm, sortBy, true)}
+        onGoToTenant={handleGoToTenant}
       />
 
       <style>

@@ -24,13 +24,16 @@ import {
   Home as HomeIcon,
   AccessTime as AccessTimeIcon,
   Person as PersonIcon,
+  People as PeopleIcon,
   Email as EmailIcon,
   Phone as PhoneIcon,
   CreditCard as IbanIcon,
   Cake as BirthdayIcon,
   Visibility as ViewIcon,
   Business as BusinessIcon,
-  Description as DescriptionIcon
+  Description as DescriptionIcon,
+  Warning as WarningIcon,
+  Error as ErrorIcon
 } from '@mui/icons-material';
 
 // Status Chip Component
@@ -39,46 +42,77 @@ const StatusChip = ({ status, expiryStatus }) => {
     const statusLower = status?.toLowerCase() || '';
 
     if (expiryStatus?.status === 'expired') {
-      return { color: 'error', icon: '🚫', displayStatus: 'Contract Expired' };
+      return { color: 'error', icon: <ErrorIcon sx={{ fontSize: '1rem' }} />, displayStatus: 'Contract Expired' };
     }
     if (expiryStatus?.status === 'expiring_soon') {
-      return { color: 'warning', icon: '⚠️', displayStatus: 'Expiring Soon' };
+      return { color: 'warning', icon: <WarningIcon sx={{ fontSize: '1rem' }} />, displayStatus: 'Expiring Soon' };
     }
     if (statusLower.includes('occupied') || statusLower.includes('rented')) {
-      return { color: 'success', icon: '🏠', displayStatus: 'Occupied' };
+      return { color: 'success', icon: <HomeIcon sx={{ fontSize: '1rem' }} />, displayStatus: 'Occupied' };
     }
     if (statusLower.includes('vacant') || statusLower.includes('available')) {
-      return { color: 'default', icon: '🔓', displayStatus: 'Vacant' };
+      return { color: 'primary', icon: <HomeIcon sx={{ fontSize: '1rem' }} />, displayStatus: 'Vacant' };
     }
     if (statusLower.includes('contract') && statusLower.includes('sent')) {
-      return { color: 'warning', icon: '📄', displayStatus: 'Contract Sent' };
+      return { color: 'warning', icon: <DescriptionIcon sx={{ fontSize: '1rem' }} />, displayStatus: 'Contract Sent' };
     }
-    return { color: 'default', icon: '❓', displayStatus: status || 'Unknown' };
+    return { color: 'default', icon: <HomeIcon sx={{ fontSize: '1rem' }} />, displayStatus: status || 'Unknown' };
   };
 
   const { color, icon, displayStatus } = getStatusConfig(status, expiryStatus);
 
   return (
-    <Box
+    <Chip
+      icon={icon}
+      label={displayStatus}
+      color={color}
       sx={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 1,
-        px: 2,
-        py: 1,
-        borderRadius: 2,
-        fontSize: '0.875rem',
         fontWeight: 600,
-        bgcolor: color === 'error' ? 'error.main' :
-                color === 'warning' ? 'warning.main' :
-                color === 'success' ? 'success.main' :
-                color === 'primary' ? 'primary.main' : 'grey.300',
-        color: color === 'default' ? 'text.primary' : 'white'
+        fontSize: '0.875rem',
+        height: 32,
+        '& .MuiChip-icon': {
+          fontSize: '1rem'
+        }
       }}
-    >
-      {icon}
-      {displayStatus}
-    </Box>
+    />
+  );
+};
+
+// Occupancy Status Component
+const OccupancyStatus = ({ currentCount, maxOccupancy }) => {
+  const percentage = maxOccupancy > 0 ? (currentCount / maxOccupancy) * 100 : 0;
+  const isFull = currentCount >= maxOccupancy;
+
+  const getOccupancyConfig = () => {
+    if (isFull) {
+      return { color: 'error', icon: <WarningIcon sx={{ fontSize: '1rem' }} />, status: 'Full Capacity' };
+    }
+    if (percentage >= 80) {
+      return { color: 'warning', icon: <PeopleIcon sx={{ fontSize: '1rem' }} />, status: 'Near Capacity' };
+    }
+    if (percentage >= 50) {
+      return { color: 'info', icon: <PeopleIcon sx={{ fontSize: '1rem' }} />, status: 'Moderate' };
+    }
+    return { color: 'success', icon: <PeopleIcon sx={{ fontSize: '1rem' }} />, status: 'Available Space' };
+  };
+
+  const { color, icon, status } = getOccupancyConfig();
+
+  return (
+    <Chip
+      icon={icon}
+      label={`${currentCount}/${maxOccupancy} - ${status}`}
+      color={color}
+      variant="outlined"
+      sx={{
+        fontWeight: 600,
+        fontSize: '0.875rem',
+        height: 32,
+        '& .MuiChip-icon': {
+          fontSize: '1rem'
+        }
+      }}
+    />
   );
 };
 
@@ -135,6 +169,8 @@ function ApartmentDetailsDialog({
   };
 
   const tenants = getCurrentTenants();
+  const currentTenantCount = apartment.current_tenant_count || tenants.length;
+  const maxOccupancy = apartment.maxOccupancy || 1;
 
   // Get tenant display name
   const getTenantDisplayName = (tenant) => {
@@ -210,26 +246,38 @@ function ApartmentDetailsDialog({
         <Box sx={{
           display: 'flex',
           justifyContent: 'space-between',
-          alignItems: 'center',
+          alignItems: 'flex-start',
           p: 3,
           bgcolor: 'grey.50',
           borderBottom: '1px solid',
-          borderColor: 'divider'
+          borderColor: 'divider',
+          gap: 2
         }}>
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-            <StatusChip status={apartment.status} expiryStatus={apartment.expiryStatus} />
-            {apartment.expiryStatus && (
-              <Chip
-                label={apartment.expiryStatus.daysRemaining >= 0
-                  ? `${apartment.expiryStatus.daysRemaining} days left`
-                  : `Expired ${Math.abs(apartment.expiryStatus.daysRemaining)} days ago`
-                }
-                color={apartment.expiryStatus.status === 'expired' ? 'error' : 'warning'}
-                size="small"
-              />
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1 }}>
+            {/* Primary Status Row */}
+            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+              <StatusChip status={apartment.status} expiryStatus={apartment.expiryStatus} />
+              <OccupancyStatus currentCount={currentTenantCount} maxOccupancy={maxOccupancy} />
+            </Box>
+
+            {/* Secondary Status Info */}
+            {apartment.expiryStatus && apartment.expiryStatus.daysUntilExpiry !== null && (
+              <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                <Chip
+                  label={apartment.expiryStatus.daysUntilExpiry >= 0
+                    ? `${apartment.expiryStatus.daysUntilExpiry} days remaining`
+                    : `Expired ${Math.abs(apartment.expiryStatus.daysUntilExpiry)} days ago`
+                  }
+                  color={apartment.expiryStatus.status === 'expired' ? 'error' : 'warning'}
+                  size="small"
+                  variant="outlined"
+                />
+              </Box>
             )}
           </Box>
-          <Box sx={{ display: 'flex', gap: 2 }}>
+
+          {/* Action Buttons */}
+          <Box sx={{ display: 'flex', gap: 1.5, flexShrink: 0 }}>
             {isAdmin && (
               <Button
                 size="small"
@@ -240,8 +288,10 @@ function ApartmentDetailsDialog({
                   onEdit(apartment);
                 }}
                 sx={{
-                  borderRadius: 1,
-                  textTransform: 'none'
+                  borderRadius: 1.5,
+                  textTransform: 'none',
+                  fontWeight: 500,
+                  px: 2
                 }}
               >
                 Edit
@@ -256,8 +306,10 @@ function ApartmentDetailsDialog({
                 onGoToPayments(apartment.id);
               }}
               sx={{
-                borderRadius: 1,
-                textTransform: 'none'
+                borderRadius: 1.5,
+                textTransform: 'none',
+                fontWeight: 500,
+                px: 2
               }}
             >
               Payments
@@ -300,6 +352,16 @@ function ApartmentDetailsDialog({
                     </Typography>
                     <Typography variant="body2" fontWeight={500}>
                       {apartment.size}
+                    </Typography>
+                  </Box>
+                </Grid>
+                <Grid item xs={12} sm={6} md={3}>
+                  <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                      Max Occupancy
+                    </Typography>
+                    <Typography variant="body2" fontWeight={500}>
+                      {maxOccupancy} people
                     </Typography>
                   </Box>
                 </Grid>
@@ -398,7 +460,7 @@ function ApartmentDetailsDialog({
                 }}
               >
                 <PersonIcon color="primary" fontSize="small" />
-                Current Tenants ({tenants.length})
+                Current Tenants ({currentTenantCount}/{maxOccupancy})
               </Typography>
 
               {tenants.length === 0 ? (

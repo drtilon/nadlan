@@ -1,8 +1,6 @@
 # config.py
 
-
 import os
-
 
 class Config:
     DB_CONFIG = {
@@ -18,13 +16,13 @@ class Config:
     SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://{DB_CONFIG['user']}:{DB_CONFIG['password']}@{DB_CONFIG['host']}:3306/{DB_CONFIG['database']}"
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
-    # File upload configuration - VERY conservative limits
-    MAX_CONTENT_LENGTH = 20 * 1024 * 1024  # 20MB total request size
+    # File upload configuration - CHANGED: 20MB → 50MB
+    MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB total request size
     UPLOAD_FOLDER = 'uploads'
 
     # Additional Flask configuration for better file handling
     SEND_FILE_MAX_AGE_DEFAULT = 0
-    MAX_FORM_MEMORY_SIZE = 20 * 1024 * 1024  # 20MB form memory
+    MAX_FORM_MEMORY_SIZE = 50 * 1024 * 1024  # 50MB form memory
 
     # Timeout settings
     PERMANENT_SESSION_LIFETIME = 1800  # 30 minutes

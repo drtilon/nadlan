@@ -13,6 +13,7 @@ class ApartmentData(BaseModel):
     address: str
     rooms: int
     size: float
+    maxOccupancy: int  # NEW FIELD
     tenants: Optional[List[TenantData]] = None  # This accepts a list of tenants.
     landlordName: str
     landlordEmail: str

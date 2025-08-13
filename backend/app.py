@@ -45,8 +45,8 @@ def create_app():
         app = Flask(__name__)
         app.config.from_object(Config)
 
-        # Set file upload limits - reduced for better reliability
-        app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size (reduced from 100MB)
+        # Set file upload limits - UPDATED to 50MB
+        app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
         app.config['UPLOAD_FOLDER'] = os.path.join(app.root_path, 'uploads')
 
         # Additional configuration for better file handling
@@ -125,7 +125,7 @@ def create_app():
         except Exception as e:
             app.logger.error(f"Error initializing CORS: {e}")
 
-        # Add error handler for file too large
+        # Add error handler for file too large - UPDATED to 50MB
         @app.errorhandler(413)
         def too_large(e):
             return {"error": "File too large. Maximum file size is 50MB."}, 413

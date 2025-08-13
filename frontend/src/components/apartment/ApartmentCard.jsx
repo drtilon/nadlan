@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Card,
   CardContent,
@@ -8,20 +8,29 @@ import {
   Divider,
   IconButton,
   Tooltip,
-  Button
+  Button,
+  Chip,
+  Menu,
+  MenuItem,
+  ListItemIcon,
+  ListItemText
 } from '@mui/material';
 import {
   Edit as EditIcon,
   Payment as PaymentIcon,
   Description as DescriptionIcon,
   Person as PersonIcon,
+  People as PeopleIcon,
   Bed as BedIcon,
   SquareFoot as SquareFootIcon,
   Event as EventIcon,
   AccessTime as AccessTimeIcon,
   Warning as WarningIcon,
-  Error as ErrorIcon
+  Error as ErrorIcon,
+  MoreVert as MoreVertIcon,
+  Visibility as ViewIcon
 } from '@mui/icons-material';
+
 // Import utility functions locally
 const getStatusChip = (status, contractEndDate) => {
   const getExpiryStatus = (contractEndDate) => {
@@ -68,36 +77,77 @@ const getStatusChip = (status, contractEndDate) => {
     if (expiryStatus.status === 'expired') {
       color = 'error';
       displayStatus = 'Expired';
-      icon = <ErrorIcon sx={{ fontSize: '0.8rem' }} />;
+      icon = <ErrorIcon sx={{ fontSize: '0.75rem' }} />;
     } else if (expiryStatus.status === 'expiring_soon') {
       color = 'warning';
       displayStatus = `Expires in ${expiryStatus.daysUntilExpiry} days`;
-      icon = <WarningIcon sx={{ fontSize: '0.8rem' }} />;
+      icon = <WarningIcon sx={{ fontSize: '0.75rem' }} />;
     }
   }
 
   return (
-    <Box
-      component="span"
+    <Chip
+      icon={icon}
+      label={displayStatus}
+      size="small"
       sx={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 0.5,
-        px: 1,
-        py: 0.5,
-        borderRadius: 1,
+        height: 24,
         fontSize: '0.75rem',
         fontWeight: 500,
         bgcolor: color === 'error' ? 'error.main' :
                 color === 'warning' ? 'warning.main' :
                 color === 'success' ? 'success.main' :
                 color === 'primary' ? 'primary.main' : 'grey.300',
-        color: color === 'default' ? 'text.primary' : 'white'
+        color: color === 'default' ? 'text.primary' : 'white',
+        '& .MuiChip-icon': {
+          fontSize: '0.75rem',
+          color: 'inherit'
+        }
       }}
-    >
-      {icon}
-      {displayStatus}
-    </Box>
+    />
+  );
+};
+
+// Occupancy indicator component
+const OccupancyIndicator = ({ currentCount, maxOccupancy, isFull }) => {
+  const percentage = maxOccupancy > 0 ? (currentCount / maxOccupancy) * 100 : 0;
+
+  const getOccupancyColor = () => {
+    if (isFull) return 'error';
+    if (percentage >= 80) return 'warning';
+    if (percentage >= 50) return 'info';
+    return 'success';
+  };
+
+  const color = getOccupancyColor();
+
+  return (
+    <Tooltip title={`${currentCount} of ${maxOccupancy} maximum occupancy`}>
+      <Chip
+        icon={<PeopleIcon sx={{ fontSize: '0.75rem !important' }} />}
+        label={`${currentCount}/${maxOccupancy}`}
+        size="small"
+        sx={{
+          height: 24,
+          fontSize: '0.75rem',
+          fontWeight: 500,
+          bgcolor: isFull ? 'error.light' :
+                   percentage >= 80 ? 'warning.light' :
+                   percentage >= 50 ? 'info.light' : 'success.light',
+          color: isFull ? 'error.dark' :
+                 percentage >= 80 ? 'warning.dark' :
+                 percentage >= 50 ? 'info.dark' : 'success.dark',
+          border: '1px solid',
+          borderColor: isFull ? 'error.main' :
+                      percentage >= 80 ? 'warning.main' :
+                      percentage >= 50 ? 'info.main' : 'success.main',
+          '& .MuiChip-icon': {
+            fontSize: '0.75rem',
+            color: 'inherit'
+          }
+        }}
+      />
+    </Tooltip>
   );
 };
 
@@ -107,8 +157,11 @@ function ApartmentCard({
   onGoToPayments,
   onGenerateContract,
   onOpenDetails,
+  onGoToTenant, // New prop for tenant navigation
   isAdmin
 }) {
+  const [tenantMenuAnchor, setTenantMenuAnchor] = useState(null);
+
   const getAddressInitial = (address) => {
     return address && address.charAt(0).toUpperCase();
   };
@@ -137,6 +190,23 @@ function ApartmentCard({
     onOpenDetails(apartment);
   };
 
+  const handleTenantMenuClick = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setTenantMenuAnchor(e.currentTarget);
+  };
+
+  const handleTenantMenuClose = () => {
+    setTenantMenuAnchor(null);
+  };
+
+  const handleTenantClick = (tenant) => {
+    handleTenantMenuClose();
+    if (onGoToTenant && tenant.id) {
+      onGoToTenant(tenant.id);
+    }
+  };
+
   const formatTenantNames = (tenants) => {
     if (!tenants || !Array.isArray(tenants) || tenants.length === 0) {
       return 'No tenants assigned';
@@ -149,6 +219,19 @@ function ApartmentCard({
       return tenant.name || 'Unnamed Tenant';
     }).join(', ');
   };
+
+  const getTenantDisplayName = (tenant) => {
+    if (tenant.firstName && tenant.lastName) {
+      return `${tenant.firstName} ${tenant.lastName}`;
+    }
+    return tenant.name || 'Unnamed Tenant';
+  };
+
+  const tenants = apartment.tenants || [];
+  const hasTenants = tenants.length > 0;
+  const currentTenantCount = apartment.current_tenant_count || tenants.length;
+  const maxOccupancy = apartment.maxOccupancy || 1;
+  const isFull = apartment.is_full || currentTenantCount >= maxOccupancy;
 
   return (
     <Card
@@ -164,7 +247,9 @@ function ApartmentCard({
           ? 'error.main'
           : apartment.expiryStatus?.status === 'expiring_soon'
             ? 'warning.main'
-            : 'divider',
+            : isFull
+              ? 'error.light'
+              : 'divider',
         '&:hover': {
           boxShadow: 3,
           transform: 'translateY(-4px)',
@@ -184,15 +269,15 @@ function ApartmentCard({
             ? 'linear-gradient(to right, rgba(211, 47, 47, 0.05), rgba(211, 47, 47, 0))'
             : apartment.expiryStatus?.status === 'expiring_soon'
               ? 'linear-gradient(to right, rgba(237, 108, 2, 0.05), rgba(237, 108, 2, 0))'
-              : 'linear-gradient(to right, rgba(0,0,0,0.02), rgba(0,0,0,0))',
+              : isFull
+                ? 'linear-gradient(to right, rgba(211, 47, 47, 0.03), rgba(211, 47, 47, 0))'
+                : 'linear-gradient(to right, rgba(0,0,0,0.02), rgba(0,0,0,0))',
           borderBottom: '1px solid',
-          borderColor: 'divider',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start'
+          borderColor: 'divider'
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, maxWidth: '80%' }}>
+        {/* Address and Avatar */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, mb: 2 }}>
           <Avatar
             sx={{
               backgroundColor: apartment.expiryStatus?.status === 'expired'
@@ -200,8 +285,8 @@ function ApartmentCard({
                 : apartment.expiryStatus?.status === 'expiring_soon'
                   ? 'warning.main'
                   : 'primary.main',
-              width: 36,
-              height: 36
+              width: 40,
+              height: 40
             }}
           >
             {getAddressInitial(apartment.address)}
@@ -210,19 +295,35 @@ function ApartmentCard({
             variant="subtitle1"
             sx={{
               fontWeight: 600,
-              fontSize: '0.95rem',
-              lineHeight: 1.2,
+              fontSize: '1rem',
+              lineHeight: 1.3,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               display: '-webkit-box',
               WebkitLineClamp: 2,
-              WebkitBoxOrient: 'vertical'
+              WebkitBoxOrient: 'vertical',
+              flexGrow: 1
             }}
           >
             {apartment.address}
           </Typography>
         </Box>
-        {getStatusChip(apartment.status, apartment.contractEndDate)}
+
+        {/* Status Chips Row */}
+        <Box sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 1,
+          alignItems: 'center',
+          justifyContent: 'flex-start'
+        }}>
+          {getStatusChip(apartment.status, apartment.contractEndDate)}
+          <OccupancyIndicator
+            currentCount={currentTenantCount}
+            maxOccupancy={maxOccupancy}
+            isFull={isFull}
+          />
+        </Box>
       </Box>
 
       <CardContent sx={{ p: 2 }}>
@@ -231,6 +332,12 @@ function ApartmentCard({
             <BedIcon fontSize="small" sx={{ color: 'text.secondary', fontSize: '1rem' }} />
             <Typography variant="body2" color="text.secondary">
               {apartment.rooms} rooms
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5, gap: 1 }}>
+            <PeopleIcon fontSize="small" sx={{ color: 'text.secondary', fontSize: '1rem' }} />
+            <Typography variant="body2" color="text.secondary">
+              Max {apartment.maxOccupancy} people
             </Typography>
           </Box>
           <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5, gap: 1 }}>
@@ -274,21 +381,75 @@ function ApartmentCard({
               </Typography>
             </Box>
           )}
+
+          {/* Enhanced Tenants Section */}
           <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
             <PersonIcon fontSize="small" sx={{ color: 'text.secondary', fontSize: '1rem', mt: 0.5 }} />
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              sx={{
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                display: '-webkit-box',
-                WebkitLineClamp: 1,
-                WebkitBoxOrient: 'vertical'
-              }}
-            >
-              {formatTenantNames(apartment.tenants)}
-            </Typography>
+            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+              {hasTenants ? (
+                <Box>
+                  {/* Show tenant names or clickable chips */}
+                  {onGoToTenant ? (
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                      {tenants.slice(0, 2).map((tenant) => (
+                        <Chip
+                          key={tenant.id}
+                          label={getTenantDisplayName(tenant)}
+                          size="small"
+                          variant="outlined"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleTenantClick(tenant);
+                          }}
+                          sx={{
+                            fontSize: '0.7rem',
+                            height: '20px',
+                            cursor: 'pointer',
+                            '&:hover': {
+                              backgroundColor: 'primary.50',
+                              borderColor: 'primary.main'
+                            }
+                          }}
+                        />
+                      ))}
+                      {tenants.length > 2 && (
+                        <IconButton
+                          size="small"
+                          onClick={handleTenantMenuClick}
+                          sx={{
+                            width: 20,
+                            height: 20,
+                            color: 'text.secondary',
+                            '&:hover': { color: 'primary.main' }
+                          }}
+                        >
+                          <MoreVertIcon fontSize="small" />
+                        </IconButton>
+                      )}
+                    </Box>
+                  ) : (
+                    <Typography
+                      variant="body2"
+                      color="text.secondary"
+                      sx={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 1,
+                        WebkitBoxOrient: 'vertical'
+                      }}
+                    >
+                      {formatTenantNames(tenants)}
+                    </Typography>
+                  )}
+                </Box>
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  No tenants assigned
+                </Typography>
+              )}
+            </Box>
           </Box>
         </Box>
         <Divider sx={{ my: 2 }} />
@@ -368,6 +529,36 @@ function ApartmentCard({
           </Box>
         </Box>
       </CardContent>
+
+      {/* Tenant Menu for overflow tenants */}
+      <Menu
+        anchorEl={tenantMenuAnchor}
+        open={Boolean(tenantMenuAnchor)}
+        onClose={handleTenantMenuClose}
+        PaperProps={{
+          sx: {
+            maxWidth: 250,
+            borderRadius: 1
+          }
+        }}
+      >
+        {tenants.slice(2).map((tenant) => (
+          <MenuItem
+            key={tenant.id}
+            onClick={() => handleTenantClick(tenant)}
+            sx={{ py: 1 }}
+          >
+            <ListItemIcon>
+              <PersonIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText
+              primary={getTenantDisplayName(tenant)}
+              secondary={tenant.email || 'No email'}
+            />
+            <ViewIcon fontSize="small" color="action" sx={{ ml: 1 }} />
+          </MenuItem>
+        ))}
+      </Menu>
     </Card>
   );
 }

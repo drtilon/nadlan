@@ -31,6 +31,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     address: '',
     rooms: 0,
     size: 0,
+    maxOccupancy: 1, // NEW FIELD - default to 1
     landlord_id: null,
     moveInDate: '',
     contractEndDate: '',
@@ -51,7 +52,8 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     status: Object.values(APARTMENT_STATUS).includes(initialData.status)
       ? initialData.status
       : APARTMENT_STATUS.VACANT,
-    landlord_id: initialData.landlord?.id || initialData.landlord_id
+    landlord_id: initialData.landlord?.id || initialData.landlord_id,
+    maxOccupancy: initialData.maxOccupancy || 1 // Ensure maxOccupancy has a default value
   } : emptyForm;
 
   // Remove any invalid fields
@@ -178,6 +180,20 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
 
     const processedValue = isNumber ? (value ? parseFloat(value) : 0) : value;
 
+    // Special handling for rooms change - suggest maxOccupancy
+    if (name === 'rooms' && isNumber && processedValue > 0) {
+      // Auto-suggest maxOccupancy based on rooms if maxOccupancy is still default
+      if (formData.maxOccupancy <= 1) {
+        const suggestedOccupancy = Math.max(1, processedValue + 1); // rooms + 1 as a reasonable default
+        setFormData(prev => ({
+          ...prev,
+          rooms: processedValue,
+          maxOccupancy: suggestedOccupancy
+        }));
+        return;
+      }
+    }
+
     if (name === 'model') {
       if (processedValue === PROPERTY_MODELS.MANAGEMENT) {
         setFormData(prev => ({
@@ -232,6 +248,12 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         return;
       }
 
+      // Check if adding this tenant would exceed max occupancy
+      if (tenantData.length >= formData.maxOccupancy) {
+        showNotification(`Cannot add more tenants. Maximum occupancy is ${formData.maxOccupancy}`, 'warning');
+        return;
+      }
+
       const isPrimary = tenantData.length === 0;
 
       const enrichedTenant = {
@@ -253,6 +275,13 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   const handleNewTenantCreated = (newTenant) => {
     if (newTenant.id && addedTenantIds.has(newTenant.id)) {
       showNotification('This tenant is already added to the apartment', 'warning');
+      setTenantFormOpen(false);
+      return;
+    }
+
+    // Check if adding this tenant would exceed max occupancy
+    if (tenantData.length >= formData.maxOccupancy) {
+      showNotification(`Cannot add more tenants. Maximum occupancy is ${formData.maxOccupancy}`, 'warning');
       setTenantFormOpen(false);
       return;
     }
@@ -297,6 +326,19 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     try {
       if (!formData.address) {
         showNotification('Address is required', 'error');
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (!formData.maxOccupancy || formData.maxOccupancy < 1) {
+        showNotification('Maximum occupancy must be at least 1', 'error');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Check if tenants exceed max occupancy
+      if (tenantData.length > formData.maxOccupancy) {
+        showNotification(`Number of tenants (${tenantData.length}) exceeds maximum occupancy (${formData.maxOccupancy})`, 'error');
         setIsSubmitting(false);
         return;
       }
@@ -388,6 +430,8 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         onSetTenantAsPrimary={setTenantAsPrimary}
         onRemoveTenant={removeTenant}
         onOpenTenantForm={() => setTenantFormOpen(true)}
+        maxOccupancy={formData.maxOccupancy}
+        currentTenantCount={tenantData.length}
       />
     )
   };

@@ -46,7 +46,7 @@ def get_expiry_status(contract_end_date):
 def list_apartments_paginated() -> Tuple[Response, int]:
     """
     Get paginated apartment list with search, sorting, and filtering.
-    Updated to work with contract periods system.
+    Updated to work with contract periods system and maxOccupancy.
     """
     try:
         # Parse query parameters
@@ -99,6 +99,21 @@ def list_apartments_paginated() -> Tuple[Response, int]:
         # Apply sorting
         if sort_by == 'alphabetical':
             query = query.order_by(asc(Apartment.address))
+        elif sort_by == 'occupancy':
+            # Sort by occupancy ratio - full apartments first, then by percentage
+            query = query.order_by(
+                # Calculate current tenant count using a subquery
+                desc(
+                    func.coalesce(
+                        db.session.query(func.count(Tenant.id))
+                        .filter(Tenant.apartment_id == Apartment.id)
+                        .scalar_subquery(),
+                        0
+                    ) * 100.0 / Apartment.maxOccupancy
+                ),
+                desc(Apartment.maxOccupancy),
+                asc(Apartment.address)
+            )
         elif sort_by == 'expiry':
             # Simplified sorting for expiry status using standard SQL
             today = date.today()
@@ -174,12 +189,24 @@ def list_apartments_paginated() -> Tuple[Response, int]:
             elif apt.status in ['Contract Sent']:
                 normalized_status = 'contract_sent'
 
+            # Calculate occupancy information
+            current_tenant_count = len(tenants)
+            max_occupancy = apt.maxOccupancy or 1
+            occupancy_ratio = f"{current_tenant_count}/{max_occupancy}"
+            is_full = current_tenant_count >= max_occupancy
+            occupancy_percentage = (current_tenant_count / max_occupancy * 100) if max_occupancy > 0 else 0
+
             # Build apartment data
             apt_dict = {
                 'id': apt.id,
                 'address': apt.address,
                 'rooms': apt.rooms,
                 'size': apt.size,
+                'maxOccupancy': max_occupancy,
+                'current_tenant_count': current_tenant_count,
+                'occupancy_ratio': occupancy_ratio,
+                'is_full': is_full,
+                'occupancy_percentage': occupancy_percentage,
                 'rent': float(apt.rent) if apt.rent else 0,
                 'deposit': float(apt.deposit) if apt.deposit else 0,
                 'status': normalized_status,

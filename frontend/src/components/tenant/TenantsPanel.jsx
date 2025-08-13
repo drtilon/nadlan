@@ -1,5 +1,6 @@
-// components/TenantsPanel.jsx
+// components/TenantsPanel.jsx - COMPLETE FIXED VERSION
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Container,
   Paper,
@@ -39,11 +40,12 @@ import {
   Cake as BirthdayIcon
 } from '@mui/icons-material';
 import api from '../../utils/api';
-import TenantDetails from './TenantDetails';
 import EnhancedTenantForm from './EnhancedTenantForm';
 import Pagination from '../common/Pagination';
 
 function TenantsPanel({ showNotification }) {
+  const navigate = useNavigate();
+
   const [tenants, setTenants] = useState([]);
   const [apartments, setApartments] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -62,7 +64,6 @@ function TenantsPanel({ showNotification }) {
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [tenantToDelete, setTenantToDelete] = useState(null);
-  const [selectedTenant, setSelectedTenant] = useState(null);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -216,9 +217,9 @@ function TenantsPanel({ showNotification }) {
     }
   };
 
-  // Handle view tenant details
+  // FIXED: Handle view tenant details with React Router
   const handleViewTenant = (tenant) => {
-    setSelectedTenant(tenant.id);
+    navigate(`/tenants/${tenant.id}`);
   };
 
   // FIXED: Get apartment address by ID with safety checks
@@ -252,17 +253,6 @@ function TenantsPanel({ showNotification }) {
   const handleItemsPerPageChange = (newItemsPerPage) => {
     setItemsPerPage(newItemsPerPage);
   };
-
-  // If a tenant is selected, show tenant details
-  if (selectedTenant) {
-    return (
-      <TenantDetails
-        tenantId={selectedTenant}
-        onBack={() => setSelectedTenant(null)}
-        showNotification={showNotification}
-      />
-    );
-  }
 
   return (
     <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>

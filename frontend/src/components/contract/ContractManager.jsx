@@ -38,7 +38,7 @@ import {
   Close as CloseIcon,
   Refresh as RefreshIcon
 } from '@mui/icons-material';
-import api from '../utils/api';
+import api from '../../utils/api';
 
 function ContractManager({ showNotification }) {
   const [apartments, setApartments] = useState([]);

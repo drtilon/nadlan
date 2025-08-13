@@ -1,10 +1,10 @@
-// src/components/ContractManager.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Paper,
   Typography,
   Box,
   Button,
+  CircularProgress,
   Table,
   TableBody,
   TableCell,
@@ -13,409 +13,441 @@ import {
   TableRow,
   IconButton,
   Tooltip,
+  Alert,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   TextField,
-  CircularProgress,
-  Alert,
-  Chip,
-  Divider,
+  LinearProgress,
   Grid,
   Card,
   CardContent,
-  LinearProgress,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Autocomplete
+  Chip,
+  Divider,
+  Stack
 } from '@mui/material';
 import {
-  Add as AddIcon,
+  Description as DescriptionIcon,
+  Upload as UploadIcon,
   Delete as DeleteIcon,
   Download as DownloadIcon,
-  CloudUpload as UploadIcon,
-  Description as DescriptionIcon,
-  Refresh as RefreshIcon,
-  Search as SearchIcon,
   Apartment as ApartmentIcon,
-  Close as CloseIcon
+  Search as SearchIcon,
+  Add as AddIcon,
+  Visibility as ViewIcon,
+  Close as CloseIcon,
+  Refresh as RefreshIcon
 } from '@mui/icons-material';
 import api from '../../utils/api';
 
 function ContractManager({ showNotification }) {
-  const [contracts, setContracts] = useState([]);
   const [apartments, setApartments] = useState([]);
+  const [selectedApartment, setSelectedApartment] = useState(null);
+  const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
-  const [selectedFiles, setSelectedFiles] = useState([]);
-  const [selectedApartment, setSelectedApartment] = useState('');
-  const [notes, setNotes] = useState('');
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredContracts, setFilteredContracts] = useState([]);
+  const [filteredApartments, setFilteredApartments] = useState([]);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [contractNotes, setContractNotes] = useState('');
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [selectedContract, setSelectedContract] = useState(null);
 
+  // Fetch apartments on component mount
   useEffect(() => {
     fetchApartments();
-    fetchAllContracts();
   }, []);
 
+  // Filter apartments based on search query
   useEffect(() => {
-    if (!searchQuery) {
-      setFilteredContracts(contracts);
-      return;
+    if (searchQuery) {
+      const filtered = apartments.filter(apt =>
+        apt.address.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      setFilteredApartments(filtered);
+    } else {
+      setFilteredApartments(apartments);
     }
+  }, [searchQuery, apartments]);
 
-    const query = searchQuery.toLowerCase();
-    const filtered = contracts.filter(contract =>
-      contract.fileName.toLowerCase().includes(query) ||
-      contract.apartmentAddress?.toLowerCase().includes(query) ||
-      contract.notes?.toLowerCase().includes(query)
-    );
-    setFilteredContracts(filtered);
-  }, [searchQuery, contracts]);
-
+  // Fetch list of apartments
   const fetchApartments = async () => {
+    setLoading(true);
     try {
       const response = await api.get('/list');
       setApartments(response.data || []);
+      setFilteredApartments(response.data || []);
+      setLoading(false);
     } catch (error) {
       console.error('Error fetching apartments:', error);
       showNotification('Failed to load apartments', 'error');
-    }
-  };
-
-  const fetchAllContracts = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get('/documents/contracts/search?q=');
-      setContracts(response.data || []);
-      setFilteredContracts(response.data || []);
-    } catch (error) {
-      console.error('Error fetching contracts:', error);
-      showNotification('Failed to load contracts', 'error');
-    } finally {
       setLoading(false);
     }
   };
 
-  const handleFileChange = (e) => {
-    const files = Array.from(e.target.files);
-
-    // Validate file types
-    const allowedTypes = ['application/pdf', 'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'text/plain', 'image/jpeg', 'image/jpg', 'image/png'];
-
-    const invalidFiles = files.filter(file => !allowedTypes.includes(file.type));
-
-    if (invalidFiles.length > 0) {
-      showNotification('Invalid file type. Please select PDF, DOC, DOCX, TXT, or image files.', 'error');
-      return;
-    }
-
-    // Check individual file sizes (50MB limit per file)
-    const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
-    const oversizedFiles = files.filter(file => file.size > MAX_FILE_SIZE);
-
-    if (oversizedFiles.length > 0) {
-      showNotification(`File(s) too large. Maximum size per file is 50MB.`, 'error');
-      return;
-    }
-
-    // Check total size (100MB limit for all files combined)
-    const MAX_TOTAL_SIZE = 100 * 1024 * 1024; // 100MB
-    const totalSize = files.reduce((sum, file) => sum + file.size, 0);
-
-    if (totalSize > MAX_TOTAL_SIZE) {
-      showNotification(`Total file size too large. Maximum total size is 100MB.`, 'error');
-      return;
-    }
-
-    setSelectedFiles(files);
-  };
-
-  const formatFileSize = (bytes) => {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-  };
-
-  const handleUpload = async () => {
-    if (!selectedApartment) {
-      showNotification('Please select an apartment', 'error');
-      return;
-    }
-
-    if (selectedFiles.length === 0) {
-      showNotification('Please select files to upload', 'error');
-      return;
-    }
-
-    setIsUploading(true);
-    setUploadProgress(0);
-
+  // Fetch contracts for a specific apartment
+  const fetchContracts = async (apartmentId) => {
+    setLoading(true);
     try {
-      const formData = new FormData();
-      formData.append('apartmentId', selectedApartment);
-      formData.append('notes', notes);
+      // Assuming there's an API endpoint to fetch contracts for an apartment
+      const response = await api.get(`/documents/contracts/${apartmentId}`);
+      setContracts(response.data || []);
 
+      // Find and set the selected apartment object
+      const selected = apartments.find(apt => apt.id === apartmentId);
+      setSelectedApartment(selected || null);
+
+      setLoading(false);
+    } catch (error) {
+      console.error('Error fetching contracts:', error);
+      showNotification('Failed to load contracts', 'error');
+      setContracts([]);
+      setLoading(false);
+    }
+  };
+
+  // Handle apartment selection
+  const handleApartmentSelect = (apartmentId) => {
+    fetchContracts(apartmentId);
+  };
+
+  // Handle file input change
+  const handleFileChange = (event) => {
+    setSelectedFiles(Array.from(event.target.files));
+  };
+
+  // Handle contract notes change
+  const handleNotesChange = (event) => {
+    setContractNotes(event.target.value);
+  };
+
+  // Open upload dialog
+  const handleOpenUploadDialog = () => {
+    setSelectedFiles([]);
+    setContractNotes('');
+    setUploadDialogOpen(true);
+  };
+
+  // Close upload dialog
+  const handleCloseUploadDialog = () => {
+    setUploadDialogOpen(false);
+  };
+
+  // Upload contract files
+  const handleUploadContracts = async () => {
+    if (!selectedFiles.length || !selectedApartment) {
+      showNotification('Please select files and an apartment', 'error');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      // Create form data for file upload
+      const formData = new FormData();
       selectedFiles.forEach(file => {
         formData.append('files', file);
       });
+      formData.append('apartmentId', selectedApartment.id);
+      formData.append('notes', contractNotes);
 
-      const response = await api.post('/documents/upload', formData, {
+      // Assuming there's an API endpoint to upload contracts
+      await api.post('/documents/upload', formData, {
         headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        onUploadProgress: (progressEvent) => {
-          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          setUploadProgress(percentCompleted);
-        },
+          'Content-Type': 'multipart/form-data'
+        }
       });
 
-      showNotification(response.data.message, 'success');
+      showNotification('Contract(s) uploaded successfully', 'success');
       setUploadDialogOpen(false);
-      setSelectedFiles([]);
-      setSelectedApartment('');
-      setNotes('');
-      fetchAllContracts();
+
+      // Refresh contracts list
+      fetchContracts(selectedApartment.id);
     } catch (error) {
       console.error('Error uploading contracts:', error);
-      if (error.response?.status === 413) {
-        showNotification('File too large. Please reduce file size and try again.', 'error');
-      } else {
-        showNotification(error.response?.data?.message || 'Failed to upload contracts', 'error');
-      }
+      showNotification('Failed to upload contracts', 'error');
     } finally {
-      setIsUploading(false);
-      setUploadProgress(0);
+      setUploading(false);
     }
   };
 
-  const handleDownload = async (contractId, fileName) => {
+  // Download a contract
+  const handleDownloadContract = async (contract) => {
     try {
-      const response = await api.get(`/documents/download/${contractId}`, {
-        responseType: 'blob',
+      const response = await api.get(`/documents/download/${contract.id}`, {
+        responseType: 'blob'
       });
 
+      // Create a URL for the blob
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', fileName);
+      link.setAttribute('download', contract.fileName);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
 
-      showNotification('Contract downloaded successfully', 'success');
     } catch (error) {
       console.error('Error downloading contract:', error);
       showNotification('Failed to download contract', 'error');
     }
   };
 
-  const handleDelete = async (contractId) => {
-    if (!window.confirm('Are you sure you want to delete this contract?')) {
+  // Delete a contract
+  const handleDeleteContract = async (contract) => {
+    if (!window.confirm(`Are you sure you want to delete ${contract.fileName}?`)) {
       return;
     }
 
     try {
-      await api.delete(`/documents/contracts/${contractId}`);
+      await api.delete(`/documents/contracts/${contract.id}`);
       showNotification('Contract deleted successfully', 'success');
-      fetchAllContracts();
+
+      // Refresh contracts list
+      fetchContracts(selectedApartment.id);
     } catch (error) {
       console.error('Error deleting contract:', error);
       showNotification('Failed to delete contract', 'error');
     }
   };
 
-  const handleOpenUploadDialog = () => {
-    setSelectedFiles([]);
-    setSelectedApartment('');
-    setNotes('');
-    setUploadDialogOpen(true);
+  // Open contract preview dialog
+  const handleViewContract = (contract) => {
+    setSelectedContract(contract);
+    setViewDialogOpen(true);
   };
 
-  const handleCloseUploadDialog = () => {
-    setUploadDialogOpen(false);
-    setSelectedFiles([]);
-    setSelectedApartment('');
-    setNotes('');
-    setUploadProgress(0);
+  // Format file size
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  const removeFile = (index) => {
-    const newFiles = selectedFiles.filter((_, i) => i !== index);
-    setSelectedFiles(newFiles);
+  // Format date
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Unknown';
+
+    const date = new Date(dateString);
+    return date.toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   return (
     <Paper elevation={3} sx={{ p: 3, mb: 3 }}>
-      <Box display="flex" alignItems="center" justifyContent="space-between" mb={3}>
-        <Box display="flex" alignItems="center">
-          <DescriptionIcon fontSize="large" color="primary" sx={{ mr: 2 }} />
-          <Typography variant="h5" component="h2">
-            Contract Manager
-          </Typography>
-        </Box>
-        <Box display="flex" gap={2}>
-          <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={fetchAllContracts}
-            disabled={loading}
-          >
-            Refresh
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<UploadIcon />}
-            onClick={handleOpenUploadDialog}
-          >
-            Upload Contracts
-          </Button>
-        </Box>
+      <Box display="flex" alignItems="center" mb={3}>
+        <DescriptionIcon fontSize="large" color="primary" sx={{ mr: 2 }} />
+        <Typography variant="h5" component="h2">
+          Contract Manager
+        </Typography>
       </Box>
 
       <Divider sx={{ mb: 3 }} />
 
-      {/* Search Bar */}
-      <Box sx={{ mb: 3 }}>
-        <TextField
-          fullWidth
-          placeholder="Search contracts by filename, apartment address, or notes..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          InputProps={{
-            startAdornment: <SearchIcon color="action" sx={{ mr: 1 }} />
-          }}
-        />
-      </Box>
+      <Grid container spacing={3}>
+        {/* Left side - Apartment Selection */}
+        <Grid item xs={12} md={4}>
+          <Card variant="outlined" sx={{ height: '100%' }}>
+            <CardContent>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                <Typography variant="h6">
+                  <ApartmentIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                  Properties
+                </Typography>
 
-      {/* Summary Cards */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Total Contracts
-              </Typography>
-              <Typography variant="h4">
-                {contracts.length}
-              </Typography>
+                <Tooltip title="Refresh">
+                  <IconButton size="small" onClick={fetchApartments} disabled={loading}>
+                    <RefreshIcon />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+
+              <TextField
+                fullWidth
+                placeholder="Search properties..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                variant="outlined"
+                size="small"
+                InputProps={{
+                  startAdornment: <SearchIcon color="action" sx={{ mr: 1 }} />
+                }}
+                sx={{ mb: 2 }}
+              />
+
+              {loading ? (
+                <Box display="flex" justifyContent="center" my={4}>
+                  <CircularProgress />
+                </Box>
+              ) : filteredApartments.length > 0 ? (
+                <Box sx={{ maxHeight: '400px', overflow: 'auto' }}>
+                  {filteredApartments.map((apartment) => (
+                    <Card
+                      key={apartment.id}
+                      variant="outlined"
+                      sx={{
+                        mb: 1,
+                        cursor: 'pointer',
+                        bgcolor: selectedApartment?.id === apartment.id ? 'primary.light' : 'background.paper',
+                        '&:hover': {
+                          boxShadow: 1,
+                          bgcolor: selectedApartment?.id === apartment.id ? 'primary.light' : 'action.hover'
+                        }
+                      }}
+                      onClick={() => handleApartmentSelect(apartment.id)}
+                    >
+                      <CardContent sx={{ py: 1, '&:last-child': { pb: 1 } }}>
+                        <Typography fontWeight={selectedApartment?.id === apartment.id ? 'bold' : 'normal'}>
+                          {apartment.address}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {apartment.tenants && (
+                            typeof apartment.tenants === 'string'
+                              ? apartment.tenants
+                              : Array.isArray(apartment.tenants)
+                                ? apartment.tenants.map(t => t.name || `${t.firstName} ${t.lastName}`).join(', ')
+                                : 'No tenants'
+                          )}
+                        </Typography>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </Box>
+              ) : (
+                <Alert severity="info">No properties found</Alert>
+              )}
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={4}>
-          <Card>
+
+        {/* Right side - Contracts List & Actions */}
+        <Grid item xs={12} md={8}>
+          <Card variant="outlined" sx={{ height: '100%' }}>
             <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Total Size
-              </Typography>
-              <Typography variant="h4">
-                {formatFileSize(contracts.reduce((sum, contract) => sum + (contract.fileSize || 0), 0))}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent>
-              <Typography color="textSecondary" gutterBottom>
-                Apartments with Contracts
-              </Typography>
-              <Typography variant="h4">
-                {new Set(contracts.map(c => c.apartment_id)).size}
-              </Typography>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                <Typography variant="h6">
+                  <DescriptionIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
+                  {selectedApartment ? `Contracts for ${selectedApartment.address}` : 'Contracts'}
+                </Typography>
+
+                <Button
+                  variant="contained"
+                  startIcon={<UploadIcon />}
+                  onClick={handleOpenUploadDialog}
+                  disabled={!selectedApartment}
+                  size="small"
+                >
+                  Upload Contract
+                </Button>
+              </Box>
+
+              {loading ? (
+                <Box display="flex" justifyContent="center" my={4}>
+                  <CircularProgress />
+                </Box>
+              ) : selectedApartment ? (
+                contracts.length > 0 ? (
+                  <TableContainer>
+                    <Table>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>File Name</TableCell>
+                          <TableCell>Upload Date</TableCell>
+                          <TableCell>Size</TableCell>
+                          <TableCell>Type</TableCell>
+                          <TableCell>Notes</TableCell>
+                          <TableCell align="right">Actions</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {contracts.map((contract) => (
+                          <TableRow key={contract.id} hover>
+                            <TableCell>
+                              <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                                <DescriptionIcon fontSize="small" sx={{ mr: 1 }} />
+                                <Typography variant="body2">{contract.fileName}</Typography>
+                              </Box>
+                            </TableCell>
+                            <TableCell>{formatDate(contract.uploadDate)}</TableCell>
+                            <TableCell>{formatFileSize(contract.fileSize)}</TableCell>
+                            <TableCell>
+                              <Chip
+                                label={contract.fileType}
+                                size="small"
+                                variant="outlined"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Typography
+                                variant="body2"
+                                sx={{
+                                  maxWidth: '150px',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis'
+                                }}
+                              >
+                                {contract.notes || 'No notes'}
+                              </Typography>
+                            </TableCell>
+                            <TableCell align="right">
+                              <Tooltip title="View">
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleViewContract(contract)}
+                                  sx={{ color: 'primary.main' }}
+                                >
+                                  <ViewIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Download">
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleDownloadContract(contract)}
+                                  sx={{ color: 'success.main' }}
+                                >
+                                  <DownloadIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Delete">
+                                <IconButton
+                                  size="small"
+                                  onClick={() => handleDeleteContract(contract)}
+                                  sx={{ color: 'error.main' }}
+                                >
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </Tooltip>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                ) : (
+                  <Alert severity="info">
+                    No contracts found for this property. Click "Upload Contract" to add contracts.
+                  </Alert>
+                )
+              ) : (
+                <Alert severity="info">
+                  Please select a property to view and manage its contracts.
+                </Alert>
+              )}
             </CardContent>
           </Card>
         </Grid>
       </Grid>
-
-      {loading ? (
-        <Box display="flex" justifyContent="center" my={4}>
-          <CircularProgress />
-        </Box>
-      ) : filteredContracts.length === 0 ? (
-        <Alert severity="info" sx={{ mt: 3 }}>
-          {searchQuery ? 'No contracts found matching your search.' : 'No contracts found. Upload some contracts to get started.'}
-        </Alert>
-      ) : (
-        <TableContainer>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>File Name</TableCell>
-                <TableCell>Apartment</TableCell>
-                <TableCell>Size</TableCell>
-                <TableCell>Upload Date</TableCell>
-                <TableCell>Notes</TableCell>
-                <TableCell align="right">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredContracts.map((contract) => (
-                <TableRow key={contract.id} hover>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <DescriptionIcon fontSize="small" sx={{ mr: 1, color: 'primary.main' }} />
-                      <Typography variant="body2">{contract.fileName}</Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <ApartmentIcon fontSize="small" sx={{ mr: 1, color: 'secondary.main' }} />
-                      <Typography variant="body2">
-                        {contract.apartmentAddress || `Apartment ID: ${contract.apartment_id}`}
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>{formatFileSize(contract.fileSize || 0)}</TableCell>
-                  <TableCell>
-                    {contract.uploadDate
-                      ? new Date(contract.uploadDate).toLocaleDateString()
-                      : 'Unknown'
-                    }
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" sx={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {contract.notes || '-'}
-                    </Typography>
-                  </TableCell>
-                  <TableCell align="right">
-                    <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
-                      <Tooltip title="Download">
-                        <IconButton
-                          size="small"
-                          color="primary"
-                          onClick={() => handleDownload(contract.id, contract.fileName)}
-                        >
-                          <DownloadIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete">
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => handleDelete(contract.id)}
-                        >
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
 
       {/* Upload Dialog */}
       <Dialog
@@ -423,182 +455,183 @@ function ContractManager({ showNotification }) {
         onClose={handleCloseUploadDialog}
         maxWidth="md"
         fullWidth
-        PaperProps={{
-          sx: { borderRadius: 2, overflow: 'hidden' }
-        }}
       >
-        <DialogTitle
-          sx={{
-            p: 3,
-            bgcolor: 'primary.main',
-            color: 'primary.contrastText',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between'
-          }}
-        >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <UploadIcon />
-            <Typography variant="h6" sx={{ fontWeight: 600 }}>
+        <DialogTitle>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="h6">
+              <UploadIcon sx={{ mr: 1, verticalAlign: 'middle' }} />
               Upload Contracts
             </Typography>
+            <IconButton onClick={handleCloseUploadDialog} size="small">
+              <CloseIcon />
+            </IconButton>
           </Box>
-          <IconButton
-            edge="end"
-            color="inherit"
-            onClick={handleCloseUploadDialog}
-            aria-label="close"
-            size="small"
-            disabled={isUploading}
-          >
-            <CloseIcon />
-          </IconButton>
         </DialogTitle>
 
-        <DialogContent sx={{ p: 3 }}>
-          <Alert severity="info" sx={{ mb: 3 }}>
-            <Typography variant="body2">
-              <strong>File Requirements:</strong>
-            </Typography>
-            <Typography variant="caption" display="block">
-              • Supported formats: PDF, DOC, DOCX, TXT, JPG, PNG
-            </Typography>
-            <Typography variant="caption" display="block">
-              • Maximum file size: 50MB per file
-            </Typography>
-            <Typography variant="caption" display="block">
-              • Maximum total size: 100MB for all files combined
-            </Typography>
-          </Alert>
-
-          <Grid container spacing={3}>
-            <Grid item xs={12}>
-              <FormControl fullWidth variant="outlined">
-                <InputLabel>Select Apartment</InputLabel>
-                <Select
-                  value={selectedApartment}
-                  onChange={(e) => setSelectedApartment(e.target.value)}
-                  label="Select Apartment"
-                  disabled={isUploading}
-                >
-                  {apartments.map((apartment) => (
-                    <MenuItem key={apartment.id} value={apartment.id}>
-                      {apartment.address}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-
-            <Grid item xs={12}>
-              <Box sx={{ mb: 2 }}>
-                <input
-                  accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png"
-                  style={{ display: 'none' }}
-                  id="contract-file-upload"
-                  type="file"
-                  multiple
-                  onChange={handleFileChange}
-                  disabled={isUploading}
-                />
-                <label htmlFor="contract-file-upload">
-                  <Button
-                    component="span"
-                    variant="outlined"
-                    startIcon={<UploadIcon />}
-                    fullWidth
-                    disabled={isUploading}
-                    sx={{ py: 2 }}
-                  >
-                    {selectedFiles.length > 0
-                      ? `${selectedFiles.length} file(s) selected`
-                      : 'Choose Files'
-                    }
-                  </Button>
-                </label>
-              </Box>
-
-              {selectedFiles.length > 0 && (
-                <Box sx={{ mt: 2 }}>
-                  <Typography variant="subtitle2" gutterBottom>
-                    Selected Files:
-                  </Typography>
-                  {selectedFiles.map((file, index) => (
-                    <Box
-                      key={index}
-                      sx={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        p: 1,
-                        border: 1,
-                        borderColor: 'divider',
-                        borderRadius: 1,
-                        mb: 1
-                      }}
-                    >
-                      <Box>
-                        <Typography variant="body2">{file.name}</Typography>
-                        <Typography variant="caption" color="textSecondary">
-                          {formatFileSize(file.size)}
-                        </Typography>
-                      </Box>
-                      <IconButton
-                        size="small"
-                        onClick={() => removeFile(index)}
-                        disabled={isUploading}
-                      >
-                        <CloseIcon fontSize="small" />
-                      </IconButton>
-                    </Box>
-                  ))}
-                  <Typography variant="caption" color="textSecondary">
-                    Total size: {formatFileSize(selectedFiles.reduce((sum, file) => sum + file.size, 0))}
-                  </Typography>
-                </Box>
-              )}
-            </Grid>
-
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Notes (Optional)"
-                multiline
-                rows={3}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                disabled={isUploading}
-              />
-            </Grid>
-          </Grid>
-
-          {isUploading && (
-            <Box sx={{ mt: 3 }}>
-              <Typography variant="body2" gutterBottom>
-                Uploading... {uploadProgress}%
+        <DialogContent>
+          {selectedApartment && (
+            <Box mb={3}>
+              <Typography variant="subtitle1" gutterBottom>
+                Selected Property:
               </Typography>
-              <LinearProgress variant="determinate" value={uploadProgress} />
+              <Chip
+                icon={<ApartmentIcon />}
+                label={selectedApartment.address}
+                color="primary"
+              />
             </Box>
           )}
+
+          <Box
+            sx={{
+              border: '2px dashed',
+              borderColor: 'divider',
+              borderRadius: 2,
+              p: 3,
+              textAlign: 'center',
+              mb: 3
+            }}
+          >
+            <input
+              accept="application/pdf,.doc,.docx"
+              id="contained-button-file"
+              multiple
+              type="file"
+              onChange={handleFileChange}
+              style={{ display: 'none' }}
+            />
+            <label htmlFor="contained-button-file">
+              <Button
+                variant="contained"
+                component="span"
+                startIcon={<AddIcon />}
+              >
+                Select Files
+              </Button>
+            </label>
+
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Supported formats: PDF, DOC, DOCX
+            </Typography>
+
+            {selectedFiles.length > 0 && (
+              <Box mt={2}>
+                <Typography variant="subtitle2" gutterBottom>
+                  Selected Files:
+                </Typography>
+                <Stack spacing={1}>
+                  {selectedFiles.map((file, index) => (
+                    <Chip
+                      key={index}
+                      label={`${file.name} (${formatFileSize(file.size)})`}
+                      onDelete={() => {
+                        const newFiles = [...selectedFiles];
+                        newFiles.splice(index, 1);
+                        setSelectedFiles(newFiles);
+                      }}
+                      sx={{ justifyContent: 'space-between' }}
+                    />
+                  ))}
+                </Stack>
+              </Box>
+            )}
+          </Box>
+
+          <TextField
+            label="Notes (optional)"
+            multiline
+            rows={3}
+            fullWidth
+            value={contractNotes}
+            onChange={handleNotesChange}
+            placeholder="Add notes about these contracts..."
+            variant="outlined"
+          />
         </DialogContent>
 
-        <DialogActions sx={{ p: 3, gap: 1 }}>
-          <Button
-            onClick={handleCloseUploadDialog}
-            variant="outlined"
-            disabled={isUploading}
-          >
+        <DialogActions sx={{ px: 3, pb: 3 }}>
+          <Button onClick={handleCloseUploadDialog} disabled={uploading}>
             Cancel
           </Button>
           <Button
-            onClick={handleUpload}
             variant="contained"
-            disabled={isUploading || !selectedApartment || selectedFiles.length === 0}
-            startIcon={isUploading ? <CircularProgress size={20} /> : <UploadIcon />}
+            color="primary"
+            onClick={handleUploadContracts}
+            disabled={selectedFiles.length === 0 || uploading}
+            startIcon={uploading ? <CircularProgress size={24} /> : <UploadIcon />}
           >
-            {isUploading ? 'Uploading...' : 'Upload'}
+            {uploading ? 'Uploading...' : 'Upload'}
           </Button>
         </DialogActions>
+      </Dialog>
+
+      {/* View Contract Dialog */}
+      <Dialog
+        open={viewDialogOpen}
+        onClose={() => setViewDialogOpen(false)}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogTitle>
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="h6">
+              {selectedContract?.fileName}
+            </Typography>
+            <IconButton onClick={() => setViewDialogOpen(false)} size="small">
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+
+        <DialogContent>
+          {selectedContract && (
+            <>
+              <Box mb={2}>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="subtitle2">Upload Date:</Typography>
+                    <Typography variant="body2">{formatDate(selectedContract.uploadDate)}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="subtitle2">File Size:</Typography>
+                    <Typography variant="body2">{formatFileSize(selectedContract.fileSize)}</Typography>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle2">Notes:</Typography>
+                    <Typography variant="body2">{selectedContract.notes || 'No notes'}</Typography>
+                  </Grid>
+                </Grid>
+              </Box>
+
+              <Divider sx={{ my: 2 }} />
+
+              {/* Contract preview iframe - would need to be implemented based on backend support */}
+              <Box
+                sx={{
+                  height: '60vh',
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexDirection: 'column'
+                }}
+              >
+                <DescriptionIcon sx={{ fontSize: 60, color: 'text.secondary', mb: 2 }} />
+                <Typography variant="body1" mb={2}>
+                  Preview not available. Use the buttons below to download the file.
+                </Typography>
+                <Button
+                  variant="contained"
+                  startIcon={<DownloadIcon />}
+                  onClick={() => handleDownloadContract(selectedContract)}
+                >
+                  Download
+                </Button>
+              </Box>
+            </>
+          )}
+        </DialogContent>
       </Dialog>
     </Paper>
   );

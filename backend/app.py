@@ -1,4 +1,4 @@
-# app.py - FIXED VERSION
+# app.py - UPDATED VERSION with Fast Analytics
 from flask import Flask, current_app, request, Response
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -46,11 +46,11 @@ def create_app():
         app.config.from_object(Config)
 
         # Set file upload limits - UPDATED to 50MB
-        app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max file size
-        app.config['UPLOAD_FOLDER'] = os.path.join(app.root_path, 'uploads')
+        app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB max file size
+        app.config["UPLOAD_FOLDER"] = os.path.join(app.root_path, "uploads")
 
         # Additional configuration for better file handling
-        app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0  # Disable caching for file uploads
+        app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # Disable caching for file uploads
 
         try:
             # Allow requests from any origin during development
@@ -135,7 +135,9 @@ def create_app():
         def bad_request(e):
             # Check if it's a file size related error
             if "too large" in str(e).lower() or "413" in str(e):
-                return {"error": "Request too large. Please reduce file size and try again."}, 413
+                return {
+                    "error": "Request too large. Please reduce file size and try again."
+                }, 413
             return {"error": "Bad request"}, 400
 
         try:
@@ -168,14 +170,16 @@ def create_app():
             from routes.adminPanel.user_actions import adminPanel_bp
             from routes.payments import payments_bp
             from routes.analytics import analytics_bp
+            from routes.fast_analytics import fast_analytics_bp  # NEW: Fast analytics
             from routes.documents import documents_bp
             from routes.logs import logs_bp
             from routes.payment_history import payment_history_bp
-            from routes.contracts import contracts_bp  # FIXED IMPORT
+            from routes.contracts import contracts_bp
             from routes.contract_templates import contract_templates_bp
             from routes.health import health_bp
             from routes.contract_periods import contract_periods_bp
 
+            # Register all blueprints
             app.register_blueprint(contract_periods_bp, url_prefix="/api")
             app.register_blueprint(health_bp, url_prefix="/api")
             app.register_blueprint(auth_bp, url_prefix="/api/auth")
@@ -185,12 +189,16 @@ def create_app():
             app.register_blueprint(landlords_bp, url_prefix="/api/")
             app.register_blueprint(payments_bp, url_prefix="/api/")
             app.register_blueprint(analytics_bp, url_prefix="/api/")
-            app.register_blueprint(payment_history_bp, url_prefix="/api")
+            app.register_blueprint(
+                fast_analytics_bp, url_prefix="/api/"
+            )  # NEW: Fast analytics routes
+            app.register_blueprint(payment_history_bp, url_prefix="/api/")
             app.register_blueprint(documents_bp, url_prefix="/api/documents")
-            app.register_blueprint(contracts_bp, url_prefix="/api/documents")  # FIXED REGISTRATION
+            app.register_blueprint(contracts_bp, url_prefix="/api/documents")
             app.register_blueprint(contract_templates_bp, url_prefix="/api/documents")
             app.register_blueprint(logs_bp, url_prefix="/api")
-            app.logger.info("Blueprints registered")
+            print("asd")
+            app.logger.info("Blueprints registered (including fast analytics)")
         except Exception as e:
             app.logger.error(f"Error registering blueprints: {e}")
 

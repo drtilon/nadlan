@@ -1,4 +1,4 @@
-// src/components/AnalyticsPanel.jsx - SIMPLIFIED VERSION (No Rental Model Controls)
+// src/components/AnalyticsPanel.jsx - COMPLETE FIXED VERSION
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
@@ -23,12 +23,14 @@ import {
   CardContent,
   Grid,
   Container,
+  Snackbar,
 } from '@mui/material';
 import {
   Close as CloseIcon,
   Assessment as AssessmentIcon,
   Error as ErrorIcon,
-  Receipt as ReceiptIcon
+  Receipt as ReceiptIcon,
+  Refresh as RefreshIcon,
 } from '@mui/icons-material';
 import api from '../../utils/api';
 import FinancialOverviewTab from './FinancialOverviewTab';
@@ -65,6 +67,7 @@ function AnalyticsPanel() {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [snackbarOpen, setSnackbarOpen] = useState(false);
 
   // Financial data
   const [financialData, setFinancialData] = useState(null);
@@ -77,15 +80,10 @@ function AnalyticsPanel() {
   const [outstandingSearch, setOutstandingSearch] = useState('');
   const [outstandingSort, setOutstandingSort] = useState('outstanding_desc');
 
-  // Net profit data - using default values (no UI controls)
+  // Net profit data
   const [netProfitData, setNetProfitData] = useState(null);
   const [netProfitLoading, setNetProfitLoading] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
-
-  // Fixed rental model settings (no UI controls)
-  const rentalModel = 'percentage';
-  const ownerPercentage = 80.0;
-  const deltaAmount = 500.0;
 
   // Dialog state
   const [selectedApartment, setSelectedApartment] = useState(null);
@@ -93,7 +91,7 @@ function AnalyticsPanel() {
   const [apartmentDetails, setApartmentDetails] = useState(null);
   const [detailsLoading, setDetailsLoading] = useState(false);
 
-  // Fetch functions
+  // FIXED: Simplified financial data fetch
   const fetchFinancialData = useCallback(async () => {
     try {
       setLoading(true);
@@ -102,20 +100,37 @@ function AnalyticsPanel() {
       console.log('Fetching financial data for year:', selectedYear);
 
       const response = await api.get('/analytics/financial-overview', {
-        params: {
-          year: selectedYear,
-          rental_model: rentalModel,
-          owner_percentage: ownerPercentage,
-          delta_amount: deltaAmount
-        }
+        params: { year: selectedYear },
+        timeout: 30000, // 30 second timeout
       });
 
       console.log('Financial data response:', response.data);
       setFinancialData(response.data);
+
+      // Show success message if data was fetched
+      if (response.data && response.data.current_month) {
+        setSnackbarOpen(true);
+      }
     } catch (err) {
       console.error('Error fetching financial data:', err);
       console.error('Error response:', err.response?.data);
-      setError('Failed to load financial overview: ' + (err.response?.data?.message || err.message));
+
+      const errorMessage = err.response?.data?.message || err.message || 'Unknown error occurred';
+      setError(`Failed to load financial overview: ${errorMessage}`);
+
+      // Set default empty data to prevent crashes
+      setFinancialData({
+        current_month: { collected: 0, net_profit: 0, outstanding: 0 },
+        outstanding: { total_amount: 0 },
+        monthly_breakdown: [],
+        debug_info: {
+          total_apartments: 0,
+          apartments_with_contracts: 0,
+          apartments_with_payments: 0,
+          year_queried: selectedYear,
+          current_month: new Date().toLocaleString('default', { month: 'long' })
+        }
+      });
     } finally {
       setLoading(false);
     }
@@ -141,7 +156,8 @@ function AnalyticsPanel() {
           year: selectedYear,
           search: outstandingSearch,
           sort: outstandingSort
-        }
+        },
+        timeout: 30000,
       });
 
       console.log('Outstanding payments response:', response.data);
@@ -149,7 +165,26 @@ function AnalyticsPanel() {
     } catch (err) {
       console.error('Error fetching outstanding data:', err);
       console.error('Error response:', err.response?.data);
-      setError('Failed to load outstanding payments: ' + (err.response?.data?.message || err.message));
+
+      const errorMessage = err.response?.data?.message || err.message || 'Unknown error occurred';
+      setError(`Failed to load outstanding payments: ${errorMessage}`);
+
+      // Set default empty data
+      setOutstandingData({
+        apartments: [],
+        pagination: {
+          current_page: 1,
+          total_pages: 0,
+          total_items: 0,
+          items_per_page: outstandingRowsPerPage,
+          has_next_page: false,
+          has_prev_page: false,
+        },
+        summary: {
+          total_outstanding: 0,
+          apartments_with_debt: 0,
+        }
+      });
     } finally {
       setOutstandingLoading(false);
     }
@@ -162,20 +197,15 @@ function AnalyticsPanel() {
 
       console.log('Fetching net profit data with params:', {
         year: selectedYear,
-        month: selectedMonth,
-        rental_model: rentalModel,
-        owner_percentage: ownerPercentage,
-        delta_amount: deltaAmount
+        month: selectedMonth
       });
 
       const response = await api.get('/analytics/net-profit-detailed', {
         params: {
           year: selectedYear,
-          month: selectedMonth,
-          rental_model: rentalModel,
-          owner_percentage: ownerPercentage,
-          delta_amount: deltaAmount
-        }
+          month: selectedMonth
+        },
+        timeout: 30000,
       });
 
       console.log('Net profit data response:', response.data);
@@ -183,7 +213,24 @@ function AnalyticsPanel() {
     } catch (err) {
       console.error('Error fetching net profit data:', err);
       console.error('Error response:', err.response?.data);
-      setError('Failed to load net profit analysis: ' + (err.response?.data?.message || err.message));
+
+      const errorMessage = err.response?.data?.message || err.message || 'Unknown error occurred';
+      setError(`Failed to load net profit analysis: ${errorMessage}`);
+
+      // Set default empty data
+      setNetProfitData({
+        apartments: [],
+        pagination: {
+          current_page: 0,
+          total_pages: 0,
+          total_items: 0,
+        },
+        summary: {
+          total_apartments: 0,
+          total_monthly_rent: 0,
+          total_monthly_profit: 0,
+        }
+      });
     } finally {
       setNetProfitLoading(false);
     }
@@ -196,7 +243,13 @@ function AnalyticsPanel() {
 
       console.log('Fetching apartment details for ID:', apartmentId);
 
-      const response = await api.get(`/analytics/apartment-details/${apartmentId}`);
+      const response = await api.get(`/analytics/apartment-outstanding-details/${apartmentId}`, {
+        params: {
+          period_type: 'current_month',
+          year: selectedYear
+        },
+        timeout: 30000,
+      });
 
       console.log('Apartment details response:', response.data);
       setApartmentDetails(response.data);
@@ -208,25 +261,30 @@ function AnalyticsPanel() {
       const errorMessage = err.response?.data?.message || err.message || 'Unknown error occurred';
       setError(`Failed to load apartment details: ${errorMessage}`);
 
+      // Set fallback data
       setApartmentDetails({
         apartment: {
           id: apartmentId,
           address: selectedApartment?.address || 'N/A',
-          rent: selectedApartment?.monthly_rent || selectedApartment?.rent || 0,
+          monthly_rent: selectedApartment?.monthly_rent || selectedApartment?.rent || 0,
           status: selectedApartment?.status || 'unknown'
         },
-        payments: [],
+        period: {
+          type: 'current_month',
+          label: 'Current Month'
+        },
         summary: {
-          total_payments: 0,
-          total_outstanding: selectedApartment?.outstanding || 0,
-          last_payment_date: null,
-          payment_history_months: 0
-        }
+          expected_amount: 0,
+          total_outstanding: selectedApartment?.total_outstanding || 0,
+          total_paid: 0,
+          collection_rate: 0
+        },
+        tenant_breakdown: []
       });
     } finally {
       setDetailsLoading(false);
     }
-  }, [selectedApartment]);
+  }, [selectedApartment, selectedYear]);
 
   // Effects
   useEffect(() => {
@@ -289,6 +347,20 @@ function AnalyticsPanel() {
     setOutstandingSort(sortOption);
   };
 
+  const handleRefresh = () => {
+    if (activeTab === 0) {
+      fetchFinancialData();
+    } else if (activeTab === 1) {
+      fetchOutstandingPayments();
+    } else if (activeTab === 2) {
+      fetchNetProfitData();
+    }
+  };
+
+  const handleCloseSnackbar = () => {
+    setSnackbarOpen(false);
+  };
+
   // Generate year options
   const currentYear = new Date().getFullYear();
   const yearOptions = Array.from({ length: 5 }, (_, i) => currentYear - i);
@@ -314,13 +386,18 @@ function AnalyticsPanel() {
       {/* Error Display */}
       {error && (
         <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
-          {error}
+          <Typography variant="body2">{error}</Typography>
         </Alert>
       )}
 
       {/* Loading Backdrop */}
       <Backdrop open={loading} sx={{ color: '#fff', zIndex: (theme) => theme.zIndex.drawer + 1 }}>
-        <CircularProgress color="inherit" />
+        <Box sx={{ textAlign: 'center' }}>
+          <CircularProgress color="inherit" size={60} />
+          <Typography variant="h6" sx={{ mt: 2 }}>
+            Loading Analytics Data...
+          </Typography>
+        </Box>
       </Backdrop>
 
       {/* Header */}
@@ -329,7 +406,17 @@ function AnalyticsPanel() {
           Analytics Dashboard
         </Typography>
 
-        <Box sx={{ display: 'flex', gap: 2 }}>
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          {/* Refresh Button */}
+          <IconButton
+            onClick={handleRefresh}
+            color="primary"
+            disabled={loading}
+            title="Refresh current tab data"
+          >
+            <RefreshIcon />
+          </IconButton>
+
           {/* Year Selector */}
           <FormControl size="small" sx={{ minWidth: 120 }}>
             <InputLabel>Year</InputLabel>
@@ -351,8 +438,6 @@ function AnalyticsPanel() {
               </Select>
             </FormControl>
           )}
-
-          {/* REMOVED: All rental model selector controls */}
         </Box>
       </Box>
 
@@ -419,9 +504,6 @@ function AnalyticsPanel() {
           netProfitLoading={netProfitLoading}
           selectedMonth={selectedMonth}
           setSelectedMonth={setSelectedMonth}
-          rentalModel={rentalModel}
-          ownerPercentage={ownerPercentage}
-          deltaAmount={deltaAmount}
         />
       </TabPanel>
 
@@ -434,6 +516,18 @@ function AnalyticsPanel() {
         selectedYear={selectedYear}
         handleCloseDetails={handleCloseDetails}
       />
+
+      {/* Success Snackbar */}
+      <Snackbar
+        open={snackbarOpen}
+        autoHideDuration={3000}
+        onClose={handleCloseSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert onClose={handleCloseSnackbar} severity="success" sx={{ width: '100%' }}>
+          Analytics data refreshed successfully!
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }

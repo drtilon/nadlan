@@ -43,10 +43,12 @@ import {
   HourglassEmpty as PendingIcon,
   CalendarToday as CalendarIcon,
   TrendingUp as TrendingUpIcon,
-  SwapHoriz as SwapIcon
+  SwapHoriz as SwapIcon,
+  Receipt as ReceiptIcon
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import api, { getUserData } from '../../utils/api';
+import OutstandingPaymentsTab from './OutstandingPaymentsTab';
 
 function UserAnalyticsPanel({ showNotification }) {
   const [loading, setLoading] = useState(true);
@@ -64,6 +66,15 @@ function UserAnalyticsPanel({ showNotification }) {
     overdue: []
   });
   const [statusFilter, setStatusFilter] = useState('all');
+
+  // Outstanding Payments Tab State
+  const [outstandingData, setOutstandingData] = useState(null);
+  const [outstandingLoading, setOutstandingLoading] = useState(false);
+  const [outstandingPage, setOutstandingPage] = useState(1);
+  const [outstandingRowsPerPage, setOutstandingRowsPerPage] = useState(10);
+  const [outstandingSearch, setOutstandingSearch] = useState('');
+  const [outstandingSort, setOutstandingSort] = useState('outstanding_desc');
+
   const navigate = useNavigate();
   const userData = getUserData();
   const isAdmin = userData && userData.role === 'admin';
@@ -79,20 +90,43 @@ function UserAnalyticsPanel({ showNotification }) {
     try {
       // Get apartments
       const apartmentsResponse = await api.get('/list');
-      const apartmentsData = apartmentsResponse.data || [];
+      let apartmentsData = apartmentsResponse.data || [];
+
+      // Ensure apartmentsData is an array
+      if (!Array.isArray(apartmentsData)) {
+        console.warn('Apartments data is not an array:', apartmentsData);
+        // Check if it's wrapped in an object
+        if (apartmentsData.apartments && Array.isArray(apartmentsData.apartments)) {
+          apartmentsData = apartmentsData.apartments;
+        } else {
+          apartmentsData = [];
+        }
+      }
+
       setApartments(apartmentsData);
       setFilteredApartments(apartmentsData);
 
       // Get tenants
       const tenantsResponse = await api.get('/tenants/list');
-      const tenantsData = tenantsResponse.data || [];
+      let tenantsData = tenantsResponse.data || [];
+
+      // Ensure tenantsData is an array
+      if (!Array.isArray(tenantsData)) {
+        console.warn('Tenants data is not an array:', tenantsData);
+        if (tenantsData.tenants && Array.isArray(tenantsData.tenants)) {
+          tenantsData = tenantsData.tenants;
+        } else {
+          tenantsData = [];
+        }
+      }
+
       setTenants(tenantsData);
       setFilteredTenants(tenantsData);
 
-      // Process vacant units
-      const vacant = apartmentsData.filter(apt =>
+      // Process vacant units (only if apartmentsData is valid array)
+      const vacant = Array.isArray(apartmentsData) ? apartmentsData.filter(apt =>
         apt.status === 'vacant' || apt.status === 'פנוי' || apt.status === 'Available'
-      );
+      ) : [];
       setVacantUnits(vacant);
 
       // Process expiring contracts
@@ -100,18 +134,20 @@ function UserAnalyticsPanel({ showNotification }) {
       const thirtyDaysFromNow = new Date();
       thirtyDaysFromNow.setDate(today.getDate() + 30);
 
-      const expiring = apartmentsData.filter(apt => {
+      const expiring = Array.isArray(apartmentsData) ? apartmentsData.filter(apt => {
         if (!apt.contractEndDate) return false;
         const endDate = new Date(apt.contractEndDate);
         return endDate > today && endDate <= thirtyDaysFromNow;
-      });
+      }) : [];
       setExpiringContracts(expiring);
 
-      // Fetch payment information
+      // Fetch payment information (simplified for user view)
       try {
-        const paymentPromises = apartmentsData
-          .filter(apt => apt.status === 'occupied' || apt.status === 'משוכר' || apt.status === 'Rented')
-          .map(apt => api.get(`/payments/${apt.id}`));
+        const occupiedApartments = Array.isArray(apartmentsData) ? apartmentsData.filter(apt =>
+          apt.status === 'occupied' || apt.status === 'משוכר' || apt.status === 'Rented'
+        ) : [];
+
+        const paymentPromises = occupiedApartments.map(apt => api.get(`/payments/${apt.id}`));
 
         const paymentResponses = await Promise.allSettled(paymentPromises);
         const paid = [];
@@ -120,9 +156,7 @@ function UserAnalyticsPanel({ showNotification }) {
 
         paymentResponses.forEach((result, index) => {
           if (result.status === 'fulfilled') {
-            const apartment = apartmentsData.filter(apt =>
-              apt.status === 'occupied' || apt.status === 'משוכר' || apt.status === 'Rented'
-            )[index];
+            const apartment = occupiedApartments[index];
             const paymentData = result.value.data;
 
             if (paymentData?.status === 'paid') {
@@ -145,20 +179,75 @@ function UserAnalyticsPanel({ showNotification }) {
       }
     } catch (error) {
       console.error('Error fetching data:', error);
-      showNotification('Error loading analytics data', 'error');
+      showNotification && showNotification('Error loading analytics data', 'error');
+
+      // Set safe fallback data
+      setApartments([]);
+      setFilteredApartments([]);
+      setTenants([]);
+      setFilteredTenants([]);
+      setVacantUnits([]);
+      setExpiringContracts([]);
+      setPaymentStatus({ paid: [], pending: [], overdue: [] });
     } finally {
       setLoading(false);
     }
   };
 
+  // Fetch outstanding payments data
+  const fetchOutstandingPayments = async () => {
+    try {
+      setOutstandingLoading(true);
+      const params = {
+        page: outstandingPage,
+        limit: outstandingRowsPerPage,
+        period_type: 'current_month',
+        sort: outstandingSort
+      };
+      if (outstandingSearch) params.search = outstandingSearch;
+
+      const response = await api.get('/analytics/outstanding-payments', { params });
+      setOutstandingData(response.data);
+    } catch (error) {
+      console.error('Error fetching outstanding payments:', error);
+      showNotification && showNotification('Error loading outstanding payments', 'error');
+      // Set fallback data
+      setOutstandingData({
+        apartments: [],
+        pagination: {
+          current_page: 1,
+          total_pages: 0,
+          total_items: 0,
+          items_per_page: outstandingRowsPerPage,
+          has_next_page: false,
+          has_prev_page: false,
+        },
+        summary: {
+          total_outstanding: 0,
+          apartments_with_debt: 0,
+        }
+      });
+    } finally {
+      setOutstandingLoading(false);
+    }
+  };
+
+  // Fetch outstanding data when tab changes
+  useEffect(() => {
+    if (tabIndex === 4) { // Outstanding Payments tab
+      fetchOutstandingPayments();
+    }
+  }, [tabIndex, outstandingPage, outstandingRowsPerPage, outstandingSearch, outstandingSort]);
+
   // Filter data based on search term and status filter
   useEffect(() => {
-    let filtered = apartments;
+    // Ensure apartments is an array before filtering
+    let filtered = Array.isArray(apartments) ? apartments : [];
 
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(apt =>
-        apt.address.toLowerCase().includes(term) ||
+        apt.address && apt.address.toLowerCase().includes(term) ||
         (apt.notes && apt.notes.toLowerCase().includes(term))
       );
     }
@@ -169,17 +258,17 @@ function UserAnalyticsPanel({ showNotification }) {
 
     setFilteredApartments(filtered);
 
+    // Filter tenants
+    let filteredTnts = Array.isArray(tenants) ? tenants : [];
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
-      const filteredTnts = tenants.filter(tenant =>
-        tenant.name.toLowerCase().includes(term) ||
+      filteredTnts = filteredTnts.filter(tenant =>
+        (tenant.name && tenant.name.toLowerCase().includes(term)) ||
         (tenant.email && tenant.email.toLowerCase().includes(term)) ||
         (tenant.phone && tenant.phone.toLowerCase().includes(term))
       );
-      setFilteredTenants(filteredTnts);
-    } else {
-      setFilteredTenants(tenants);
     }
+    setFilteredTenants(filteredTnts);
   }, [searchTerm, apartments, tenants, statusFilter]);
 
   // Format date for display
@@ -211,16 +300,6 @@ function UserAnalyticsPanel({ showNotification }) {
     }
   };
 
-  // Get payment status color
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'paid': return 'success';
-      case 'pending': case 'partial': return 'warning';
-      case 'overdue': case 'not_paid': return 'error';
-      default: return 'default';
-    }
-  };
-
   // Handle tab change
   const handleTabChange = (event, newIndex) => {
     setTabIndex(newIndex);
@@ -239,6 +318,21 @@ function UserAnalyticsPanel({ showNotification }) {
   // Navigate to admin analytics
   const handleGoToAdminAnalytics = () => {
     navigate('/analytics');
+  };
+
+  // Outstanding payments handlers
+  const handleOutstandingPageChange = (newPage) => {
+    setOutstandingPage(newPage);
+  };
+
+  const handleOutstandingRowsPerPageChange = (newRowsPerPage) => {
+    setOutstandingRowsPerPage(newRowsPerPage);
+    setOutstandingPage(1);
+  };
+
+  const handleOpenDetails = (apartment) => {
+    // For user panel, just navigate to apartment details
+    navigate(`/dashboard?apartment=${apartment.apartment_id || apartment.id}`);
   };
 
   if (loading) {
@@ -320,7 +414,7 @@ function UserAnalyticsPanel({ showNotification }) {
           </FormControl>
         </Box>
 
-        {/* Overview Cards */}
+        {/* Overview Cards - NO FINANCIAL DATA */}
         <Grid container spacing={3} sx={{ mb: 4 }}>
           <Grid item xs={12} sm={6} md={3}>
             <Card sx={{
@@ -333,7 +427,7 @@ function UserAnalyticsPanel({ showNotification }) {
               <CardContent>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Box>
-                    <Typography variant="h4" fontWeight="bold">{apartments.length}</Typography>
+                    <Typography variant="h4" fontWeight="bold">{Array.isArray(apartments) ? apartments.length : 0}</Typography>
                     <Typography variant="body2" sx={{ opacity: 0.9 }}>Total Properties</Typography>
                   </Box>
                   <ApartmentIcon sx={{ fontSize: 48, opacity: 0.8 }} />
@@ -353,7 +447,7 @@ function UserAnalyticsPanel({ showNotification }) {
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Box>
                     <Typography variant="h4" fontWeight="bold">
-                      {apartments.filter(apt => apt.status === 'occupied' || apt.status === 'משוכר' || apt.status === 'Rented').length}
+                      {Array.isArray(apartments) ? apartments.filter(apt => apt.status === 'occupied' || apt.status === 'משוכר' || apt.status === 'Rented').length : 0}
                     </Typography>
                     <Typography variant="body2" sx={{ opacity: 0.9 }}>Occupied Properties</Typography>
                   </Box>
@@ -373,7 +467,7 @@ function UserAnalyticsPanel({ showNotification }) {
               <CardContent>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Box>
-                    <Typography variant="h4" fontWeight="bold">{vacantUnits.length}</Typography>
+                    <Typography variant="h4" fontWeight="bold">{Array.isArray(vacantUnits) ? vacantUnits.length : 0}</Typography>
                     <Typography variant="body2" sx={{ opacity: 0.9 }}>Vacant Units</Typography>
                   </Box>
                   <VacantIcon sx={{ fontSize: 48, opacity: 0.8 }} />
@@ -392,7 +486,7 @@ function UserAnalyticsPanel({ showNotification }) {
               <CardContent>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Box>
-                    <Typography variant="h4" fontWeight="bold">{expiringContracts.length}</Typography>
+                    <Typography variant="h4" fontWeight="bold">{Array.isArray(expiringContracts) ? expiringContracts.length : 0}</Typography>
                     <Typography variant="body2" sx={{ opacity: 0.9 }}>Contracts Expiring Soon</Typography>
                   </Box>
                   <RenewalIcon sx={{ fontSize: 48, opacity: 0.8 }} />
@@ -421,6 +515,7 @@ function UserAnalyticsPanel({ showNotification }) {
             <Tab icon={<WarningIcon />} iconPosition="start" label="Attention Needed" sx={{ fontSize: '0.95rem' }} />
             <Tab icon={<PersonIcon />} iconPosition="start" label="Tenant Overview" sx={{ fontSize: '0.95rem' }} />
             <Tab icon={<CalendarIcon />} iconPosition="start" label="Contract Timeline" sx={{ fontSize: '0.95rem' }} />
+            <Tab icon={<ReceiptIcon />} iconPosition="start" label="Outstanding Payments" sx={{ fontSize: '0.95rem' }} />
           </Tabs>
           <Divider />
         </Box>
@@ -430,7 +525,7 @@ function UserAnalyticsPanel({ showNotification }) {
           <Box>
             <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
               <HomeIcon color="primary" fontSize="small" />
-              Property Overview ({filteredApartments.length} properties)
+              Property Overview ({Array.isArray(filteredApartments) ? filteredApartments.length : 0} properties)
             </Typography>
             <TableContainer component={Paper} variant="outlined" sx={{ mb: 4, borderRadius: 2 }}>
               <Table>
@@ -445,14 +540,14 @@ function UserAnalyticsPanel({ showNotification }) {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {filteredApartments.length === 0 ? (
+                  {!Array.isArray(filteredApartments) || filteredApartments.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
                         <Alert severity="info">No properties match your search criteria</Alert>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredApartments.map(apartment => (
+                    Array.isArray(filteredApartments) && filteredApartments.map(apartment => (
                       <TableRow key={apartment.id} hover sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
                         <TableCell>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -533,10 +628,10 @@ function UserAnalyticsPanel({ showNotification }) {
                   Vacant Properties
                 </Typography>
                 <Paper variant="outlined" sx={{ p: 2, mb: 3, borderRadius: 2 }}>
-                  {vacantUnits.length === 0 ? (
+                  {!Array.isArray(vacantUnits) || vacantUnits.length === 0 ? (
                     <Alert severity="success">No vacant properties at the moment</Alert>
                   ) : (
-                    vacantUnits.map(unit => (
+                    Array.isArray(vacantUnits) && vacantUnits.map(unit => (
                       <Box key={unit.id} sx={{
                         p: 2,
                         mb: 1,
@@ -573,10 +668,10 @@ function UserAnalyticsPanel({ showNotification }) {
                   Contracts Expiring Soon
                 </Typography>
                 <Paper variant="outlined" sx={{ p: 2, mb: 3, borderRadius: 2 }}>
-                  {expiringContracts.length === 0 ? (
+                  {!Array.isArray(expiringContracts) || expiringContracts.length === 0 ? (
                     <Alert severity="success">No contracts expiring in the next 30 days</Alert>
                   ) : (
-                    expiringContracts.map(contract => (
+                    Array.isArray(expiringContracts) && expiringContracts.map(contract => (
                       <Box key={contract.id} sx={{
                         p: 2,
                         mb: 1,
@@ -617,16 +712,16 @@ function UserAnalyticsPanel({ showNotification }) {
               <Grid item xs={12}>
                 <Typography variant="subtitle1" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <OverdueIcon color="error" fontSize="small" />
-                  Payment Status
+                  Payment Status Overview
                 </Typography>
                 <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
                   {paymentStatus.overdue.length === 0 && paymentStatus.pending.length === 0 ? (
-                    <Alert severity="success">All payments are up to date</Alert>
+                    <Alert severity="success">All payments appear to be up to date</Alert>
                   ) : (
                     <Grid container spacing={2}>
                       {paymentStatus.overdue.length > 0 && (
                         <Grid item xs={12} md={6}>
-                          <Typography variant="subtitle2" gutterBottom>Overdue Payments</Typography>
+                          <Typography variant="subtitle2" gutterBottom>Properties with Payment Issues</Typography>
                           {paymentStatus.overdue.map(apt => (
                             <Box key={apt.id} sx={{
                               p: 2,
@@ -695,7 +790,7 @@ function UserAnalyticsPanel({ showNotification }) {
           <Box>
             <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
               <PersonIcon color="primary" fontSize="small" />
-              Tenant Overview ({filteredTenants.length} tenants)
+              Tenant Overview ({Array.isArray(filteredTenants) ? filteredTenants.length : 0} tenants)
             </Typography>
             <TableContainer component={Paper} variant="outlined" sx={{ mb: 4, borderRadius: 2 }}>
               <Table>
@@ -709,21 +804,21 @@ function UserAnalyticsPanel({ showNotification }) {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {filteredTenants.length === 0 ? (
+                  {!Array.isArray(filteredTenants) || filteredTenants.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
                         <Alert severity="info">No tenants match your search criteria</Alert>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredTenants.map(tenant => {
-                      const tenantApartment = apartments.find(apt =>
+                    Array.isArray(filteredTenants) && filteredTenants.map(tenant => {
+                      const tenantApartment = Array.isArray(apartments) ? apartments.find(apt =>
                         apt.id === tenant.apartment_id ||
                         (Array.isArray(apt.tenants) && apt.tenants.some(t =>
                           (typeof t === 'object' && t.id === tenant.id) ||
                           (typeof t === 'string' && t === tenant.name)
                         ))
-                      );
+                      ) : null;
 
                       return (
                         <TableRow key={tenant.id} hover sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
@@ -800,7 +895,7 @@ function UserAnalyticsPanel({ showNotification }) {
               <CalendarIcon color="primary" fontSize="small" />
               Contract Timeline
             </Typography>
-            {apartments.filter(apt => apt.contractEndDate).length === 0 ? (
+            {Array.isArray(apartments) && apartments.filter(apt => apt.contractEndDate).length === 0 ? (
               <Alert severity="info">No contract end dates found for any properties</Alert>
             ) : (
               <TableContainer component={Paper} variant="outlined" sx={{ mb: 4, borderRadius: 2 }}>
@@ -816,7 +911,7 @@ function UserAnalyticsPanel({ showNotification }) {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {filteredApartments
+                    {Array.isArray(filteredApartments) && filteredApartments
                       .filter(apt => apt.contractEndDate)
                       .sort((a, b) => new Date(a.contractEndDate) - new Date(b.contractEndDate))
                       .map(apartment => {
@@ -883,6 +978,37 @@ function UserAnalyticsPanel({ showNotification }) {
                 </Table>
               </TableContainer>
             )}
+          </Box>
+        )}
+
+        {/* Outstanding Payments Tab */}
+        {tabIndex === 4 && (
+          <Box>
+            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
+              <ReceiptIcon color="primary" fontSize="small" />
+              Outstanding Payments Overview
+            </Typography>
+
+            {/* Note for users about data limitations */}
+            <Alert severity="info" sx={{ mb: 3 }}>
+              <Typography variant="body2">
+                This view shows properties with outstanding payment balances. Financial amounts are visible but detailed payment management requires admin access.
+              </Typography>
+            </Alert>
+
+            <OutstandingPaymentsTab
+              outstandingData={outstandingData}
+              outstandingLoading={outstandingLoading}
+              outstandingPage={outstandingPage}
+              outstandingRowsPerPage={outstandingRowsPerPage}
+              outstandingSearch={outstandingSearch}
+              outstandingSort={outstandingSort}
+              setOutstandingSearch={setOutstandingSearch}
+              setOutstandingSort={setOutstandingSort}
+              handleOutstandingPageChange={handleOutstandingPageChange}
+              handleOutstandingRowsPerPageChange={handleOutstandingRowsPerPageChange}
+              handleOpenDetails={handleOpenDetails}
+            />
           </Box>
         )}
       </Paper>

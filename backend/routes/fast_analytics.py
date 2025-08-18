@@ -268,12 +268,11 @@ def get_financial_overview():
         current_app.logger.error(f"Error in financial overview: {e}")
         return jsonify({"message": "Error calculating financial overview", "error": str(e)}), 500
 
-# ========== ENHANCED OUTSTANDING PAYMENTS ENDPOINT ==========
 @fast_analytics_bp.route("/analytics/outstanding-payments", methods=["GET"])
 @token_required
 @role_required("admin")
 def get_outstanding_payments():
-    """Enhanced outstanding payments with contract period support"""
+    """Enhanced outstanding payments with contract period support and paid this month column"""
     try:
         # Pagination parameters
         page = request.args.get("page", 1, type=int) - 1  # Convert to 0-based
@@ -369,6 +368,9 @@ def get_outstanding_payments():
                     end_period
                 )
 
+                # Calculate paid this month
+                paid_this_month = sum(extract_payment_amount(p) for p in contract_payments)
+
                 # Calculate expected amount
                 months_in_period = max(1, (end_period.year - start_period.year) * 12 + (end_period.month - start_period.month) + 1)
                 expected_amount = float(current_contract.monthly_rent) * months_in_period
@@ -383,60 +385,52 @@ def get_outstanding_payments():
                     "tenants": tenant_names,
                     "tenant_count": len(tenant_names),
                     "expected_amount": expected_amount,
+                    "paid_this_month": paid_this_month,  # NEW COLUMN
                     "total_outstanding": outstanding_amount,
-                    "contract_info": {
-                        "id": current_contract.id,
-                        "contract_number": current_contract.contract_number,
-                        "start_date": current_contract.start_date.isoformat(),
-                        "end_date": current_contract.end_date.isoformat() if current_contract.end_date else None,
-                        "status": current_contract.status
-                    },
+                    "collection_rate": ((paid_this_month / expected_amount) * 100) if expected_amount > 0 else 100,
+                    "payment_count": len(contract_payments),
                     "status": apartment.status,
-                    "max_occupancy": apartment.maxOccupancy,
-                    "landlord_id": apartment.landlord_id
+                    "last_payment_date": max([p.paymentDate for p in contract_payments if hasattr(p, 'paymentDate') and p.paymentDate], default=None)
                 })
 
             except Exception as e:
                 current_app.logger.error(f"Error processing apartment {apartment.id}: {e}")
                 continue
 
-        # Sort the data
+        # Apply sorting
         if sort_by == "outstanding_desc":
             apartments_data.sort(key=lambda x: x["total_outstanding"], reverse=True)
         elif sort_by == "outstanding_asc":
             apartments_data.sort(key=lambda x: x["total_outstanding"])
         elif sort_by == "address_asc":
             apartments_data.sort(key=lambda x: x["address"])
-        elif sort_by == "address_desc":
-            apartments_data.sort(key=lambda x: x["address"], reverse=True)
         elif sort_by == "rent_desc":
             apartments_data.sort(key=lambda x: x["monthly_rent"], reverse=True)
-        elif sort_by == "rent_asc":
-            apartments_data.sort(key=lambda x: x["monthly_rent"])
-
-        # Pagination
-        total_count = len(apartments_data)
-        total_pages = (total_count + limit - 1) // limit
-        has_next = page < total_pages - 1
-        has_prev = page > 0
-
-        paginated_apartments = apartments_data[offset:offset + limit]
+        elif sort_by == "paid_desc":  # NEW SORT OPTION
+            apartments_data.sort(key=lambda x: x["paid_this_month"], reverse=True)
+        elif sort_by == "paid_asc":   # NEW SORT OPTION
+            apartments_data.sort(key=lambda x: x["paid_this_month"])
 
         # Calculate summary statistics
+        total_count = len(apartments_data)
         total_outstanding = sum(apt["total_outstanding"] for apt in apartments_data)
         total_expected = sum(apt["expected_amount"] for apt in apartments_data)
+        total_paid_this_month = sum(apt["paid_this_month"] for apt in apartments_data)  # NEW SUMMARY
         apartments_with_debt = len([apt for apt in apartments_data if apt["total_outstanding"] > 0])
 
+        # Apply pagination
+        paginated_data = apartments_data[offset:offset + limit]
+
         response = {
-            "apartments": paginated_apartments,
+            "apartments": paginated_data,
             "pagination": {
-                "current_page": page + 1,  # Convert back to 1-based
-                "total_pages": total_pages,
+                "current_page": page + 1,
+                "total_pages": math.ceil(total_count / limit) if total_count > 0 else 0,
                 "total_items": total_count,
                 "items_per_page": limit,
-                "has_next_page": has_next,
-                "has_prev_page": has_prev,
-                "start_index": offset + 1 if paginated_apartments else 0,
+                "has_next_page": (offset + limit) < total_count,
+                "has_prev_page": page > 0,
+                "start_index": offset + 1 if paginated_data else 0,
                 "end_index": min(offset + limit, total_count),
                 "page_size_options": PAGE_SIZE_OPTIONS,
             },
@@ -446,6 +440,7 @@ def get_outstanding_payments():
                 "end_date": end_period.isoformat(),
                 "total_outstanding": total_outstanding,
                 "total_expected": total_expected,
+                "total_paid_this_month": total_paid_this_month,  # NEW SUMMARY FIELD
                 "collection_rate": ((total_expected - total_outstanding) / total_expected * 100) if total_expected > 0 else 100,
                 "apartments_with_debt": apartments_with_debt,
                 "apartments_current": total_count - apartments_with_debt,
@@ -468,7 +463,6 @@ def get_outstanding_payments():
     except Exception as e:
         current_app.logger.error(f"Error in outstanding payments: {e}")
         return jsonify({"message": "Error retrieving outstanding payments", "error": str(e)}), 500
-
 # ========== NET PROFIT DETAILED ENDPOINT ==========
 @fast_analytics_bp.route("/analytics/net-profit-detailed", methods=["GET"])
 @token_required
@@ -611,3 +605,241 @@ def get_net_profit_detailed():
     except Exception as e:
         current_app.logger.error(f"Error in detailed net profit calculation: {e}")
         return jsonify({"message": "Error calculating detailed net profit", "error": str(e)}), 500
+
+@fast_analytics_bp.route("/analytics/apartment-outstanding-details/<int:apartment_id>", methods=["GET"])
+@token_required
+@role_required("admin")
+def get_apartment_outstanding_details(apartment_id):
+    """Get detailed outstanding payment information for a specific apartment with accurate data"""
+    try:
+        # Period selection parameters
+        period_type = request.args.get("period_type", "current_month")
+        contract_period_id = request.args.get("contract_period_id", type=int)
+        start_date_str = request.args.get("start_date")
+        end_date_str = request.args.get("end_date")
+
+        # Get apartment
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"error": "Apartment not found"}), 404
+
+        current_date = datetime.now()
+        current_year = current_date.year
+        current_month = current_date.month
+
+        # Determine the date range based on period type
+        if period_type == "current_month":
+            start_period = date(current_year, current_month, 1)
+            if current_month == 12:
+                end_period = date(current_year + 1, 1, 1) - timedelta(days=1)
+            else:
+                end_period = date(current_year, current_month + 1, 1) - timedelta(days=1)
+            period_label = f"{current_date.strftime('%B %Y')}"
+
+        elif period_type == "contract_period" and contract_period_id:
+            contract = ContractPeriod.query.get(contract_period_id)
+            if not contract:
+                return jsonify({"error": "Contract period not found"}), 404
+            start_period = contract.start_date
+            end_period = contract.end_date or date.today()
+            period_label = f"Contract {contract.contract_number}"
+
+        elif period_type == "custom" and start_date_str and end_date_str:
+            start_period = datetime.strptime(start_date_str, "%Y-%m-%d").date()
+            end_period = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+            period_label = f"{start_period.strftime('%B %d, %Y')} - {end_period.strftime('%B %d, %Y')}"
+        else:
+            # Default to current month
+            start_period = date(current_year, current_month, 1)
+            if current_month == 12:
+                end_period = date(current_year + 1, 1, 1) - timedelta(days=1)
+            else:
+                end_period = date(current_year, current_month + 1, 1) - timedelta(days=1)
+            period_label = f"{current_date.strftime('%B %Y')}"
+
+        # Try to get current contract first
+        current_contract = get_current_contract_for_apartment(apartment_id)
+
+        # If no contract found, create fallback using apartment data
+        if not current_contract:
+            # Use apartment rent as monthly rent
+            monthly_rent = float(apartment.rent or 0)
+
+            # Get all payments for this apartment in the period
+            payments_in_period = Payment.query.filter(
+                and_(
+                    Payment.apartment_id == apartment_id,
+                    Payment.paymentDate >= start_period,
+                    Payment.paymentDate <= end_period,
+                    Payment.status.in_(['paid', 'completed', 'partial'])
+                )
+            ).all()
+
+        else:
+            # Use contract rent
+            monthly_rent = float(current_contract.monthly_rent)
+
+            # Get contract payments in the period
+            payments_in_period = get_contract_payments(
+                apartment_id,
+                current_contract.id,
+                start_period,
+                end_period
+            )
+
+        # Calculate expected amount for the period
+        if period_type == "current_month":
+            expected_amount = monthly_rent  # Just one month
+        else:
+            months_in_period = max(1, (end_period.year - start_period.year) * 12 + (end_period.month - start_period.month) + 1)
+            expected_amount = monthly_rent * months_in_period
+
+        # Calculate total paid in period
+        total_paid_in_period = sum(extract_payment_amount(p) for p in payments_in_period)
+        outstanding_amount = max(0, expected_amount - total_paid_in_period)
+
+        # Get tenant breakdown
+        tenant_breakdown = []
+
+        if current_contract and current_contract.contract_tenants:
+            # Use contract tenants
+            tenant_count = len(current_contract.contract_tenants)
+            rent_per_tenant = expected_amount / tenant_count if tenant_count > 0 else expected_amount
+
+            for ct in current_contract.contract_tenants:
+                if ct.tenant:
+                    # Get individual tenant payments (try to match by tenant_id or name)
+                    tenant_payments = []
+                    tenant_paid = 0
+
+                    for payment in payments_in_period:
+                        # Check if payment is linked to this tenant
+                        if hasattr(payment, 'tenant_id') and payment.tenant_id == ct.tenant.id:
+                            tenant_payments.append(payment)
+                            tenant_paid += extract_payment_amount(payment)
+                        elif payment.tenants:
+                            # Check in tenants JSON
+                            try:
+                                tenants_data = json.loads(payment.tenants)
+                                for tenant_data in tenants_data:
+                                    if (tenant_data.get('name', '').lower() == ct.tenant.name.lower() or
+                                        tenant_data.get('id') == ct.tenant.id):
+                                        amount_paid = float(tenant_data.get('amountPaid', 0))
+                                        if amount_paid > 0:
+                                            tenant_payments.append({
+                                                'id': payment.id,
+                                                'amount': amount_paid,
+                                                'paymentDate': payment.paymentDate,
+                                                'status': payment.status
+                                            })
+                                            tenant_paid += amount_paid
+                            except (json.JSONDecodeError, ValueError):
+                                pass
+
+                    # If no individual payments found, split total equally
+                    if tenant_paid == 0 and total_paid_in_period > 0:
+                        tenant_paid = total_paid_in_period / tenant_count
+
+                    tenant_breakdown.append({
+                        "tenant_id": ct.tenant.id,
+                        "tenant_name": ct.tenant.name,
+                        "total_paid": tenant_paid,
+                        "total_due": rent_per_tenant,
+                        "outstanding": max(0, rent_per_tenant - tenant_paid),
+                        "payment_count": len(tenant_payments),
+                        "payments": [
+                            {
+                                "id": p.id if hasattr(p, 'id') else payment.id,
+                                "amount": p.amount if hasattr(p, 'amount') else extract_payment_amount(p),
+                                "date": p.paymentDate.isoformat() if hasattr(p, 'paymentDate') and p.paymentDate else None,
+                                "status": p.status if hasattr(p, 'status') else 'paid'
+                            } for p in (tenant_payments if isinstance(tenant_payments[0], Payment) else
+                                      [p for p in payments_in_period if any(
+                                          json.loads(pay.tenants) if pay.tenants else []
+                                          for pay in [p] if pay.tenants
+                                      )])[:3]  # Limit to 3 recent payments
+                        ]
+                    })
+        else:
+            # Fallback to apartment tenants or create default tenant
+            apartment_tenants = apartment.tenants if apartment.tenants else []
+
+            if not apartment_tenants:
+                # Create default "Unknown Tenant" entry
+                tenant_breakdown.append({
+                    "tenant_id": None,
+                    "tenant_name": "Unknown Tenant",
+                    "total_paid": total_paid_in_period,
+                    "total_due": expected_amount,
+                    "outstanding": outstanding_amount,
+                    "payment_count": len(payments_in_period),
+                    "payments": [
+                        {
+                            "id": p.id,
+                            "amount": extract_payment_amount(p),
+                            "date": p.paymentDate.isoformat() if p.paymentDate else None,
+                            "status": p.status
+                        } for p in payments_in_period[-3:]  # Last 3 payments
+                    ]
+                })
+            else:
+                # Use apartment tenants
+                tenant_count = len(apartment_tenants)
+                rent_per_tenant = expected_amount / tenant_count
+                paid_per_tenant = total_paid_in_period / tenant_count
+
+                for tenant in apartment_tenants:
+                    tenant_breakdown.append({
+                        "tenant_id": tenant.id,
+                        "tenant_name": tenant.name,
+                        "total_paid": paid_per_tenant,
+                        "total_due": rent_per_tenant,
+                        "outstanding": max(0, rent_per_tenant - paid_per_tenant),
+                        "payment_count": len(payments_in_period),
+                        "payments": [
+                            {
+                                "id": p.id,
+                                "amount": extract_payment_amount(p) / tenant_count,
+                                "date": p.paymentDate.isoformat() if p.paymentDate else None,
+                                "status": p.status
+                            } for p in payments_in_period[-3:]  # Last 3 payments, split equally
+                        ]
+                    })
+
+        response = {
+            "apartment": {
+                "id": apartment.id,
+                "address": apartment.address,
+                "monthly_rent": monthly_rent,
+                "status": apartment.status
+            },
+            "period": {
+                "type": period_type,
+                "label": period_label,
+                "start_date": start_period.isoformat(),
+                "end_date": end_period.isoformat()
+            },
+            "summary": {
+                "expected_amount": expected_amount,
+                "total_paid": total_paid_in_period,
+                "total_outstanding": outstanding_amount,
+                "collection_rate": ((total_paid_in_period / expected_amount) * 100) if expected_amount > 0 else 100,
+                "payment_count": len(payments_in_period)
+            },
+            "tenant_breakdown": tenant_breakdown,
+            "debug_info": {
+                "has_contract": current_contract is not None,
+                "contract_id": current_contract.id if current_contract else None,
+                "payments_found": len(payments_in_period),
+                "tenant_count": len(tenant_breakdown)
+            }
+        }
+
+        return jsonify(response), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error getting apartment outstanding details: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"message": "Error retrieving apartment details", "error": str(e)}), 500
+

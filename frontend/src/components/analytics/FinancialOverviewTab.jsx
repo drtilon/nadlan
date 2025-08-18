@@ -171,14 +171,14 @@ function FinancialOverviewTab({ loading, financialData, selectedYear }) {
             value={financialData.current_month?.net_profit || 0}
             icon={<TrendingUpIcon />}
             color={COLORS.primary}
-            subtitle="Expected monthly profit"
+            subtitle="Expected monthly profit from management and rental model"
             isLoading={loading}
           />
         </Grid>
 
         <Grid item xs={12} md={4}>
           <MetricCard
-            title="Current Outstanding"
+            title="Current Month Outstanding"
             value={financialData.current_month?.outstanding || 0}
             icon={<WarningIcon />}
             color={COLORS.error}

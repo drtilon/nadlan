@@ -178,6 +178,7 @@ def create_app():
             from routes.contract_templates import contract_templates_bp
             from routes.health import health_bp
             from routes.contract_periods import contract_periods_bp
+            from routes.csv_payments import csv_payments_bp
 
             # Register all blueprints
             app.register_blueprint(contract_periods_bp, url_prefix="/api")
@@ -197,6 +198,7 @@ def create_app():
             app.register_blueprint(contracts_bp, url_prefix="/api/documents")
             app.register_blueprint(contract_templates_bp, url_prefix="/api/documents")
             app.register_blueprint(logs_bp, url_prefix="/api")
+            app.register_blueprint(csv_payments_bp, url_prefix="/api/")
             print("asd")
             app.logger.info("Blueprints registered (including fast analytics)")
         except Exception as e:

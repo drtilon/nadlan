@@ -56,6 +56,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import BarChartIcon from '@mui/icons-material/BarChart';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 
 import { getUserData } from '../../utils/api';
 
@@ -132,6 +133,7 @@ function MainLayout({ onLogout }) {
       hasChildren: false,
       adminOnly: false
     }]),
+    { id: 10, title: 'CSV Payments', icon: <CloudUploadIcon />, path: 'csv-payments', adminOnly: true },
     { id: 8, title: 'Admin Panel', icon: <AdminPanelSettingsIcon />, path: 'admin', adminOnly: true },
     { id: 9, title: 'System Logs', icon: <AssessmentIcon />, path: 'logs', adminOnly: true },
   ];

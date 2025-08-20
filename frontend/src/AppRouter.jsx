@@ -20,6 +20,7 @@ import LogsViewer from './components/analytics/LogsViewer';
 import MainLayout from './components/layout/MainLayout';
 import TenantDetails from './components/tenant/TenantDetails';
 import LandlordDetails from './components/landlord/LandlordDetails';
+import CSVPaymentProcessor from './components/payment/CSVPaymentProcessor';
 import UserAnalyticsPanel from './components/analytics/UserAnalyticsPanel'; // FIXED: User Analytics Panel
 // Utils and theme
 import theme from './theme';
@@ -348,7 +349,13 @@ const AppRouterContainer = () => {
               />
             </ProtectedRoute>
           } />
-
+          <Route path="csv-payments" element={
+            <ProtectedRoute adminOnly={true}>
+              <CSVPaymentProcessor
+                showNotification={showNotification}
+              />
+            </ProtectedRoute>
+          } />
           <Route path="logs" element={
             <ProtectedRoute adminOnly={true}>
               <LogsViewer

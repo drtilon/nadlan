@@ -1,6 +1,8 @@
-from pydantic import BaseModel
+# schemas.py - Complete Fixed Version
+from pydantic import BaseModel, validator, Field
 from datetime import date
 from typing import Optional, List
+import re
 
 
 class TenantData(BaseModel):
@@ -9,21 +11,219 @@ class TenantData(BaseModel):
     phone: Optional[str] = None
 
 
+class ApartmentAddressData(BaseModel):
+    """Validation for address components"""
+    street_name: str = Field(..., min_length=1, max_length=100, description="Street name")
+    house_number: str = Field(..., min_length=1, max_length=20, description="House number (can include letters)")
+    zip_code: str = Field(..., min_length=3, max_length=20, description="Postal/ZIP code")
+    city: str = Field(..., min_length=1, max_length=50, description="City name")
+    state: Optional[str] = Field(None, max_length=50, description="State/Province (optional)")
+    country: str = Field(default="Israel", max_length=50, description="Country name")
+    building: Optional[str] = Field(None, max_length=50, description="Building name/number (optional)")
+    floor: Optional[str] = Field(None, max_length=10, description="Floor number (optional)")
+    side: Optional[str] = Field(None, max_length=10, description="Side/Unit identifier (optional)")
+
+    @validator('street_name', 'city', 'country')
+    def validate_required_text_fields(cls, v):
+        if not v or not v.strip():
+            raise ValueError('This field is required and cannot be empty')
+        return v.strip()
+
+    @validator('house_number')
+    def validate_house_number(cls, v):
+        if not v or not v.strip():
+            raise ValueError('House number is required')
+        # Allow numbers with letters (e.g., "123A", "45-47")
+        if not re.match(r'^[0-9]+[A-Za-z]?(-[0-9]+[A-Za-z]?)?$', v.strip()):
+            raise ValueError('House number must be numeric, optionally with letter suffix (e.g., "123", "123A", "45-47")')
+        return v.strip()
+
+    @validator('zip_code')
+    def validate_zip_code(cls, v):
+        if not v or not v.strip():
+            raise ValueError('ZIP/Postal code is required')
+        # Basic validation - alphanumeric with possible spaces/dashes
+        if not re.match(r'^[A-Za-z0-9\s\-]+$', v.strip()):
+            raise ValueError('ZIP code contains invalid characters')
+        return v.strip()
+
+    @validator('state', 'building', 'floor', 'side', pre=True)
+    def validate_optional_fields(cls, v):
+        if v is not None:
+            v = str(v).strip()
+            return v if v else None
+        return None
+
+    @validator('floor')
+    def validate_floor(cls, v):
+        if v is not None:
+            # Allow numbers, basement, ground floor variations
+            if not re.match(r'^(-?\d+|[Bb]asement|[Gg]round|[Gg]F|[Bb]\d*|[Pp]arking)$', v):
+                raise ValueError('Floor must be a number, "Basement", "Ground", "GF", etc.')
+        return v
+
+
 class ApartmentData(BaseModel):
-    address: str
-    rooms: int
-    size: float
-    maxOccupancy: int  # NEW FIELD
-    tenants: Optional[List[TenantData]] = None  # This accepts a list of tenants.
-    landlordName: str
-    landlordEmail: str
-    landlordPhone: str
+    """Complete apartment data validation"""
+    # Address components (flattened from ApartmentAddressData)
+    street_name: str = Field(..., min_length=1, max_length=100)
+    house_number: str = Field(..., min_length=1, max_length=20)
+    zip_code: str = Field(..., min_length=3, max_length=20)
+    city: str = Field(..., min_length=1, max_length=50)
+    state: Optional[str] = Field(None, max_length=50)
+    country: str = Field(default="Israel", max_length=50)
+    building: Optional[str] = Field(None, max_length=50)
+    floor: Optional[str] = Field(None, max_length=10)
+    side: Optional[str] = Field(None, max_length=10)
+
+    # Apartment details
+    rooms: int = Field(..., ge=1, le=20, description="Number of rooms")
+    size: float = Field(..., gt=0, le=10000, description="Size in square meters")
+    maxOccupancy: int = Field(..., ge=1, le=50, description="Maximum occupancy")
+
+    # Financial
+    rent: float = Field(..., ge=0, description="Monthly rent")
+    deposit: float = Field(..., ge=0, description="Security deposit")
+    managementFee: Optional[float] = Field(0.0, ge=0, le=100, description="Management fee percentage")
+    rentCost: Optional[float] = Field(0.0, ge=0, description="Rent cost for rental model")
+
+    # Status and model
+    status: str = Field(..., description="Apartment status")
+    model: Optional[str] = Field("management", description="Property model")
+    notes: Optional[str] = Field(None, description="Additional notes")
+
+    # NEW: Gender preference for apartments
+    genderPreference: Optional[str] = Field("mixed", description="Gender preference for tenants")
+
+    # Dates
     moveInDate: Optional[date] = None
     contractEndDate: Optional[date] = None
-    rent: float
-    deposit: float
+
+    # Foreign keys
+    landlord_id: Optional[int] = None
+
+    # Related data
+    tenants: Optional[List[TenantData]] = None
+
+    @validator('rooms', 'maxOccupancy')
+    def validate_positive_integers(cls, v):
+        if v <= 0:
+            raise ValueError('Must be a positive number')
+        return v
+
+    @validator('size', 'rent', 'deposit')
+    def validate_positive_numbers(cls, v):
+        if v <= 0:
+            raise ValueError('Must be a positive number')
+        return v
+
+    @validator('status')
+    def validate_status(cls, v):
+        valid_statuses = ['vacant', 'occupied', 'contract_sent', 'maintenance']
+        if v.lower() not in valid_statuses:
+            raise ValueError(f'Status must be one of: {", ".join(valid_statuses)}')
+        return v.lower()
+
+    @validator('model')
+    def validate_model(cls, v):
+        if v is not None:
+            valid_models = ['management', 'rental']
+            if v.lower() not in valid_models:
+                raise ValueError(f'Model must be one of: {", ".join(valid_models)}')
+            return v.lower()
+        return 'management'
+
+    @validator('genderPreference')
+    def validate_gender_preference(cls, v):
+        if v is not None:
+            valid_preferences = ['mixed', 'men_only', 'women_only']
+            if v.lower() not in valid_preferences:
+                raise ValueError(f'Gender preference must be one of: {", ".join(valid_preferences)}')
+            return v.lower()
+        return 'mixed'
+
+    # Include all validators from ApartmentAddressData
+    @validator('street_name', 'city', 'country')
+    def validate_required_text_fields(cls, v):
+        if not v or not v.strip():
+            raise ValueError('This field is required and cannot be empty')
+        return v.strip()
+
+    @validator('house_number')
+    def validate_house_number(cls, v):
+        if not v or not v.strip():
+            raise ValueError('House number is required')
+        if not re.match(r'^[0-9]+[A-Za-z]?(-[0-9]+[A-Za-z]?)?$', v.strip()):
+            raise ValueError('House number must be numeric, optionally with letter suffix')
+        return v.strip()
+
+    @validator('zip_code')
+    def validate_zip_code(cls, v):
+        if not v or not v.strip():
+            raise ValueError('ZIP/Postal code is required')
+        if not re.match(r'^[A-Za-z0-9\s\-]+$', v.strip()):
+            raise ValueError('ZIP code contains invalid characters')
+        return v.strip()
+
+    @validator('state', 'building', 'floor', 'side', pre=True)
+    def validate_optional_fields(cls, v):
+        if v is not None:
+            v = str(v).strip()
+            return v if v else None
+        return None
+
+
+class ApartmentUpdateData(BaseModel):
+    """For apartment updates - all fields optional except those that shouldn't change"""
+    # Address components
+    street_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    house_number: Optional[str] = Field(None, min_length=1, max_length=20)
+    zip_code: Optional[str] = Field(None, min_length=3, max_length=20)
+    city: Optional[str] = Field(None, min_length=1, max_length=50)
+    state: Optional[str] = Field(None, max_length=50)
+    country: Optional[str] = Field(None, max_length=50)
+    building: Optional[str] = Field(None, max_length=50)
+    floor: Optional[str] = Field(None, max_length=10)
+    side: Optional[str] = Field(None, max_length=10)
+
+    # Other fields
+    rooms: Optional[int] = Field(None, ge=1, le=20)
+    size: Optional[float] = Field(None, gt=0, le=10000)
+    maxOccupancy: Optional[int] = Field(None, ge=1, le=50)
+    rent: Optional[float] = Field(None, ge=0)
+    deposit: Optional[float] = Field(None, ge=0)
+    managementFee: Optional[float] = Field(None, ge=0, le=100)
+    rentCost: Optional[float] = Field(None, ge=0)
+    status: Optional[str] = None
+    model: Optional[str] = None
     notes: Optional[str] = None
-    IBAN: str
-    status: str
-    managementFee: Optional[float] = 0.0
-    rentCost: Optional[float] = 0.0
+    genderPreference: Optional[str] = None  # NEW: Gender preference
+    moveInDate: Optional[date] = None
+    contractEndDate: Optional[date] = None
+    landlord_id: Optional[int] = None
+
+    # Apply same validators as ApartmentData but for optional fields
+    @validator('street_name', 'city', 'country')
+    def validate_text_fields(cls, v):
+        if v is not None and (not v or not v.strip()):
+            raise ValueError('Field cannot be empty if provided')
+        return v.strip() if v else None
+
+    @validator('genderPreference')
+    def validate_gender_preference(cls, v):
+        if v is not None:
+            valid_preferences = ['mixed', 'men_only', 'women_only']
+            if v.lower() not in valid_preferences:
+                raise ValueError(f'Gender preference must be one of: {", ".join(valid_preferences)}')
+            return v.lower()
+        return v
+
+
+class LandlordData(BaseModel):
+    company_name: str = Field(..., min_length=1, max_length=100)
+    name: str = Field(..., min_length=1, max_length=100)
+    email: Optional[str] = Field(None, max_length=100)
+    phone: Optional[str] = Field(None, max_length=50)
+    iban: Optional[str] = Field(None, max_length=100)
+    company_address: Optional[str] = Field(None, max_length=500)
+    notes: Optional[str] = None

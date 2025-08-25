@@ -7,47 +7,45 @@ import json
 
 
 class Landlord(db.Model):
-    """Landlord model to store landlord details separate from apartments"""
-
     __tablename__ = "landlords"
     __table_args__ = {'extend_existing': True}
 
     id = db.Column(db.Integer, primary_key=True)
-    company_name = db.Column(db.String(255), nullable=False)
-    name = db.Column(db.String(255), nullable=False)
-    email = db.Column(db.String(255), nullable=False)
-    phone = db.Column(db.String(255), nullable=False)
-    iban = db.Column(db.String(255), nullable=False)
-    company_address = db.Column(db.String(255), nullable=False)
+    company_name = db.Column(db.String(100), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(100), nullable=True)
+    phone = db.Column(db.String(50), nullable=True)
+    iban = db.Column(db.String(100), nullable=True)
+    company_address = db.Column(db.String(500), nullable=True)
     notes = db.Column(db.Text, nullable=True)
+
+    # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(
-        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
-    )
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # Relationship with apartments
-    apartments = db.relationship("Apartment", backref="landlord", lazy=True)
+    # Relationship - NO backref here to avoid conflict
+    # apartments will be accessible via backref from Apartment model
 
-    def to_dict(self, include_apartments=False):
-        """Convert Landlord object to dictionary with optional apartments"""
-        result = {
-            "id": self.id,
-            "company_name": self.company_name,
-            "name": self.name,
-            "email": self.email,
-            "phone": self.phone,
-            "iban": self.iban,
-            "company_address": self.company_address,
-            "notes": self.notes,
-            "created_at": self.created_at.isoformat() if self.created_at else None,
-            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "apartment_count": len(self.apartments) if self.apartments else 0,
-        }
+    def to_dict(self, include_apartments=True):
+        """Convert to dictionary with optional related data"""
+        result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
-        if include_apartments:
-            result["apartments"] = [apt.to_dict(include_landlord=False, include_contract_periods=False) for apt in self.apartments]
+        # Convert date objects to string format
+        if self.created_at:
+            result["created_at"] = self.created_at.isoformat()
+        if self.updated_at:
+            result["updated_at"] = self.updated_at.isoformat()
+
+        # Add apartments count
+        result["apartments_count"] = len(self.apartments) if self.apartments else 0
+
+        if include_apartments and self.apartments:
+            result["apartments"] = [apt.to_dict(include_landlord=False, include_tenants=False) for apt in self.apartments]
 
         return result
+
+    def __repr__(self):
+        return f'<Landlord {self.id}: {self.company_name}>'
 
 
 class Apartment(db.Model):
@@ -55,83 +53,230 @@ class Apartment(db.Model):
     __table_args__ = {'extend_existing': True}
 
     id = db.Column(db.Integer, primary_key=True)
-    address = db.Column(db.String(255), nullable=False)
+
+    # Address component fields
+    street_name = db.Column(db.String(100), nullable=False, default="Unknown Street")
+    house_number = db.Column(db.String(20), nullable=False, default="1")
+    zip_code = db.Column(db.String(20), nullable=False, default="00000")
+    city = db.Column(db.String(50), nullable=False, default="Tel Aviv")
+    state = db.Column(db.String(50), nullable=True)  # Optional for international addresses
+    country = db.Column(db.String(50), nullable=False, default="Israel")
+    building = db.Column(db.String(50), nullable=True)  # Optional (building name/number)
+    floor = db.Column(db.String(10), nullable=True)     # Optional (floor number)
+    side = db.Column(db.String(10), nullable=True)      # Optional (A, B, left, right, etc.)
+
+    # Full address - computed and stored for performance and search optimization
+    full_address = db.Column(db.String(500), nullable=True)  # Computed address stored in DB
+
     rooms = db.Column(db.Integer, nullable=False)
     size = db.Column(db.Float, nullable=False)
-    maxOccupancy = db.Column(db.Integer, nullable=False, default=1)  # NEW FIELD
+    maxOccupancy = db.Column(db.Integer, nullable=False, default=1)
 
     # Foreign key to landlords table
     landlord_id = db.Column(db.Integer, db.ForeignKey("landlords.id"), nullable=True)
 
-    # Legacy fields - kept for backward compatibility
+    # Date fields
     moveInDate = db.Column(db.Date, nullable=True)
     contractEndDate = db.Column(db.Date, nullable=True)
+
+    # Financial fields
     rent = db.Column(db.Float, nullable=False)
     deposit = db.Column(db.Float, nullable=False)
-
-    notes = db.Column(db.Text, nullable=True)
-    status = db.Column(db.String(50), nullable=False)
     managementFee = db.Column(db.Numeric(5, 2), nullable=True, default=0.00)
     rentCost = db.Column(db.Numeric(10, 2), nullable=True, default=0.00)
-    model = db.Column(db.String(50), nullable=True)  # Management or Rental model
 
-    # Relationships
+    # Status and model
+    notes = db.Column(db.Text, nullable=True)
+    status = db.Column(db.String(50), nullable=False)
+    model = db.Column(db.String(50), nullable=True, default="management")  # Management or Rental model
+
+    # Gender preference field for apartments
+    genderPreference = db.Column(db.String(20), nullable=True, default="mixed")  # 'mixed', 'men_only', 'women_only'
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships - WITH backref to create landlord.apartments automatically
     tenants = db.relationship("Tenant", backref="apartment", lazy=True)
-    contract_periods = db.relationship("ContractPeriod", backref="apartment", lazy=True, cascade="all, delete-orphan")
+    landlord = db.relationship("Landlord", backref="apartments", lazy=True)
+
+    def __init__(self, **kwargs):
+        """Initialize apartment and compute full address"""
+        super().__init__(**kwargs)
+        self.update_full_address()
+
+    def update_full_address(self):
+        """Update the stored full_address field based on components"""
+        parts = [
+            self.street_name,
+            self.house_number,
+            self.zip_code,
+            self.city,
+            self.state,
+            self.country,
+            self.building,
+            self.floor,
+            self.side
+        ]
+        # Filter out None/empty values and join with commas
+        self.full_address = ", ".join(filter(lambda x: x and str(x).strip(), parts))
+
+    @property
+    def address(self):
+        """Property to get full address (for compatibility)"""
+        if not self.full_address:
+            self.update_full_address()
+        return self.full_address
+
+    def get_short_address(self):
+        """Get a shorter version of the address for display"""
+        parts = [self.street_name, self.house_number, self.city]
+        return ", ".join(filter(lambda x: x and str(x).strip(), parts))
+
+    def get_street_address(self):
+        """Get just the street address part"""
+        parts = [self.street_name, self.house_number]
+        if self.building:
+            parts.append(f"Building {self.building}")
+        if self.floor:
+            parts.append(f"Floor {self.floor}")
+        if self.side:
+            parts.append(f"Side {self.side}")
+        return ", ".join(filter(None, parts))
+
+    def get_location_info(self):
+        """Get location information (city, state, country)"""
+        parts = [self.city]
+        if self.state:
+            parts.append(self.state)
+        parts.append(self.country)
+        return ", ".join(parts)
 
     def to_dict(self, include_landlord=True, include_tenants=True, include_contract_periods=True):
         """Convert to dictionary with optional related data to prevent circular references"""
         result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+        # Add computed addresses
+        result["address"] = self.address  # Full computed address
+        result["short_address"] = self.get_short_address()
+        result["street_address"] = self.get_street_address()
+        result["location_info"] = self.get_location_info()
+
+        # Add address components for frontend
+        result["address_components"] = {
+            "street_name": self.street_name,
+            "house_number": self.house_number,
+            "zip_code": self.zip_code,
+            "city": self.city,
+            "state": self.state,
+            "country": self.country,
+            "building": self.building,
+            "floor": self.floor,
+            "side": self.side
+        }
 
         # Convert date objects to string format
         if self.moveInDate:
             result["moveInDate"] = self.moveInDate.isoformat()
         if self.contractEndDate:
             result["contractEndDate"] = self.contractEndDate.isoformat()
+        if self.created_at:
+            result["created_at"] = self.created_at.isoformat()
+        if self.updated_at:
+            result["updated_at"] = self.updated_at.isoformat()
 
         # Add tenants data if requested
         if include_tenants and self.tenants:
             result["tenants"] = [
-                tenant.to_dict(include_apartment=False, include_contracts=False)
+                tenant.to_dict(include_apartment=False, include_contracts=False) if hasattr(tenant, 'to_dict') else {
+                    'id': tenant.id,
+                    'name': tenant.name,
+                    'email': tenant.email,
+                    'phone': tenant.phone
+                }
                 for tenant in self.tenants
             ]
 
         # Add landlord data if requested and available
         if include_landlord and self.landlord:
-            result["landlord"] = self.landlord.to_dict(include_apartments=False)
+            result["landlord"] = self.landlord.to_dict(include_apartments=False) if hasattr(self.landlord, 'to_dict') else {
+                'id': self.landlord.id,
+                'name': self.landlord.name,
+                'company_name': self.landlord.company_name,
+                'email': self.landlord.email,
+                'phone': self.landlord.phone
+            }
 
-        # Add current contract period if requested
-        if include_contract_periods:
-            current_contract = self.get_current_contract()
-            if current_contract:
-                result["current_contract"] = current_contract.to_dict(include_apartment=False)
-                result["current_contract_id"] = current_contract.id
-
-            # Add contract periods count
-            result["contract_periods_count"] = len(self.contract_periods)
-
-        # Add occupancy information
-        current_tenant_count = len(self.tenants) if self.tenants else 0
-        result["current_tenant_count"] = current_tenant_count
-        result["occupancy_ratio"] = f"{current_tenant_count}/{self.maxOccupancy}"
-        result["is_full"] = current_tenant_count >= self.maxOccupancy
-        result["occupancy_percentage"] = (current_tenant_count / self.maxOccupancy * 100) if self.maxOccupancy > 0 else 0
+        # Add contract periods if requested and available
+        if include_contract_periods and hasattr(self, 'contract_periods') and self.contract_periods:
+            result["contract_periods"] = [
+                cp.to_dict(include_apartment=False) if hasattr(cp, 'to_dict') else {'id': cp.id}
+                for cp in self.contract_periods
+            ]
 
         return result
 
-    def get_current_contract(self):
-        """Get the currently active contract period"""
-        today = date.today()
-        for contract in self.contract_periods:
-            if (contract.start_date <= today and
-                (contract.end_date is None or contract.end_date >= today) and
-                contract.status == 'active'):
-                return contract
-        return None
+    def __repr__(self):
+        return f'<Apartment {self.id}: {self.get_short_address()}>'
 
-    def get_contract_history(self):
-        """Get all contract periods ordered by start date (newest first)"""
-        return sorted(self.contract_periods, key=lambda x: x.start_date, reverse=True)
+
+class Tenant(db.Model):
+    __tablename__ = "tenants"
+    __table_args__ = {'extend_existing': True}
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(255), nullable=False)
+    email = db.Column(db.String(255), nullable=True)
+    phone = db.Column(db.String(50), nullable=True)
+    bornOn = db.Column(db.String(50), nullable=True)
+    refundIban = db.Column(db.String(50), nullable=True)
+
+    # Keep apartment_id for backward compatibility
+    apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=True)
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self, include_apartment=True, include_contracts=True):
+        """Convert to dictionary with optional related data"""
+        # Split name into first and last name for frontend
+        name_parts = self.name.split(" ", 1) if self.name else ["", ""]
+        first_name = name_parts[0]
+        last_name = name_parts[1] if len(name_parts) > 1 else ""
+
+        result = {
+            "id": self.id,
+            "name": self.name,
+            "firstName": first_name,
+            "lastName": last_name,
+            "email": self.email,
+            "phone": self.phone,
+            "bornOn": self.bornOn,
+            "refundIban": self.refundIban,
+            "apartment_id": self.apartment_id,
+        }
+
+        # Convert date objects to string format
+        if self.created_at:
+            result["created_at"] = self.created_at.isoformat()
+        if self.updated_at:
+            result["updated_at"] = self.updated_at.isoformat()
+
+        # Add apartment data if requested and available
+        if include_apartment and self.apartment:
+            result["apartment"] = {
+                'id': self.apartment.id,
+                'address': self.apartment.address,
+                'short_address': self.apartment.get_short_address()
+            }
+
+        return result
+
+    def __repr__(self):
+        return f'<Tenant {self.id}: {self.name}>'
+
 
 
 class ContractPeriod(db.Model):
@@ -250,61 +395,6 @@ class ContractTenant(db.Model):
 
         return result
 
-
-class Tenant(db.Model):
-    __tablename__ = "tenants"
-    __table_args__ = {'extend_existing': True}
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(255), nullable=False)
-    email = db.Column(db.String(255), nullable=True)
-    phone = db.Column(db.String(50), nullable=True)
-    bornOn = db.Column(db.String(50), nullable=True)
-    refundIban = db.Column(db.String(50), nullable=True)
-
-    # Keep apartment_id for backward compatibility, but it's now optional
-    apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=True)
-
-    def to_dict(self, include_apartment=True, include_contracts=True):
-        """Convert to dictionary with optional related data"""
-        # Split name into first and last name for frontend
-        name_parts = self.name.split(" ", 1) if self.name else ["", ""]
-        first_name = name_parts[0]
-        last_name = name_parts[1] if len(name_parts) > 1 else ""
-
-        result = {
-            "id": self.id,
-            "name": self.name,
-            "firstName": first_name,
-            "lastName": last_name,
-            "email": self.email,
-            "phone": self.phone,
-            "bornOn": self.bornOn,
-            "refundIban": self.refundIban,
-            "apartment_id": self.apartment_id,
-        }
-
-        if include_contracts:
-            result["current_contracts"] = [
-                ca.contract_period.to_dict(include_apartment=False, include_tenants=False)
-                for ca in self.contract_assignments
-                if ca.contract_period.is_current_contract()
-            ]
-            result["contract_history_count"] = len(self.contract_assignments) if self.contract_assignments else 0
-
-        if include_apartment and self.apartment:
-            result["apartment_address"] = self.apartment.address
-
-        return result
-
-    def get_current_contracts(self):
-        """Get all currently active contracts for this tenant"""
-        return [ca.contract_period for ca in self.contract_assignments
-                if ca.contract_period.is_current_contract()]
-
-    def get_contract_history(self):
-        """Get all contract periods this tenant has been part of"""
-        return [ca.contract_period for ca in self.contract_assignments]
 
 
 class User(db.Model):

@@ -28,37 +28,74 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   const isAdmin = userData && userData.role === 'admin';
 
   const emptyForm = {
-    address: '',
+    // Address components (replacing single address field)
+    street_name: '',
+    house_number: '',
+    zip_code: '',
+    city: '',
+    state: '',
+    country: '',
+    building: '',
+    floor: '',
+    side: '',
+
+    // Property details
     rooms: 0,
     size: 0,
-    maxOccupancy: 1, // NEW FIELD - default to 1
+    maxOccupancy: 1,
+
+    // Financial
+    rent: 0,
+    deposit: 0,
+    managementFee: 0.00,
+    rentCost: 0.00,
+
+    // Other fields
     landlord_id: null,
     moveInDate: '',
     contractEndDate: '',
-    rent: 0,
-    deposit: 0,
     notes: '',
     status: APARTMENT_STATUS.VACANT,
     model: PROPERTY_MODELS.MANAGEMENT,
-    managementFee: 0,
-    rentCost: 0
+    genderPreference: 'mixed'
   };
 
   const [tenantData, setTenantData] = useState([]);
 
-  // Clean initial data
+  // Clean and process initial data
   const cleanedInitialData = isEdit ? {
     ...initialData,
+    // Handle address components
+    street_name: initialData.street_name || initialData.address_components?.street_name || '',
+    house_number: initialData.house_number || initialData.address_components?.house_number || '',
+    zip_code: initialData.zip_code || initialData.address_components?.zip_code || '',
+    city: initialData.city || initialData.address_components?.city || '',
+    state: initialData.state || initialData.address_components?.state || '',
+    country: initialData.country || initialData.address_components?.country || '',
+    building: initialData.building || initialData.address_components?.building || '',
+    floor: initialData.floor || initialData.address_components?.floor || '',
+    side: initialData.side || initialData.address_components?.side || '',
+
+    // Ensure status is valid
     status: Object.values(APARTMENT_STATUS).includes(initialData.status)
       ? initialData.status
       : APARTMENT_STATUS.VACANT,
     landlord_id: initialData.landlord?.id || initialData.landlord_id,
-    maxOccupancy: initialData.maxOccupancy || 1 // Ensure maxOccupancy has a default value
+    maxOccupancy: initialData.maxOccupancy || 1,
+
+    // Ensure financial fields have default values
+    managementFee: initialData.managementFee || 0.00,
+    rentCost: initialData.rentCost || 0.00,
+    model: initialData.model || PROPERTY_MODELS.MANAGEMENT,
+    genderPreference: initialData.genderPreference || 'mixed'
   } : emptyForm;
 
-  // Remove any invalid fields
+  // Remove any invalid/legacy fields
   if (cleanedInitialData.rentInSentance) {
     delete cleanedInitialData.rentInSentance;
+  }
+  if (cleanedInitialData.address) {
+    delete cleanedInitialData.address;
   }
 
   const [formData, setFormData] = useState(cleanedInitialData);
@@ -86,82 +123,34 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
           return {
             ...tenant,
             firstName: tenant.firstName || firstName,
-            lastName: tenant.lastName || lastName,
-            isCurrentTenant: isEdit && initialData.id && tenant.apartment_id === initialData.id
+            lastName: tenant.lastName || lastName
           };
         });
 
         setAvailableTenants(processedTenants);
-        setLoading(false);
-
-        // If editing, find current tenants for this apartment
-        if (isEdit && initialData.id) {
-          const currentTenants = processedTenants.filter(t => t.apartment_id === initialData.id);
-
-          if (currentTenants.length > 0 && tenantData.length === 0) {
-            const tenantsWithPrimary = currentTenants.map((tenant, index) => ({
-              ...tenant,
-              isPrimary: index === 0
-            }));
-
-            setTenantData(tenantsWithPrimary);
-            const tenantIdSet = new Set(tenantsWithPrimary.map(t => t.id).filter(Boolean));
-            setAddedTenantIds(tenantIdSet);
-          }
-        }
       } catch (error) {
         console.error('Error fetching tenants:', error);
-        showNotification('Error loading tenants from database', 'error');
+        showNotification('Error fetching tenants', 'error');
+      } finally {
         setLoading(false);
       }
     };
 
     fetchTenants();
-  }, [isEdit, initialData.id]);
+  }, [showNotification]);
 
-  // Initialize tenant data from current contract if editing
+  // Process initial tenant data
   useEffect(() => {
-    if (isEdit && initialData) {
+    if (isEdit && initialData && availableTenants.length > 0) {
       let tenantsToProcess = [];
 
-      // Try to get tenants from current_contract first
-      if (initialData.current_contract?.tenants) {
-        tenantsToProcess = initialData.current_contract.tenants.map(ct => ct.tenant).filter(Boolean);
-      }
-      // Fallback to legacy tenants array
-      else if (initialData.tenants) {
-        if (typeof initialData.tenants === 'string') {
-          const tenantNames = initialData.tenants.split(',').map(name => name.trim()).filter(name => name);
-          tenantsToProcess = tenantNames.map((name, index) => {
-            const existingTenant = availableTenants.find(t =>
-              t.name === name ||
-              (t.firstName && t.lastName && `${t.firstName} ${t.lastName}` === name) ||
-              (initialData.id && t.apartment_id === initialData.id)
-            );
-
-            if (existingTenant) {
-              return { ...existingTenant, isPrimary: index === 0 };
-            } else {
-              const nameParts = name.split(' ');
-              return {
-                id: `temp-${index}`,
-                firstName: nameParts[0] || '',
-                lastName: nameParts.slice(1).join(' ') || '',
-                name,
-                email: '',
-                phone: '',
-                isPrimary: index === 0
-              };
-            }
-          });
-        } else if (Array.isArray(initialData.tenants)) {
-          tenantsToProcess = initialData.tenants.map((tenant, index) => ({
-            ...tenant,
-            firstName: tenant.firstName || (tenant.name ? tenant.name.split(' ')[0] : ''),
-            lastName: tenant.lastName || (tenant.name ? tenant.name.split(' ').slice(1).join(' ') : ''),
-            isPrimary: tenant.isPrimary === undefined ? index === 0 : tenant.isPrimary
-          }));
-        }
+      if (initialData.tenants && initialData.tenants.length > 0) {
+        tenantsToProcess = initialData.tenants.map((tenant, index) => ({
+          ...tenant,
+          firstName: tenant.firstName || (tenant.name ? tenant.name.split(' ')[0] : ''),
+          lastName: tenant.lastName || (tenant.name ? tenant.name.split(' ').slice(1).join(' ') : ''),
+          isPrimary: tenant.isPrimary === undefined ? index === 0 : tenant.isPrimary
+        }));
       }
 
       if (tenantsToProcess.length > 0 && tenantData.length === 0) {
@@ -324,8 +313,9 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     setIsSubmitting(true);
 
     try {
-      if (!formData.address) {
-        showNotification('Address is required', 'error');
+      // Validate required address fields
+      if (!formData.street_name || !formData.house_number || !formData.city || !formData.zip_code) {
+        showNotification('Street name, house number, city, and ZIP code are required', 'error');
         setIsSubmitting(false);
         return;
       }
@@ -344,7 +334,25 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       }
 
       const cleanedFormData = { ...formData };
+
+      // Remove any invalid/legacy fields
       delete cleanedFormData.rentInSentance;
+      delete cleanedFormData.address; // Remove legacy address field if present
+
+      // Ensure managementFee and rentCost are always sent (for backend validation)
+      // For non-admin users, these will use default values
+      if (!isAdmin) {
+        // Set default values based on model for non-admin users
+        if (cleanedFormData.model === PROPERTY_MODELS.MANAGEMENT) {
+          cleanedFormData.managementFee = 0.00;
+          cleanedFormData.rentCost = 0.00;
+        } else {
+          cleanedFormData.managementFee = 0.00;
+          cleanedFormData.rentCost = 0.00;
+        }
+        // Force management model for non-admin users
+        cleanedFormData.model = PROPERTY_MODELS.MANAGEMENT;
+      }
 
       const processedTenants = tenantData.map(tenant => {
         const isExistingTenant = tenant.id && !String(tenant.id).startsWith('temp-');

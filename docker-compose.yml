@@ -38,12 +38,10 @@ services:
       mysql:
         condition: service_healthy
     environment:
-      FLASK_ENV: production
-      DB_USER: myuser
-      DB_PASSWORD: mypassword
-      DB_HOST: mysql
-      DB_NAME: mydatabase
-      SECRET_KEY: mysecret
+      - PYTHONUNBUFFERED=1  # Fix for immediate log output
+      - FLASK_ENV=development
+    env_file:
+      - .env
     networks: [app_network]
 
   frontend:

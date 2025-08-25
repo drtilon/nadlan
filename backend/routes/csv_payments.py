@@ -1,528 +1,651 @@
-# routes/csv_payments.py - CSV Payment Processing Endpoint
-import csv
-import io
+import os
+import json
+import tempfile
+import time
 import re
+import sys
+import logging
 from datetime import datetime
-from decimal import Decimal, InvalidOperation
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
 from .auth import token_required, role_required
+from models.models import Tenant, Apartment, Payment
 from extentions import db
-from models.models import Payment, Apartment, Tenant
+from openai import OpenAI
 from activity_logger import ActivityLogger
-from sqlalchemy import or_, func
-import json
 
-csv_payments_bp = Blueprint("csv_payments_bp", __name__)
+# Set up logging for immediate output
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - CSV_PROCESSOR - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger(__name__)
+
+# Configuration
+XAI_API_KEY = os.environ.get("XAI_API_KEY")
+
+def get_grok_client():
+    """Get Grok client using X.AI API"""
+    if not XAI_API_KEY:
+        return None
+    return OpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1")
+
+# Define blueprint
+csv_payments_bp = Blueprint('csv_payments', __name__, url_prefix='/api/csv-payments')
 
 # Configuration
 ALLOWED_EXTENSIONS = {'csv', 'txt'}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
-COMMON_DELIMITERS = [';', ',', '\t', '|']
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+CHUNK_SIZE = 100
+
+def debug_print(message):
+    """Print with immediate flush for Docker/Flask development"""
+    print(message, flush=True)
+    sys.stdout.flush()
+    logger.info(message)
+
+
 
 def allowed_file(filename):
     """Check if file extension is allowed"""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def detect_delimiter(sample_text):
-    """Detect the most likely delimiter in CSV content"""
-    delimiter_counts = {}
-    for delimiter in COMMON_DELIMITERS:
-        delimiter_counts[delimiter] = sample_text.count(delimiter)
+def create_temp_results_file():
+    """Create a temporary file to store processing results"""
+    temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json')
+    initial_data = {
+        "processed_chunks": 0,
+        "total_chunks": 0,
+        "rent_payments": [],
+        "processing_complete": False,
+        "error": None,
+        "original_transactions": [],
+        "csv_structure": {},
+        "start_time": time.time()
+    }
+    json.dump(initial_data, temp_file)
+    temp_file.close()
+    debug_print(f"Created temp file: {temp_file.name}")
+    return temp_file.name
 
-    # Return the delimiter with the highest count
-    return max(delimiter_counts, key=delimiter_counts.get) if any(delimiter_counts.values()) else ';'
-
-def parse_amount(amount_str):
-    """Parse amount string to float, handling various formats"""
-    if not amount_str or amount_str.strip() == '':
-        return 0.0
-
-    # Remove common currency symbols and whitespace
-    cleaned = re.sub(r'[€$£¥\s]', '', str(amount_str))
-
-    # Handle German number format (1.234,56 -> 1234.56)
-    if ',' in cleaned and '.' in cleaned:
-        # If both comma and dot exist, assume German format
-        cleaned = cleaned.replace('.', '').replace(',', '.')
-    elif ',' in cleaned and cleaned.count(',') == 1:
-        # Single comma, likely decimal separator
-        if len(cleaned.split(',')[1]) <= 2:  # Decimal places
-            cleaned = cleaned.replace(',', '.')
-
-    # Remove any remaining non-numeric characters except decimal point and minus
-    cleaned = re.sub(r'[^\d.-]', '', cleaned)
-
+def update_temp_results_file(temp_file_path, chunk_results, chunk_number, total_chunks, complete=False, error=None):
+    """Update the temporary results file with new chunk results"""
     try:
-        return float(cleaned)
-    except (ValueError, InvalidOperation):
-        return 0.0
+        # Read existing data
+        with open(temp_file_path, 'r') as f:
+            data = json.load(f)
 
-def parse_date(date_str):
-    """Parse date string to datetime object, trying multiple formats"""
-    if not date_str or date_str.strip() == '':
+        # Update data
+        data["processed_chunks"] = chunk_number
+        data["total_chunks"] = total_chunks
+        data["rent_payments"].extend(chunk_results)
+        data["processing_complete"] = complete
+        if error:
+            data["error"] = str(error)
+
+        # Write back
+        with open(temp_file_path, 'w') as f:
+            json.dump(data, f)
+
+        debug_print(f"Updated temp file: chunk {chunk_number}/{total_chunks}, {len(chunk_results)} new payments")
+        return True
+    except Exception as e:
+        debug_print(f"Error updating temp file: {e}")
+        return False
+
+def read_temp_results_file(temp_file_path):
+    """Read the current state from temporary results file"""
+    try:
+        with open(temp_file_path, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        debug_print(f"Error reading temp file: {e}")
         return None
 
-    date_formats = [
-        '%d.%m.%Y',      # German format: 19.08.2025
-        '%d/%m/%Y',      # 19/08/2025
-        '%Y-%m-%d',      # ISO format: 2025-08-19
-        '%d-%m-%Y',      # 19-08-2025
-        '%m/%d/%Y',      # US format: 08/19/2025
-        '%d.%m.%y',      # Short year: 19.08.25
-        '%d/%m/%y',      # 19/08/25
-    ]
-
-    date_str = date_str.strip()
-    for fmt in date_formats:
-        try:
-            return datetime.strptime(date_str, fmt)
-        except ValueError:
-            continue
-
-    return None
-
-def fuzzy_match_tenant(payment_reference, tenant_name, threshold=0.6):
-    """
-    Fuzzy match payment reference with tenant name
-    Returns similarity score (0-1)
-    """
-    if not payment_reference or not tenant_name:
-        return 0.0
-
-    # Normalize strings
-    ref_clean = re.sub(r'[^\w\s]', '', payment_reference.lower())
-    name_clean = re.sub(r'[^\w\s]', '', tenant_name.lower())
-
-    # Simple substring matching
-    if name_clean in ref_clean or ref_clean in name_clean:
-        return 1.0
-
-    # Split into words and check for matches
-    ref_words = set(ref_clean.split())
-    name_words = set(name_clean.split())
-
-    if not ref_words or not name_words:
-        return 0.0
-
-    # Calculate Jaccard similarity
-    intersection = len(ref_words.intersection(name_words))
-    union = len(ref_words.union(name_words))
-
-    return intersection / union if union > 0 else 0.0
-
-def find_matching_tenant(payment_data, apartments_cache):
-    """
-    Find the best matching tenant for a payment
-    Returns (tenant, apartment, confidence_score)
-    """
-    best_match = None
-    best_score = 0.0
-    best_apartment = None
-
-    # Get searchable fields from payment
-    search_fields = [
-        payment_data.get('reference', ''),
-        payment_data.get('description', ''),
-        payment_data.get('purpose', ''),
-        payment_data.get('tenant', ''),
-        payment_data.get('sender', ''),
-    ]
-
-    search_text = ' '.join(filter(None, search_fields)).lower()
-
-    # Search through all apartments and tenants
-    for apartment in apartments_cache:
-        # Check apartment address in payment reference
-        address_score = fuzzy_match_tenant(search_text, apartment.address)
-
-        for tenant in apartment.tenants:
-            # Calculate tenant name match score
-            name_score = fuzzy_match_tenant(search_text, tenant.name)
-
-            # Combine apartment address and tenant name scores
-            combined_score = max(name_score, address_score * 0.7)  # Slight preference for direct name matches
-
-            if combined_score > best_score:
-                best_score = combined_score
-                best_match = tenant
-                best_apartment = apartment
-
-    return best_match, best_apartment, best_score
-
-def process_csv_content(csv_content, delimiter=';'):
-    """
-    Process CSV content and extract payment data
-    Returns list of payment dictionaries
-    """
-    payments = []
-
+def store_original_transactions(temp_file_path, transactions, csv_structure):
+    """Store the original transactions and structure in temp file"""
     try:
-        # Create CSV reader
-        csv_reader = csv.DictReader(io.StringIO(csv_content), delimiter=delimiter)
+        with open(temp_file_path, 'r') as f:
+            data = json.load(f)
 
-        # Get field names and try to map to common payment fields
-        fieldnames = csv_reader.fieldnames or []
-        current_app.logger.info(f"CSV fields detected: {fieldnames}")
+        data["original_transactions"] = transactions
+        data["csv_structure"] = csv_structure
 
-        # Define field mappings (German banking format)
-        field_mappings = {
-            'date': ['Buchungsdatum', 'Buchungstag', 'Valutadatum', 'Date', 'Datum'],
-            'amount': ['Betrag (€)', 'Betrag', 'Umsatz (EUR)', 'Amount', 'Summe'],
-            'sender': ['Zahlungspflichtige*r', 'Auftraggeber', 'Sender', 'Von'],
-            'reference': ['Verwendungszweck', 'Reference', 'Zweck', 'Beschreibung'],
-            'description': ['Buchungstext', 'Description', 'Text'],
-            'purpose': ['Verwendungszweck', 'Purpose', 'Zweck'],
-        }
+        with open(temp_file_path, 'w') as f:
+            json.dump(data, f)
 
-        # Auto-detect field mappings
-        detected_fields = {}
-        for target_field, possible_names in field_mappings.items():
-            for field_name in fieldnames:
-                if any(possible.lower() in field_name.lower() for possible in possible_names):
-                    detected_fields[target_field] = field_name
-                    break
-
-        current_app.logger.info(f"Field mappings detected: {detected_fields}")
-
-        # Process each row
-        for row_num, row in enumerate(csv_reader, 1):
-            try:
-                payment_data = {}
-
-                # Extract data using detected mappings
-                for target_field, csv_field in detected_fields.items():
-                    payment_data[target_field] = row.get(csv_field, '').strip()
-
-                # Parse amount
-                amount_str = payment_data.get('amount', '0')
-                amount = parse_amount(amount_str)
-
-                # Only process incoming payments (positive amounts)
-                if amount <= 0:
-                    continue
-
-                # Parse date
-                date_str = payment_data.get('date', '')
-                payment_date = parse_date(date_str)
-
-                if not payment_date:
-                    current_app.logger.warning(f"Row {row_num}: Could not parse date '{date_str}'")
-                    continue
-
-                # Create payment record
-                payment_record = {
-                    'row_number': row_num,
-                    'amount': amount,
-                    'date': payment_date,
-                    'sender': payment_data.get('sender', ''),
-                    'reference': payment_data.get('reference', ''),
-                    'description': payment_data.get('description', ''),
-                    'purpose': payment_data.get('purpose', ''),
-                    'raw_data': dict(row),  # Keep original row data
-                }
-
-                payments.append(payment_record)
-
-            except Exception as e:
-                current_app.logger.error(f"Error processing row {row_num}: {e}")
-                continue
-
+        debug_print(f"Stored {len(transactions)} transactions in temp file")
+        return True
     except Exception as e:
-        current_app.logger.error(f"Error processing CSV content: {e}")
-        raise
+        debug_print(f"Error storing transactions: {e}")
+        return False
 
-    return payments
+@csv_payments_bp.route("/grok-status", methods=["GET"])
+@token_required
+def check_grok_status():
+    """Check if Grok AI is configured and working"""
+    try:
+        client = get_grok_client()
+        if not client:
+            return jsonify({"configured": False, "message": "Grok API key not configured"}), 200
 
-@csv_payments_bp.route("/process-csv-payments", methods=["POST"])
+        # Test with a simple query
+        try:
+            completion = client.chat.completions.create(
+                model="grok-3-mini",
+                messages=[{"role": "user", "content": "Say 'ok' if you can hear me"}],
+                timeout=10
+            )
+            api_working = "ok" in completion.choices[0].message.content.lower()
+        except Exception as e:
+            debug_print(f"Grok test failed: {e}")
+            api_working = False
+
+        return jsonify({
+            "configured": True,
+            "api_working": api_working,
+        }), 200
+    except Exception as e:
+        debug_print(f"Grok status check error: {e}")
+        return jsonify({"configured": False, "message": str(e)}), 500
+
+@csv_payments_bp.route("/process-csv-simple", methods=["POST"])
 @token_required
 @role_required("admin")
-def process_csv_payments():
+def process_csv_simple():
     """
-    Process uploaded CSV file to extract and match rent payments
+    Modified version that uses AI only once for CSV structure detection,
+    then returns all positive transactions to frontend
     """
     try:
-        # Check if file is present
+        debug_print("Starting CSV processing...")
+
+        client = get_grok_client()
+        if not client:
+            debug_print("Grok AI not configured")
+            return jsonify({"message": "Grok AI not configured"}), 500
+
+        if 'file' not in request.files:
+            debug_print("No file provided in request")
+            return jsonify({"message": "No file provided"}), 400
+
+        file = request.files['file']
+        if not file:
+            debug_print("No file selected")
+            return jsonify({"message": "No file selected"}), 400
+
+        debug_print(f"Processing file: {file.filename}")
+
+        # Read file
+        try:
+            csv_content = file.read().decode('utf-8')
+            debug_print("File decoded as UTF-8")
+        except:
+            file.seek(0)
+            csv_content = file.read().decode('latin-1')
+            debug_print("File decoded as latin-1")
+
+        # Count lines for information
+        line_count = len(csv_content.strip().split('\n'))
+        debug_print(f"CSV has {line_count} lines")
+
+        # Process with single AI call
+        return process_csv_structure_only(csv_content, client)
+
+    except Exception as e:
+        debug_print(f"ERROR in process_csv_simple: {e}")
+        return jsonify({"message": str(e)}), 500
+
+def process_csv_structure_only(csv_content, client):
+    """
+    Process CSV using AI only for structure detection,
+    then return all positive transactions without AI analysis
+    """
+    try:
+        # Get first 10 lines for column detection
+        lines = csv_content.strip().split('\n')
+        first_10_lines = '\n'.join(lines[:10])
+
+        debug_print("=" * 50)
+        debug_print("DETECTING CSV STRUCTURE (SINGLE AI CALL)...")
+        debug_print(first_10_lines)
+        debug_print("=" * 50)
+
+        # SINGLE AI CALL - Only for structure detection
+        prompt = f"""Look at these first 10 lines of a CSV file and tell me:
+1. Which row number (0-based) contains the actual data (not headers or account info)
+2. Which column numbers contain:
+   - Date
+   - Name/Description (person or company name)
+   - Amount (money amount)
+   - Extra notes/reference (optional, use -1 if none)
+
+First 10 lines:
+{first_10_lines}
+
+Return ONLY a JSON array: [data_start_row, date_column, name_column, amount_column, notes_column]
+Use 0-based indexing.
+
+Example: [4, 0, 2, 4, 5] means data starts at row 4, date in column 0, name in column 2, etc."""
+
+        debug_print("Sending structure detection prompt to AI...")
+
+        completion = client.chat.completions.create(
+            model="grok-3-mini",
+            messages=[{"role": "user", "content": prompt}],
+            timeout=120
+        )
+
+        ai_response = completion.choices[0].message.content.strip()
+        debug_print(f"AI structure response: {ai_response}")
+
+        # Clean and parse response
+        if ai_response.startswith('```'):
+            ai_response = re.sub(r'```[json]*\n?', '', ai_response).strip()
+
+        result = json.loads(ai_response)
+
+        if len(result) < 4:
+            debug_print("AI response incomplete")
+            return jsonify({"message": "AI response incomplete"}), 400
+
+        data_start_row = result[0]
+        date_col = result[1]
+        name_col = result[2]
+        amount_col = result[3]
+        notes_col = result[4] if len(result) > 4 else -1
+
+        csv_structure = {
+            "data_start_row": data_start_row,
+            "date_col": date_col,
+            "name_col": name_col,
+            "amount_col": amount_col,
+            "notes_col": notes_col
+        }
+
+        debug_print(f"CSV STRUCTURE DETECTED:")
+        debug_print(f"DATA STARTS AT ROW: {data_start_row}")
+        debug_print(f"DATE COLUMN: {date_col}")
+        debug_print(f"NAME COLUMN: {name_col}")
+        debug_print(f"AMOUNT COLUMN: {amount_col}")
+        debug_print(f"NOTES COLUMN: {notes_col}")
+
+        if data_start_row == -1 or date_col == -1 or name_col == -1 or amount_col == -1:
+            debug_print("Could not detect required columns")
+            return jsonify({"message": "Could not detect required columns in CSV"}), 400
+
+        # Parse all data and filter positive amounts - NO MORE AI CALLS
+        all_lines = csv_content.strip().split('\n')
+        data_lines = all_lines[data_start_row:]
+
+        debug_print(f"Total lines in CSV: {len(all_lines)}")
+        debug_print(f"Data lines to process: {len(data_lines)}")
+
+        positive_transactions = []
+
+        # Detect delimiter by checking the first data line
+        if data_lines:
+            delimiters = [',', ';', '\t', '|']
+            best_delimiter = ','
+            max_columns = 0
+
+            for delimiter in delimiters:
+                columns = data_lines[0].split(delimiter)
+                if len(columns) > max_columns:
+                    max_columns = len(columns)
+                    best_delimiter = delimiter
+
+            debug_print(f"Detected delimiter: '{best_delimiter}' (found {max_columns} columns)")
+
+        # Parse all transactions and return positive ones
+        for line_index, line in enumerate(data_lines):
+            try:
+                columns = line.split(best_delimiter)
+                columns = [col.strip().strip('"') for col in columns]
+
+                if len(columns) <= amount_col:
+                    debug_print(f"Line {line_index}: Not enough columns ({len(columns)} <= {amount_col})")
+                    continue
+
+                amount_str = columns[amount_col].strip()
+                debug_print(f"Line {line_index}: Raw amount string: '{amount_str}'")
+
+                # Handle different number formats
+                clean_amount = amount_str
+
+                # Remove currency symbols and spaces
+                clean_amount = re.sub(r'[€$£¥\s]', '', clean_amount)
+
+                # Handle European vs US number formats
+                if ',' in clean_amount and '.' in clean_amount:
+                    # Both comma and dot present - determine which is decimal separator
+                    comma_pos = clean_amount.rindex(',')
+                    dot_pos = clean_amount.rindex('.')
+
+                    if comma_pos > dot_pos:
+                        # European format: 1.234.567,89 (dot=thousands, comma=decimal)
+                        clean_amount = clean_amount.replace('.', '').replace(',', '.')
+                    else:
+                        # US format: 1,234,567.89 (comma=thousands, dot=decimal)
+                        clean_amount = clean_amount.replace(',', '')
+                elif ',' in clean_amount:
+                    # Only comma present
+                    if clean_amount.count(',') == 1 and len(clean_amount.split(',')[1]) <= 2:
+                        # Likely decimal separator: 123,45
+                        clean_amount = clean_amount.replace(',', '.')
+                    else:
+                        # Likely thousands separator: 1,234 or 12,345
+                        clean_amount = clean_amount.replace(',', '')
+                elif '.' in clean_amount:
+                    # Only dot present - could be thousands or decimal separator
+                    dot_parts = clean_amount.split('.')
+                    if len(dot_parts) == 2:
+                        # One dot - check if it's thousands or decimal
+                        if len(dot_parts[1]) == 3 and dot_parts[1].isdigit():
+                            # Likely thousands separator: 1.600 = 1600
+                            clean_amount = clean_amount.replace('.', '')
+                        # else: assume decimal separator: 123.45 stays as is
+                    else:
+                        # Multiple dots - thousands separators: 1.234.567
+                        clean_amount = clean_amount.replace('.', '')
+
+                # Remove any remaining non-numeric characters except decimal point and minus
+                clean_amount = re.sub(r'[^\d.-]', '', clean_amount)
+
+                if not clean_amount or clean_amount == '.' or clean_amount == '-':
+                    debug_print(f"Line {line_index}: Empty or invalid amount after cleaning")
+                    continue
+
+                try:
+                    amount = float(clean_amount)
+                    debug_print(f"Line {line_index}: Parsed amount: {amount}")
+                except ValueError as ve:
+                    debug_print(f"Line {line_index}: Failed to parse amount '{clean_amount}': {ve}")
+                    continue
+
+                # Only include positive amounts (incoming transactions)
+                if amount > 0:
+                    date_value = columns[date_col].strip() if date_col < len(columns) else ""
+                    name_value = columns[name_col].strip() if name_col < len(columns) else ""
+                    notes_value = columns[notes_col].strip() if notes_col != -1 and notes_col < len(columns) else ""
+
+                    transaction = {
+                        "date": date_value,
+                        "sender": name_value,
+                        "amount": amount,
+                        "reference": notes_value,
+                        "csv_line": data_start_row + line_index,
+                        "data_index": line_index,
+                        "full_row": columns
+                    }
+
+                    positive_transactions.append(transaction)
+                    debug_print(f"Line {line_index}: Added positive transaction: {name_value} - €{amount}")
+
+            except Exception as e:
+                debug_print(f"Error parsing line {line_index}: {e}")
+                continue
+
+        debug_print(f"FOUND {len(positive_transactions)} POSITIVE TRANSACTIONS")
+
+        if len(positive_transactions) == 0:
+            return jsonify({
+                "message": "No positive amounts found - all transactions appear to be outgoing",
+                "summary": {
+                    "file_size_mb": round(len(csv_content) / (1024 * 1024), 2),
+                    "total_positive_transactions": 0,
+                    "auto_inserted_count": 0,
+                    "auto_inserted_amount": 0.0,
+                    "manual_review_count": 0,
+                    "manual_review_amount": 0.0,
+                    "api_calls_made": 1,
+                    "processing_method": "structure_only"
+                },
+                "auto_inserted_payments": [],
+                "manual_review_transactions": [],
+                "auto_insert_errors": []
+            }), 200
+
+        # Calculate total amount
+        total_amount = sum(t['amount'] for t in positive_transactions)
+
+        debug_print(f"Total amount of positive transactions: €{total_amount}")
+
+        # Return all positive transactions for frontend to handle
+        return jsonify({
+            "message": f"Found {len(positive_transactions)} positive transactions",
+            "summary": {
+                "file_size_mb": round(len(csv_content) / (1024 * 1024), 2),
+                "total_positive_transactions": len(positive_transactions),
+                "auto_inserted_count": 0,
+                "auto_inserted_amount": 0.0,
+                "manual_review_count": len(positive_transactions),
+                "manual_review_amount": total_amount,
+                "api_calls_made": 1,  # Only one AI call for structure detection
+                "processing_method": "structure_only"
+            },
+            "csv_structure": csv_structure,
+            "auto_inserted_payments": [],
+            "manual_review_transactions": positive_transactions,  # All positive transactions
+            "auto_insert_errors": []
+        }), 200
+
+    except Exception as e:
+        debug_print(f"ERROR in structure-only processing: {e}")
+        return jsonify({"message": str(e)}), 500
+
+# Keep the old chunked processing for backward compatibility if needed
+@csv_payments_bp.route("/process-csv-chunked", methods=["POST"])
+@token_required
+@role_required("admin")
+def process_csv_chunked():
+    """Start chunked processing for large files (legacy - now uses structure-only approach)"""
+    try:
+        debug_print("Chunked processing endpoint called - redirecting to structure-only processing...")
+
+        client = get_grok_client()
+        if not client:
+            return jsonify({"message": "Grok AI not configured"}), 500
+
         if 'file' not in request.files:
             return jsonify({"message": "No file provided"}), 400
 
         file = request.files['file']
-        if file.filename == '':
+        if not file:
             return jsonify({"message": "No file selected"}), 400
 
-        if not allowed_file(file.filename):
-            return jsonify({"message": "Invalid file type. Only CSV and TXT files are allowed"}), 400
+        debug_print(f"Processing large file: {file.filename}")
 
-        # Check file size
-        file.seek(0, 2)  # Seek to end
-        file_size = file.tell()
-        file.seek(0)  # Reset to beginning
-
-        if file_size > MAX_FILE_SIZE:
-            return jsonify({"message": f"File too large. Maximum size is {MAX_FILE_SIZE // (1024*1024)}MB"}), 400
-
-        # Read file content
+        # Read file
         try:
-            content = file.read().decode('utf-8-sig')  # Handle BOM
-        except UnicodeDecodeError:
-            try:
-                file.seek(0)
-                content = file.read().decode('latin1')  # Fallback encoding
-            except UnicodeDecodeError:
-                return jsonify({"message": "Could not decode file. Please ensure it's a valid CSV file"}), 400
+            csv_content = file.read().decode('utf-8')
+        except:
+            file.seek(0)
+            csv_content = file.read().decode('latin-1')
 
-        # Detect delimiter
-        delimiter = detect_delimiter(content[:1000])  # Sample first 1000 characters
-
-        # Get optional parameters
-        confidence_threshold = float(request.form.get('confidence_threshold', 0.6))
-        auto_insert = request.form.get('auto_insert', 'true').lower() == 'true'
-
-        current_app.logger.info(f"Processing CSV with delimiter '{delimiter}', threshold {confidence_threshold}")
-
-        # Process CSV content
-        payments = process_csv_content(content, delimiter)
-
-        if not payments:
-            return jsonify({
-                "message": "No valid payments found in CSV file",
-                "total_rows": 0,
-                "matched_payments": [],
-                "unmatched_payments": [],
-                "insert_errors": []
-            }), 200
-
-        # Cache apartments and tenants for matching
-        apartments_cache = Apartment.query.all()
-
-        # Process payments and find matches
-        matched_payments = []
-        unmatched_payments = []
-        insert_errors = []
-
-        for payment in payments:
-            # Find matching tenant
-            tenant, apartment, confidence = find_matching_tenant(payment, apartments_cache)
-
-            payment_result = {
-                "row_number": payment['row_number'],
-                "amount": payment['amount'],
-                "date": payment['date'].isoformat(),
-                "sender": payment['sender'],
-                "reference": payment['reference'],
-                "description": payment['description'],
-                "confidence": confidence,
-                "matched_tenant": tenant.name if tenant else None,
-                "matched_apartment": apartment.address if apartment else None,
-                "apartment_id": apartment.id if apartment else None,
-                "tenant_id": tenant.id if tenant else None,
-            }
-
-            if confidence >= confidence_threshold and tenant and apartment:
-                # High confidence match
-                matched_payments.append(payment_result)
-
-                # Auto-insert if enabled
-                if auto_insert:
-                    try:
-                        # Create payment record
-                        new_payment = Payment(
-                            apartment_id=apartment.id,
-                            month=payment['date'].strftime('%B'),
-                            year=payment['date'].year,
-                            status='paid',
-                            tenants=json.dumps([{
-                                "name": tenant.name,
-                                "amountPaid": payment['amount'],
-                                "amountDue": payment['amount'],
-                                "paid": True
-                            }]),
-                            internet=0.0,
-                            electricity=0.0,
-                            other=0.0,
-                            extraPayments="{}",
-                            paymentDate=payment['date'],
-                            paymentMethod="bank_transfer",
-                            notes=f"CSV Import: {payment['reference'][:100]}",
-                            updated_at=datetime.utcnow()
-                        )
-
-                        # Add new model fields if they exist
-                        if hasattr(new_payment, 'amount'):
-                            new_payment.amount = payment['amount']
-                        if hasattr(new_payment, 'payment_type'):
-                            new_payment.payment_type = 'rent'
-                        if hasattr(new_payment, 'tenant_name'):
-                            new_payment.tenant_name = tenant.name
-
-                        db.session.add(new_payment)
-                        db.session.flush()
-
-                        payment_result["inserted"] = True
-                        payment_result["payment_id"] = new_payment.id
-
-                    except Exception as e:
-                        db.session.rollback()
-                        current_app.logger.error(f"Error inserting payment: {e}")
-                        insert_errors.append({
-                            "row_number": payment['row_number'],
-                            "error": str(e),
-                            "payment_data": payment_result
-                        })
-                        payment_result["inserted"] = False
-                        payment_result["insert_error"] = str(e)
-            else:
-                # Low confidence or no match
-                unmatched_payments.append(payment_result)
-
-        # Commit all successful insertions
-        if auto_insert and not insert_errors:
-            db.session.commit()
-
-            # Log the CSV processing
-            ActivityLogger.log_activity(
-                action="process_csv_payments",
-                entity_type="payment",
-                details={
-                    "filename": secure_filename(file.filename),
-                    "total_payments": len(payments),
-                    "matched": len(matched_payments),
-                    "unmatched": len(unmatched_payments),
-                    "inserted": len([p for p in matched_payments if p.get("inserted", False)]),
-                    "confidence_threshold": confidence_threshold
-                }
-            )
-        elif auto_insert:
-            db.session.rollback()
-
-        # Prepare response
-        response = {
-            "message": f"Processed {len(payments)} payments from CSV",
-            "total_rows": len(payments),
-            "matched_payments": matched_payments,
-            "unmatched_payments": unmatched_payments,
-            "insert_errors": insert_errors,
-            "summary": {
-                "total": len(payments),
-                "matched": len(matched_payments),
-                "unmatched": len(unmatched_payments),
-                "inserted": len([p for p in matched_payments if p.get("inserted", False)]),
-                "errors": len(insert_errors),
-                "confidence_threshold": confidence_threshold,
-                "auto_insert_enabled": auto_insert
-            },
-            "field_mappings": {
-                "delimiter_detected": delimiter,
-                "total_amount": sum(p['amount'] for p in payments),
-                "date_range": {
-                    "earliest": min(p['date'] for p in payments).isoformat() if payments else None,
-                    "latest": max(p['date'] for p in payments).isoformat() if payments else None
-                }
-            }
-        }
-
-        return jsonify(response), 200
+        # Use the same structure-only processing
+        return process_csv_structure_only(csv_content, client)
 
     except Exception as e:
-        current_app.logger.error(f"Error processing CSV payments: {e}")
-        db.session.rollback()
-        return jsonify({
-            "message": "Error processing CSV file",
-            "error": str(e),
-            "matched_payments": [],
-            "unmatched_payments": [],
-            "insert_errors": []
-        }), 500
+        debug_print(f"ERROR in chunked processing: {e}")
+        return jsonify({"message": str(e)}), 500
 
-@csv_payments_bp.route("/manual-match-payment", methods=["POST"])
+@csv_payments_bp.route("/process-chunk/<temp_file_id>/<int:chunk_number>", methods=["POST"])
 @token_required
 @role_required("admin")
-def manual_match_payment():
-    """
-    Manually match and insert a payment that was unmatched during CSV processing
-    """
+def process_chunk(temp_file_id, chunk_number):
+    """Legacy endpoint - no longer needed with structure-only approach"""
+    return jsonify({
+        "message": "Chunk processing is no longer needed. All transactions are processed immediately.",
+        "chunk_processed": chunk_number + 1,
+        "rent_payments_found": 0,
+        "chunk_results": [],
+        "processing_complete": True
+    }), 200
+
+@csv_payments_bp.route("/get-results/<temp_file_id>", methods=["GET"])
+@token_required
+def get_processing_results(temp_file_id):
+    """Legacy endpoint for getting processing results"""
+    return jsonify({
+        "message": "Results are now returned immediately from the main processing endpoint",
+        "summary": {
+            "total_transactions_found": 0,
+            "total_amount": 0.0,
+            "processing_complete": True
+        },
+        "rent_payments": [],
+        "processing_complete": True
+    }), 200
+
+@csv_payments_bp.route("/manual-assign-payment", methods=["POST"])
+@token_required
+@role_required("admin")
+def manual_assign_payment():
+    """Manually assign a CSV transaction to a tenant and apartment"""
     try:
         data = request.get_json()
         if not data:
             return jsonify({"message": "No data provided"}), 400
 
-        # Required fields
-        required_fields = ['apartment_id', 'tenant_id', 'amount', 'date']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({"message": f"Missing required field: {field}"}), 400
+        # Extract transaction and assignment data
+        transaction_data = data.get('transaction_data', {})
+        assignment_data = data.get('assignment_data', {})
 
-        # Validate apartment and tenant
-        apartment = Apartment.query.get(data['apartment_id'])
-        if not apartment:
-            return jsonify({"message": "Apartment not found"}), 404
+        debug_print(f"Manual assignment request: {data}")
 
-        tenant = Tenant.query.get(data['tenant_id'])
+        # Validate required fields
+        required_transaction_fields = ['csv_line', 'sender', 'original_amount', 'date']
+        required_assignment_fields = ['tenant_id', 'apartment_id', 'amount', 'payment_date']
+
+        for field in required_transaction_fields:
+            if field not in transaction_data:
+                return jsonify({"message": f"Missing required transaction field: {field}"}), 400
+
+        for field in required_assignment_fields:
+            if field not in assignment_data:
+                return jsonify({"message": f"Missing required assignment field: {field}"}), 400
+
+        # Validate that tenant and apartment exist
+        tenant_id = assignment_data['tenant_id']
+        apartment_id = assignment_data['apartment_id']
+
+        tenant = Tenant.query.get(tenant_id)
         if not tenant:
             return jsonify({"message": "Tenant not found"}), 404
 
-        # Parse date
-        try:
-            payment_date = datetime.fromisoformat(data['date'].replace('Z', '+00:00'))
-        except ValueError:
-            try:
-                payment_date = datetime.strptime(data['date'], '%Y-%m-%d')
-            except ValueError:
-                return jsonify({"message": "Invalid date format"}), 400
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
 
-        # Create payment record
+        # Parse payment date
+        payment_date_str = assignment_data['payment_date']
+        try:
+            payment_date = datetime.strptime(payment_date_str, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({"message": "Invalid payment date format. Use YYYY-MM-DD"}), 400
+
+        # Extract payment details
+        amount = float(assignment_data['amount'])
+        notes = assignment_data.get('notes', f"CSV Import - Line {transaction_data['csv_line']}")
+
+        # Create unique month identifier for CSV payments
+        month_identifier = f"csv_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        # Create tenant data structure
+        tenant_data = [{
+            "id": tenant.id,
+            "name": tenant.name,
+            "amountPaid": amount,
+            "amountDue": amount,
+            "paid": True
+        }]
+
+        # Create new payment record
         new_payment = Payment(
-            apartment_id=apartment.id,
-            month=payment_date.strftime('%B'),
+            apartment_id=apartment_id,
+            month=month_identifier,
             year=payment_date.year,
             status='paid',
-            tenants=json.dumps([{
-                "name": tenant.name,
-                "amountPaid": float(data['amount']),
-                "amountDue": float(data['amount']),
-                "paid": True
-            }]),
+            tenants=json.dumps(tenant_data),
             internet=0.0,
             electricity=0.0,
             other=0.0,
             extraPayments="{}",
             paymentDate=payment_date,
-            paymentMethod="bank_transfer",
-            notes=f"Manual CSV Match: {data.get('reference', '')}",
+            paymentMethod='bank_transfer',
+            notes=notes,
             updated_at=datetime.utcnow()
         )
-
-        # Add new model fields if they exist
-        if hasattr(new_payment, 'amount'):
-            new_payment.amount = float(data['amount'])
-        if hasattr(new_payment, 'payment_type'):
-            new_payment.payment_type = 'rent'
-        if hasattr(new_payment, 'tenant_name'):
-            new_payment.tenant_name = tenant.name
 
         db.session.add(new_payment)
         db.session.commit()
 
-        # Log the manual match
-        ActivityLogger.log_payment_action(
-            action="manual_csv_match",
-            payment_id=new_payment.id,
-            apartment_id=apartment.id,
-            details={
-                "tenant_id": tenant.id,
-                "amount": float(data['amount']),
-                "date": data['date'],
-                "reference": data.get('reference', ''),
-                "row_number": data.get('row_number')
-            }
-        )
+        debug_print(f"Successfully created payment record for tenant {tenant.name} - €{amount}")
 
         return jsonify({
-            "message": "Payment manually matched and inserted successfully",
-            "payment_id": new_payment.id
+            "message": "Payment successfully assigned and recorded",
+            "payment_id": new_payment.id,
+            "tenant_name": tenant.name,
+            "apartment_address": apartment.address,
+            "amount": amount,
+            "payment_date": payment_date.strftime('%Y-%m-%d')
         }), 201
 
     except Exception as e:
-        current_app.logger.error(f"Error manually matching payment: {e}")
         db.session.rollback()
-        return jsonify({"message": "Error manually matching payment", "error": str(e)}), 500
+        debug_print(f"ERROR in manual assignment: {e}")
+        return jsonify({"message": str(e)}), 500
+
+@csv_payments_bp.route("/test", methods=["GET"])
+def test_endpoint():
+    """Test endpoint to verify blueprint is working"""
+    return jsonify({"message": "CSV Payments API is working!", "timestamp": datetime.now().isoformat()}), 200
+
+@csv_payments_bp.route("/tenants", methods=["GET"])
+@token_required
+def get_tenants():
+    """Get all tenants for assignment dropdown"""
+    try:
+        tenants = Tenant.query.all()
+        tenant_list = []
+        for tenant in tenants:
+            tenant_data = {
+                "id": tenant.id,
+                "name": tenant.name,
+                "email": tenant.email,
+                "phone": tenant.phone,
+                "apartment_id": tenant.apartment_id,
+                "apartment_address": tenant.apartment.address if tenant.apartment else "No apartment"
+            }
+            tenant_list.append(tenant_data)
+
+        debug_print(f"Retrieved {len(tenant_list)} tenants")
+        return jsonify(tenant_list), 200
+    except Exception as e:
+        debug_print(f"Error getting tenants: {e}")
+        return jsonify({"message": str(e)}), 500
+
+@csv_payments_bp.route("/apartments", methods=["GET"])
+@token_required
+def get_apartments():
+    """Get all apartments for assignment dropdown"""
+    try:
+        apartments = Apartment.query.all()
+        apartment_list = []
+        for apartment in apartments:
+            apartment_data = {
+                "id": apartment.id,
+                "address": apartment.address,
+                "rent": apartment.rent,
+                "rooms": apartment.rooms,
+                "status": apartment.status
+            }
+            apartment_list.append(apartment_data)
+
+        debug_print(f"Retrieved {len(apartment_list)} apartments")
+        return jsonify(apartment_list), 200
+    except Exception as e:
+        debug_print(f"Error getting apartments: {e}")
+        return jsonify({"message": str(e)}), 500

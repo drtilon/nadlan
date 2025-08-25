@@ -17,3 +17,5 @@ num2words
 dotenv
 openpyxl
 num2words
+requests
+openai

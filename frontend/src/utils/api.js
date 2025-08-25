@@ -13,24 +13,21 @@ const getBaseUrl = () => {
   }
 
   // Local development - use relative path to go through proxy
-  // This will use the current origin (e.g., http://localhost or http://localhost:3001)
-  // and the Vite proxy or nginx will handle routing to the backend
   return '/api';
 };
 
 // API service with dynamic base URL configuration
 const api = axios.create({
   baseURL: getBaseUrl(),
-  timeout: 10000, // 10 second timeout
+  timeout: 300000, // INCREASED to 5 minutes (300 seconds) for CSV processing
   headers: {
     'Content-Type': 'application/json',
   },
-  withCredentials: true, // Important for cookies/credentials
+  withCredentials: true,
 });
 
 // Track if we are currently handling a session expiration
 let isHandlingSessionExpiration = false;
-// Debounce the expiration handling to prevent multiple expiry alerts
 let expirationDebounceTimer = null;
 
 // Request interceptor - runs before each request
@@ -94,6 +91,19 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// SET LONGER TIMEOUT FOR CSV PROCESSING SPECIFICALLY
+export const createLongTimeoutApi = () => {
+  return axios.create({
+    baseURL: getBaseUrl(),
+    timeout: 600000, // 10 minutes for CSV processing
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${localStorage.getItem('token')}`
+    },
+    withCredentials: true,
+  });
+};
 
 // Set auth token for API requests safely
 export const setAuthToken = (token) => {

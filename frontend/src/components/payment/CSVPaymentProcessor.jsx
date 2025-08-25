@@ -1,4 +1,3 @@
-// CSVPaymentProcessor.jsx - Admin-only CSV Payment Processing Component
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
@@ -8,7 +7,6 @@ import {
   Button,
   LinearProgress,
   Alert,
-  AlertTitle,
   Table,
   TableBody,
   TableCell,
@@ -17,112 +15,170 @@ import {
   TableRow,
   Paper,
   Chip,
-  IconButton,
+  Grid,
+  CircularProgress,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
+  TablePagination,
   TextField,
+  MenuItem,
+  Select,
   FormControl,
   InputLabel,
-  Select,
-  MenuItem,
-  Grid,
-  Divider,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  Collapse,
-  Tabs,
-  Tab,
-  Switch,
-  FormControlLabel,
-  Tooltip,
+  Autocomplete,
   Stack,
-  Badge,
-  CircularProgress,
-  Stepper,
-  Step,
-  StepLabel,
-  StepContent
+  Divider,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
 
 // Icons
 import UploadFileIcon from '@mui/icons-material/UploadFile';
-import CheckCircleIcon from '@mui/icons-material/CheckCircle';
-import ErrorIcon from '@mui/icons-material/Error';
-import WarningIcon from '@mui/icons-material/Warning';
-import InfoIcon from '@mui/icons-material/Info';
-import VisibilityIcon from '@mui/icons-material/Visibility';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
+import PaymentIcon from '@mui/icons-material/Payment';
 import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
+import PauseIcon from '@mui/icons-material/Pause';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import StopIcon from '@mui/icons-material/Stop';
+import AssignmentIcon from '@mui/icons-material/Assignment';
 import SaveIcon from '@mui/icons-material/Save';
 import CancelIcon from '@mui/icons-material/Cancel';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
-import PaymentIcon from '@mui/icons-material/Payment';
-import PersonIcon from '@mui/icons-material/Person';
-import HomeIcon from '@mui/icons-material/Home';
-import RefreshIcon from '@mui/icons-material/Refresh';
+import PersonAddIcon from '@mui/icons-material/PersonAdd';
 
-import api, { apiHelpers } from '../../utils/api';
+// IMPORT THE LONG TIMEOUT API
+import { createLongTimeoutApi } from '../../utils/api';
 
 const CSVPaymentProcessor = ({ showNotification }) => {
-  // State management
-  const [activeTab, setActiveTab] = useState(0);
+  // State
   const [file, setFile] = useState(null);
   const [processing, setProcessing] = useState(false);
-  const [uploadStep, setUploadStep] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [status, setStatus] = useState('');
+  const [results, setResults] = useState(null);
+  const [transactions, setTransactions] = useState([]);
   const [grokStatus, setGrokStatus] = useState({ configured: false, checking: true });
 
-  // Processing results
-  const [results, setResults] = useState(null);
-  const [matchedPayments, setMatchedPayments] = useState([]);
-  const [unmatchedPayments, setUnmatchedPayments] = useState([]);
-  const [insertErrors, setInsertErrors] = useState([]);
+  // Pagination state
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [filteredTransactions, setFilteredTransactions] = useState([]);
+  const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'matched', 'unmatched'
 
-  // Configuration
-  const [confidenceThreshold, setConfidenceThreshold] = useState(0.6);
-  const [autoInsert, setAutoInsert] = useState(true);
-
-  // Manual matching dialog
-  const [manualMatchDialog, setManualMatchDialog] = useState({
+  // Manual assignment state
+  const [assignmentDialog, setAssignmentDialog] = useState({
     open: false,
-    payment: null,
-    selectedApartment: '',
-    selectedTenant: '',
-    apartments: []
+    transaction: null,
+    selectedTenant: null,
+    selectedApartment: null,
+    customAmount: '',
+    notes: '',
+    paymentDate: '',
   });
 
-  // View states
-  const [expandedSections, setExpandedSections] = useState({
-    matched: true,
-    unmatched: true,
-    errors: false
+  // Data for dropdowns
+  const [tenants, setTenants] = useState([]);
+  const [apartments, setApartments] = useState([]);
+
+  // Chunked processing state
+  const [processingDetails, setProcessingDetails] = useState({
+    tempFileId: null,
+    totalChunks: 0,
+    processedChunks: 0,
+    currentChunk: 0,
+    totalTransactions: 0,
+    chunkSize: 0,
+    paused: false,
+    stopped: false,
+    originalTransactions: [],
+    isChunkedMode: false
   });
 
-  // Check Grok AI status on component mount
+  const [showProgressDialog, setShowProgressDialog] = useState(false);
+  const [processingStartTime, setProcessingStartTime] = useState(null);
+
+  // Load data on component mount
   useEffect(() => {
     checkGrokStatus();
+    fetchTenants();
+    fetchApartments();
   }, []);
 
-  const checkGrokStatus = async () => {
+  // Update filtered transactions when transactions or filter changes
+  useEffect(() => {
+    let filtered = transactions;
+
+    switch (filterStatus) {
+      case 'matched':
+        filtered = transactions.filter(t => t.confidence > 0.8);
+        break;
+      case 'unmatched':
+        filtered = transactions.filter(t => t.confidence <= 0.8);
+        break;
+      default:
+        filtered = transactions;
+    }
+
+    setFilteredTransactions(filtered);
+    setPage(0); // Reset to first page when filter changes
+  }, [transactions, filterStatus]);
+
+  const fetchTenants = async () => {
     try {
-      const response = await api.get('/grok-status');
-      setGrokStatus({ ...response.data, checking: false });
+      const response = await fetch('/api/csv-payments/tenants', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setTenants(data);
+      }
     } catch (error) {
-      console.error('Error checking Grok status:', error);
-      setGrokStatus({ configured: false, checking: false, error: error.message });
+      console.error('Error fetching tenants:', error);
     }
   };
 
-  // Handle file selection
+  const fetchApartments = async () => {
+    try {
+      const response = await fetch('/api/csv-payments/apartments', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setApartments(data);
+      }
+    } catch (error) {
+      console.error('Error fetching apartments:', error);
+    }
+  };
+
+  const checkGrokStatus = async () => {
+    try {
+      const response = await fetch('/api/csv-payments/grok-status', {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setGrokStatus({
+          configured: data.configured,
+          api_working: data.api_working,
+          fullyOperational: data.configured && data.api_working,
+          checking: false
+        });
+      } else {
+        setGrokStatus({ configured: false, checking: false, fullyOperational: false });
+      }
+    } catch (error) {
+      console.error('Error checking Grok status:', error);
+      setGrokStatus({ configured: false, checking: false, fullyOperational: false });
+    }
+  };
+
   const handleFileSelect = (event) => {
     const selectedFile = event.target.files[0];
     if (selectedFile) {
-      // Validate file type
       const allowedTypes = ['text/csv', 'text/plain', 'application/csv'];
       const fileExtension = selectedFile.name.split('.').pop().toLowerCase();
 
@@ -131,240 +187,482 @@ const CSVPaymentProcessor = ({ showNotification }) => {
         return;
       }
 
-      // Validate file size (50MB limit)
       if (selectedFile.size > 50 * 1024 * 1024) {
         showNotification('File too large. Maximum size is 50MB', 'error');
         return;
       }
 
       setFile(selectedFile);
-      setUploadStep(1);
       setResults(null);
+      setTransactions([]);
+      setPage(0);
+      setFilterStatus('all');
+      setProcessingDetails({
+        tempFileId: null,
+        totalChunks: 0,
+        processedChunks: 0,
+        currentChunk: 0,
+        totalTransactions: 0,
+        chunkSize: 0,
+        paused: false,
+        stopped: false,
+        originalTransactions: [],
+        isChunkedMode: false
+      });
     }
   };
 
-  // Process CSV file with Grok AI
-  const processCSVFile = async () => {
+  const handlePageChange = (event, newPage) => {
+    setPage(newPage);
+  };
+
+  const handleRowsPerPageChange = (event) => {
+    setRowsPerPage(parseInt(event.target.value, 10));
+    setPage(0);
+  };
+
+  const handleFilterChange = (event) => {
+    setFilterStatus(event.target.value);
+  };
+
+  const openAssignmentDialog = (transaction) => {
+    const transactionDate = transaction.date || new Date().toISOString().split('T')[0];
+
+    setAssignmentDialog({
+      open: true,
+      transaction,
+      selectedTenant: null,
+      selectedApartment: null,
+      customAmount: transaction.amount?.toString() || '',
+      notes: transaction.reference || '',
+      paymentDate: transactionDate,
+    });
+  };
+
+  const closeAssignmentDialog = () => {
+    setAssignmentDialog({
+      open: false,
+      transaction: null,
+      selectedTenant: null,
+      selectedApartment: null,
+      customAmount: '',
+      notes: '',
+      paymentDate: '',
+    });
+  };
+
+  const handleManualAssignment = async () => {
+    const { transaction, selectedTenant, selectedApartment, customAmount, notes, paymentDate } = assignmentDialog;
+
+    if (!selectedTenant || !selectedApartment || !customAmount || !paymentDate) {
+      showNotification('Please fill in all required fields', 'error');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/csv-payments/manual-assign-payment', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          transaction_data: {
+            csv_line: transaction.csv_line,
+            sender: transaction.sender,
+            original_amount: transaction.amount,
+            date: transaction.date,
+            reference: transaction.reference
+          },
+          assignment_data: {
+            tenant_id: selectedTenant.id,
+            apartment_id: selectedApartment.id,
+            amount: parseFloat(customAmount),
+            payment_date: paymentDate,
+            notes: notes,
+            assigned_manually: true
+          }
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      // Update the transaction in the local state
+      setTransactions(prev => prev.map(t =>
+        t.csv_line === transaction.csv_line ? {
+          ...t,
+          suggested_tenant: selectedTenant.name,
+          suggested_apartment: selectedApartment.address || selectedApartment.name,
+          confidence: 1.0,
+          amount: parseFloat(customAmount),
+          manually_assigned: true
+        } : t
+      ));
+
+      showNotification(
+        `Payment of €${customAmount} assigned to ${selectedTenant.name} at ${selectedApartment.address || selectedApartment.name}`,
+        'success'
+      );
+
+      closeAssignmentDialog();
+
+    } catch (error) {
+      console.error('Error assigning payment:', error);
+      showNotification('Error assigning payment. Please try again.', 'error');
+    }
+  };
+
+  const processFile = async () => {
     if (!file) {
       showNotification('Please select a file first', 'error');
       return;
     }
 
+    if (!grokStatus.fullyOperational) {
+      showNotification('Grok AI is not fully operational', 'error');
+      return;
+    }
+
     setProcessing(true);
-    setUploadStep(2);
+    setProgress(10);
+    setStatus('Uploading file...');
+    setProcessingStartTime(Date.now());
 
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('confidence_threshold', confidenceThreshold.toString());
-      formData.append('auto_insert', autoInsert.toString());
 
-      const response = await api.post('/process-csv-payments', formData, {
+      setProgress(30);
+      setStatus('Detecting CSV columns...');
+
+      // CREATE API INSTANCE WITH LONGER TIMEOUT
+      const longTimeoutApi = createLongTimeoutApi();
+
+      // Try the simple endpoint first with longer timeout
+      const response = await longTimeoutApi.post('/csv-payments/process-csv-simple', formData, {
         headers: {
           'Content-Type': 'multipart/form-data'
         },
-        timeout: 300000 // 5 minutes timeout for large files
+        timeout: 600000 // 10 minutes
       });
 
       const data = response.data;
-      setResults(data);
-      setMatchedPayments(data.matched_payments || []);
-      setUnmatchedPayments(data.unmatched_payments || []);
-      setInsertErrors(data.insert_errors || []);
-      setUploadStep(3);
 
-      // Show summary notification
+      // Check if it suggests chunked processing
+      if (data.suggestion === 'use_chunked_processing') {
+        showNotification(
+          `Large file detected (${data.line_count} lines). Switching to chunked processing for better performance.`,
+          'info'
+        );
+
+        // Start chunked processing
+        await startChunkedProcessing();
+        return;
+      }
+
+      // Handle normal processing results
+      setProgress(100);
+      setStatus('Complete!');
+      setResults(data);
+      setTransactions(data.manual_review_transactions || []);
+
+      const totalCount = data.summary?.manual_review_count || 0;
+      const totalAmount = data.summary?.manual_review_amount || 0;
+
       showNotification(
-        `Processing complete: ${data.summary?.matched || 0} matched, ${data.summary?.unmatched || 0} unmatched, ${data.summary?.inserted || 0} inserted`,
-        data.summary?.errors > 0 ? 'warning' : 'success'
+        `Found ${totalCount} transactions totaling €${totalAmount.toFixed(2)}`,
+        'success'
       );
 
     } catch (error) {
       console.error('Error processing CSV:', error);
-      const errorMessage = error.response?.data?.message || error.message || 'Error processing CSV file';
-      showNotification(errorMessage, 'error');
-      setUploadStep(1);
+
+      // Better error handling for timeout
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        showNotification('Processing is taking longer than expected. Try using chunked processing for large files.', 'warning');
+      } else if (error.response && error.response.status === 504) {
+        showNotification('Server timeout. Large file detected - switching to chunked processing automatically.', 'info');
+        // Automatically try chunked processing
+        try {
+          await startChunkedProcessing();
+          return;
+        } catch (chunkedError) {
+          showNotification('Both processing methods failed. Please try a smaller file.', 'error');
+        }
+      } else {
+        showNotification('Processing failed. Please try again.', 'error');
+      }
+      setProgress(0);
+      setStatus('');
     } finally {
       setProcessing(false);
     }
   };
 
-  // Handle manual matching
-  const handleManualMatch = async (payment) => {
+  const startChunkedProcessing = async () => {
     try {
-      // Get apartments for dropdown
-      const response = await api.get('/apartments/all');
+      setShowProgressDialog(true);
+      setProcessingDetails(prev => ({ ...prev, isChunkedMode: true }));
 
-      setManualMatchDialog({
-        open: true,
-        payment,
-        selectedApartment: '',
-        selectedTenant: '',
-        apartments: response.data || []
+      const formData = new FormData();
+      formData.append('file', file);
+
+      setProgress(20);
+      setStatus('Analyzing CSV structure for chunked processing...');
+
+      // USE LONGER TIMEOUT API FOR CHUNKED PROCESSING TOO
+      const longTimeoutApi = createLongTimeoutApi();
+
+      const response = await longTimeoutApi.post('/csv-payments/process-csv-chunked', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        },
+        timeout: 300000 // 5 minutes for initial analysis
       });
+
+      const data = response.data;
+
+      if (data.processing_started) {
+        setProcessingDetails(prev => ({
+          ...prev,
+          tempFileId: data.temp_file_id,
+          totalChunks: data.total_chunks,
+          totalTransactions: data.total_transactions,
+          chunkSize: data.chunk_size,
+          paused: false,
+          stopped: false,
+          currentChunk: 0
+        }));
+
+        setProgress(30);
+        setStatus(`Found ${data.total_transactions} transactions. Starting AI analysis...`);
+
+        // Start processing chunks
+        processNextChunk(0, data.total_chunks, data.temp_file_id);
+      }
+
     } catch (error) {
-      showNotification('Error loading apartments', 'error');
+      console.error('Error starting chunked processing:', error);
+      showNotification('Failed to start chunked processing. Please try again.', 'error');
+      setProcessing(false);
+      setShowProgressDialog(false);
+      setProgress(0);
+      setStatus('');
     }
   };
 
-  // Submit manual match
-  const submitManualMatch = async () => {
-    const { payment, selectedApartment, selectedTenant } = manualMatchDialog;
-
-    if (!selectedApartment || !selectedTenant) {
-      showNotification('Please select both apartment and tenant', 'error');
+  const processNextChunk = async (chunkNumber, totalChunks, tempFileId) => {
+    if (processingDetails.paused || processingDetails.stopped || chunkNumber >= totalChunks) {
       return;
     }
 
     try {
-      const matchData = {
-        apartment_id: selectedApartment,
-        tenant_id: selectedTenant,
-        amount: payment.amount,
-        date: payment.date,
-        reference: payment.reference || '',
-        tenant_from_grok: payment.tenant_from_grok || '',
-        confidence: payment.confidence || 0
-      };
+      setStatus(`Processing chunk ${chunkNumber + 1} of ${totalChunks}...`);
 
-      await api.post('/manual-match-payment', matchData);
+      // USE STANDARD FETCH WITH LONGER TIMEOUT FOR CHUNK PROCESSING
+      const response = await fetch(`/api/csv-payments/process-chunk/${tempFileId}/${chunkNumber}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        // Note: fetch doesn't have timeout, but chunks should be faster
+        signal: AbortSignal.timeout(120000) // 2 minutes per chunk
+      });
 
-      // Move payment from unmatched to matched
-      const updatedPayment = {
-        ...payment,
-        matched_apartment: manualMatchDialog.apartments.find(a => a.id === selectedApartment)?.address,
-        matched_tenant: 'Manually matched',
-        confidence: 1.0,
-        inserted: true
-      };
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
-      setMatchedPayments(prev => [...prev, updatedPayment]);
-      setUnmatchedPayments(prev => prev.filter(p => p.index !== payment.index));
+      const chunkData = await response.json();
 
-      setManualMatchDialog({ open: false, payment: null, selectedApartment: '', selectedTenant: '', apartments: [] });
-      showNotification('Payment manually matched successfully', 'success');
+      // Update progress
+      const newProgress = 30 + (60 * (chunkNumber + 1) / totalChunks);
+      setProgress(newProgress);
+
+      // Update processing details
+      setProcessingDetails(prev => ({
+        ...prev,
+        processedChunks: chunkData.chunk_processed,
+        currentChunk: chunkNumber + 1
+      }));
+
+      // Add chunk results to transactions
+      setTransactions(prev => [...prev, ...chunkData.chunk_results]);
+
+      showNotification(
+        `Chunk ${chunkData.chunk_processed}/${totalChunks} complete: ${chunkData.rent_payments_found} payments found`,
+        'info'
+      );
+
+      // Continue with next chunk or finish
+      if (chunkData.processing_complete) {
+        finishChunkedProcessing(tempFileId);
+      } else {
+        // Process next chunk with a small delay
+        setTimeout(() => {
+          if (!processingDetails.paused && !processingDetails.stopped) {
+            processNextChunk(chunkNumber + 1, totalChunks, tempFileId);
+          }
+        }, 500);
+      }
 
     } catch (error) {
-      const errorMessage = error.response?.data?.message || error.message || 'Error matching payment';
-      showNotification(errorMessage, 'error');
+      console.error('Error processing chunk:', error);
+      showNotification(`Error processing chunk ${chunkNumber + 1}: ${error.message}`, 'error');
+
+      // Continue with next chunk despite error
+      if (chunkNumber + 1 < totalChunks) {
+        setTimeout(() => {
+          if (!processingDetails.paused && !processingDetails.stopped) {
+            processNextChunk(chunkNumber + 1, totalChunks, tempFileId);
+          }
+        }, 1000);
+      } else {
+        finishChunkedProcessing(tempFileId);
+      }
     }
   };
 
-  // Toggle section expansion
-  const toggleSection = (section) => {
-    setExpandedSections(prev => ({
-      ...prev,
-      [section]: !prev[section]
-    }));
-  };
+  const finishChunkedProcessing = async (tempFileId) => {
+    try {
+      setStatus('Finalizing results...');
+      setProgress(90);
 
-  // Get confidence color
-  const getConfidenceColor = (confidence) => {
-    if (confidence >= 0.8) return 'success';
-    if (confidence >= 0.6) return 'warning';
-    return 'error';
-  };
+      // Get final results
+      const response = await fetch(`/api/csv-payments/get-results/${tempFileId}`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
 
-  // Get step content
-  const getStepContent = (step) => {
-    switch (step) {
-      case 0:
-        return 'Select CSV file containing bank transactions';
-      case 1:
-        return 'Configure processing settings';
-      case 2:
-        return 'Processing with Grok AI...';
-      case 3:
-        return 'Review and manage results';
-      default:
-        return 'Unknown step';
+      if (response.ok) {
+        const finalData = await response.json();
+
+        setResults({
+          summary: {
+            ...finalData.summary,
+            file_size_mb: Math.round(file.size / (1024 * 1024) * 100) / 100,
+            processing_method: "chunked"
+          }
+        });
+
+        setTransactions(finalData.rent_payments);
+
+        showNotification(
+          `Processing complete! Found ${finalData.summary.total_transactions_found} rent payments totaling €${finalData.summary.total_amount.toFixed(2)}`,
+          'success'
+        );
+      }
+
+      setProgress(100);
+      setStatus('Processing complete!');
+
+    } catch (error) {
+      console.error('Error finalizing results:', error);
+      showNotification('Error finalizing results', 'error');
+    } finally {
+      setProcessing(false);
+      setTimeout(() => {
+        setShowProgressDialog(false);
+      }, 2000);
     }
   };
 
-  if (grokStatus.checking) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
+  const pauseProcessing = () => {
+    setProcessingDetails(prev => ({ ...prev, paused: true }));
+    setStatus('Processing paused');
+  };
 
-  if (!grokStatus.configured) {
-    return (
-      <Card sx={{ maxWidth: 600, mx: 'auto', mt: 4 }}>
-        <CardContent sx={{ textAlign: 'center', py: 4 }}>
-          <ErrorIcon sx={{ fontSize: 64, color: 'error.main', mb: 2 }} />
-          <Typography variant="h5" gutterBottom>
-            Grok AI Not Configured
-          </Typography>
-          <Typography color="text.secondary" paragraph>
-            The Grok AI integration is not properly configured. Please contact your system administrator to set up the GROK_API_KEY environment variable.
-          </Typography>
-          <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={checkGrokStatus}
-          >
-            Check Again
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
+  const resumeProcessing = () => {
+    setProcessingDetails(prev => ({ ...prev, paused: false }));
+    setStatus('Resuming processing...');
+    // Continue processing from current chunk
+    const { currentChunk, totalChunks, tempFileId } = processingDetails;
+    if (currentChunk < totalChunks) {
+      processNextChunk(currentChunk, totalChunks, tempFileId);
+    }
+  };
+
+  const stopProcessing = () => {
+    setProcessingDetails(prev => ({ ...prev, stopped: true }));
+    setProcessing(false);
+    setShowProgressDialog(false);
+    setProgress(0);
+    setStatus('Processing stopped');
+    showNotification('Processing stopped by user', 'warning');
+  };
+
+  const deleteTransaction = async (transaction) => {
+    try {
+      const response = await fetch('/api/csv-payments/delete-transaction', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          amount: transaction.amount,
+          date: transaction.date,
+          sender: transaction.sender,
+          reference: transaction.reference,
+          csv_line: transaction.csv_line
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      setTransactions(prev => prev.filter(t =>
+        t.csv_line !== transaction.csv_line
+      ));
+
+      showNotification('Transaction deleted', 'success');
+    } catch (error) {
+      console.error('Error deleting transaction:', error);
+      showNotification('Error deleting transaction', 'error');
+    }
+  };
+
+  // Calculate pagination
+  const displayedTransactions = filteredTransactions.slice(
+    page * rowsPerPage,
+    page * rowsPerPage + rowsPerPage
+  );
 
   return (
     <Box sx={{ maxWidth: 1200, mx: 'auto', p: 3 }}>
       {/* Header */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <SmartToyIcon sx={{ fontSize: 36 }} />
+          <PaymentIcon sx={{ fontSize: 40, color: 'primary.main' }} />
           CSV Payment Processor
           <Chip
-            label="Grok AI Powered"
-            color="primary"
+            label={grokStatus.checking ? 'Checking...' : grokStatus.fullyOperational ? 'AI Ready' : 'AI Issues'}
+            color={grokStatus.api_working ? 'success' : 'warning'}
             variant="outlined"
             size="small"
           />
         </Typography>
         <Typography variant="body1" color="text.secondary">
-          Upload bank CSV files to automatically extract and match rent payments using AI
+          Upload CSV files to find potential tenant payments using AI column detection.
+          {processingDetails.isChunkedMode && " Large files processed in chunks with real-time progress."}
         </Typography>
       </Box>
-
-      {/* Progress Stepper */}
-      <Card sx={{ mb: 4 }}>
-        <CardContent>
-          <Stepper activeStep={uploadStep} orientation="horizontal">
-            {['Select File', 'Configure', 'Process', 'Review'].map((label, index) => (
-              <Step key={label}>
-                <StepLabel>{label}</StepLabel>
-              </Step>
-            ))}
-          </Stepper>
-
-          {uploadStep < 3 && (
-            <Box sx={{ mt: 2 }}>
-              <Typography variant="body2" color="text.secondary">
-                {getStepContent(uploadStep)}
-              </Typography>
-            </Box>
-          )}
-        </CardContent>
-      </Card>
 
       {/* Upload Section */}
       <Card sx={{ mb: 4 }}>
         <CardContent>
           <Grid container spacing={3}>
-            {/* File Upload */}
             <Grid item xs={12} md={6}>
               <Box sx={{ textAlign: 'center', py: 3, border: '2px dashed #ddd', borderRadius: 2 }}>
                 <UploadFileIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                <Typography variant="h6" gutterBottom>
-                  Upload CSV File
-                </Typography>
+                <Typography variant="h6" gutterBottom>Upload CSV File</Typography>
                 <Typography variant="body2" color="text.secondary" paragraph>
-                  Bank statement CSV with transaction data
+                  Bank statement CSV with transaction data (up to 50MB)
                 </Typography>
 
                 <input
@@ -397,486 +695,583 @@ const CSVPaymentProcessor = ({ showNotification }) => {
               </Box>
             </Grid>
 
-            {/* Settings */}
             <Grid item xs={12} md={6}>
-              <Typography variant="h6" gutterBottom>
-                Processing Settings
+              <Typography variant="h6" gutterBottom>Process File</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                AI will analyze the CSV and automatically choose the best processing method based on file size
               </Typography>
 
-              <FormControl fullWidth sx={{ mb: 2 }}>
-                <Typography gutterBottom>
-                  Confidence Threshold: {(confidenceThreshold * 100).toFixed(0)}%
-                </Typography>
-                <Box sx={{ px: 1 }}>
-                  <input
-                    type="range"
-                    min="0.3"
-                    max="0.95"
-                    step="0.05"
-                    value={confidenceThreshold}
-                    onChange={(e) => setConfidenceThreshold(parseFloat(e.target.value))}
-                    style={{ width: '100%' }}
-                  />
-                </Box>
-                <Typography variant="caption" color="text.secondary">
-                  Higher values require more confident matches
-                </Typography>
-              </FormControl>
-
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={autoInsert}
-                    onChange={(e) => setAutoInsert(e.target.checked)}
-                    color="primary"
-                  />
-                }
-                label="Auto-insert matched payments"
-                sx={{ mb: 2 }}
-              />
-
               <Button
-                fullWidth
                 variant="contained"
-                size="large"
-                onClick={processCSVFile}
-                disabled={!file || processing}
                 startIcon={processing ? <CircularProgress size={20} /> : <SmartToyIcon />}
+                onClick={processFile}
+                disabled={!file || processing || !grokStatus.fullyOperational}
+                fullWidth
+                size="large"
               >
-                {processing ? 'Processing with Grok AI...' : 'Process with Grok AI'}
+                {processing ? 'Processing...' : 'Process with AI'}
               </Button>
+
+              {!grokStatus.fullyOperational && (
+                <Alert severity="warning" sx={{ mt: 2 }}>
+                  AI is not fully operational. Please check configuration.
+                </Alert>
+              )}
+
+              {/* Progress for simple processing */}
+              {processing && !processingDetails.isChunkedMode && (
+                <Box sx={{ mt: 3 }}>
+                  <Typography variant="body2" gutterBottom>{status}</Typography>
+                  <LinearProgress variant="determinate" value={progress} />
+                  <Typography variant="caption" color="text.secondary">
+                    {progress.toFixed(1)}% complete
+                  </Typography>
+                </Box>
+              )}
+
+              {/* Quick Stats for chunked processing */}
+              {processingDetails.totalTransactions > 0 && processingDetails.isChunkedMode && (
+                <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+                  <Typography variant="caption" display="block">
+                    Total Transactions: {processingDetails.totalTransactions}
+                  </Typography>
+                  <Typography variant="caption" display="block">
+                    Chunks: {processingDetails.totalChunks} Ã— {processingDetails.chunkSize}
+                  </Typography>
+                  <Typography variant="caption" display="block">
+                    Progress: {processingDetails.processedChunks}/{processingDetails.totalChunks}
+                  </Typography>
+                </Box>
+              )}
             </Grid>
           </Grid>
         </CardContent>
       </Card>
 
-      {/* Processing Progress */}
-      {processing && (
-        <Card sx={{ mb: 4 }}>
-          <CardContent>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-              <SmartToyIcon color="primary" />
-              <Typography variant="h6">
-                Grok AI is analyzing your CSV file...
-              </Typography>
-            </Box>
-            <LinearProgress />
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              This may take a few moments for large files
-            </Typography>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Results Section */}
-      {results && (
-        <>
-          {/* Summary Cards */}
-          <Grid container spacing={3} sx={{ mb: 4 }}>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <TrendingUpIcon sx={{ fontSize: 40, color: 'primary.main', mb: 1 }} />
-                  <Typography variant="h4" color="primary">
-                    {results.summary?.grok_extracted || 0}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Payments Found by Grok AI
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <Card>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <CheckCircleIcon sx={{ fontSize: 40, color: 'success.main', mb: 1 }} />
-                  <Typography variant="h4" color="success.main">
-                    {results.summary?.matched || 0}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Successfully Matched
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <Card>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <WarningIcon sx={{ fontSize: 40, color: 'warning.main', mb: 1 }} />
-                  <Typography variant="h4" color="warning.main">
-                    {results.summary?.unmatched || 0}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Need Manual Review
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <Card>
-                <CardContent sx={{ textAlign: 'center' }}>
-                  <PaymentIcon sx={{ fontSize: 40, color: 'info.main', mb: 1 }} />
-                  <Typography variant="h4" color="info.main">
-                    {results.summary?.inserted || 0}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Inserted to Database
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-
-          {/* Processing Info */}
-          <Card sx={{ mb: 4 }}>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Processing Information
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Typography variant="body2" color="text.secondary">
-                    File Size
-                  </Typography>
-                  <Typography variant="body1">
-                    {results.processing_info?.file_size_mb || 0} MB
-                  </Typography>
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Typography variant="body2" color="text.secondary">
-                    Grok API Calls
-                  </Typography>
-                  <Typography variant="body1">
-                    {results.processing_info?.grok_api_calls || 0}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Typography variant="body2" color="text.secondary">
-                    Total Amount Found
-                  </Typography>
-                  <Typography variant="body1">
-                    €{results.processing_info?.total_amount_found?.toFixed(2) || '0.00'}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Typography variant="body2" color="text.secondary">
-                    Date Range
-                  </Typography>
-                  <Typography variant="body1">
-                    {results.processing_info?.date_range?.earliest ?
-                      `${new Date(results.processing_info.date_range.earliest).toLocaleDateString()} - ${new Date(results.processing_info.date_range.latest).toLocaleDateString()}` :
-                      'N/A'
-                    }
-                  </Typography>
-                </Grid>
-              </Grid>
-            </CardContent>
-          </Card>
-
-          {/* Results Tabs */}
-          <Card>
-            <CardContent>
-              <Tabs
-                value={activeTab}
-                onChange={(e, newValue) => setActiveTab(newValue)}
-                sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}
-              >
-                <Tab
-                  label={
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CheckCircleIcon />
-                      Matched Payments
-                      <Badge badgeContent={matchedPayments.length} color="success" />
-                    </Box>
-                  }
-                />
-                <Tab
-                  label={
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <WarningIcon />
-                      Unmatched Payments
-                      <Badge badgeContent={unmatchedPayments.length} color="warning" />
-                    </Box>
-                  }
-                />
-                {insertErrors.length > 0 && (
-                  <Tab
-                    label={
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                        <ErrorIcon />
-                        Errors
-                        <Badge badgeContent={insertErrors.length} color="error" />
-                      </Box>
-                    }
-                  />
-                )}
-              </Tabs>
-
-              {/* Matched Payments Tab */}
-              {activeTab === 0 && (
-                <Box>
-                  {matchedPayments.length === 0 ? (
-                    <Alert severity="info">
-                      No matched payments found
-                    </Alert>
-                  ) : (
-                    <TableContainer component={Paper} variant="outlined">
-                      <Table>
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Date</TableCell>
-                            <TableCell>Amount</TableCell>
-                            <TableCell>Tenant (Grok AI)</TableCell>
-                            <TableCell>Matched Tenant</TableCell>
-                            <TableCell>Apartment</TableCell>
-                            <TableCell>Confidence</TableCell>
-                            <TableCell>Status</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {matchedPayments.map((payment, index) => (
-                            <TableRow key={index}>
-                              <TableCell>
-                                {new Date(payment.date).toLocaleDateString()}
-                              </TableCell>
-                              <TableCell>
-                                <Typography variant="body2" fontWeight="bold">
-                                  €{payment.amount.toFixed(2)}
-                                </Typography>
-                              </TableCell>
-                              <TableCell>{payment.tenant_from_grok || 'N/A'}</TableCell>
-                              <TableCell>{payment.matched_tenant}</TableCell>
-                              <TableCell>{payment.matched_apartment}</TableCell>
-                              <TableCell>
-                                <Chip
-                                  label={`${(payment.confidence * 100).toFixed(0)}%`}
-                                  color={getConfidenceColor(payment.confidence)}
-                                  size="small"
-                                />
-                              </TableCell>
-                              <TableCell>
-                                <Chip
-                                  label={payment.inserted ? 'Inserted' : 'Pending'}
-                                  color={payment.inserted ? 'success' : 'default'}
-                                  size="small"
-                                />
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  )}
-                </Box>
-              )}
-
-              {/* Unmatched Payments Tab */}
-              {activeTab === 1 && (
-                <Box>
-                  {unmatchedPayments.length === 0 ? (
-                    <Alert severity="success">
-                      All payments have been successfully matched!
-                    </Alert>
-                  ) : (
-                    <>
-                      <Alert severity="warning" sx={{ mb: 2 }}>
-                        <AlertTitle>Manual Review Required</AlertTitle>
-                        These payments could not be automatically matched. Please review and manually assign them.
-                      </Alert>
-
-                      <TableContainer component={Paper} variant="outlined">
-                        <Table>
-                          <TableHead>
-                            <TableRow>
-                              <TableCell>Date</TableCell>
-                              <TableCell>Amount</TableCell>
-                              <TableCell>Tenant (Grok AI)</TableCell>
-                              <TableCell>Reference</TableCell>
-                              <TableCell>Confidence</TableCell>
-                              <TableCell>Actions</TableCell>
-                            </TableRow>
-                          </TableHead>
-                          <TableBody>
-                            {unmatchedPayments.map((payment, index) => (
-                              <TableRow key={index}>
-                                <TableCell>
-                                  {new Date(payment.date).toLocaleDateString()}
-                                </TableCell>
-                                <TableCell>
-                                  <Typography variant="body2" fontWeight="bold">
-                                    €{payment.amount.toFixed(2)}
-                                  </Typography>
-                                </TableCell>
-                                <TableCell>{payment.tenant_from_grok || 'Unknown'}</TableCell>
-                                <TableCell>
-                                  <Typography variant="body2" sx={{ maxWidth: 200 }} noWrap>
-                                    {payment.reference || 'N/A'}
-                                  </Typography>
-                                </TableCell>
-                                <TableCell>
-                                  <Chip
-                                    label={`${(payment.confidence * 100).toFixed(0)}%`}
-                                    color={getConfidenceColor(payment.confidence)}
-                                    size="small"
-                                  />
-                                </TableCell>
-                                <TableCell>
-                                  <Button
-                                    size="small"
-                                    variant="outlined"
-                                    startIcon={<EditIcon />}
-                                    onClick={() => handleManualMatch(payment)}
-                                  >
-                                    Manual Match
-                                  </Button>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      </TableContainer>
-                    </>
-                  )}
-                </Box>
-              )}
-
-              {/* Errors Tab */}
-              {activeTab === 2 && insertErrors.length > 0 && (
-                <Box>
-                  <Alert severity="error" sx={{ mb: 2 }}>
-                    <AlertTitle>Database Insertion Errors</AlertTitle>
-                    The following payments could not be inserted into the database.
-                  </Alert>
-
-                  <List>
-                    {insertErrors.map((error, index) => (
-                      <ListItem key={index} divider>
-                        <ListItemIcon>
-                          <ErrorIcon color="error" />
-                        </ListItemIcon>
-                        <ListItemText
-                          primary={`Row ${error.row_number || error.index}: ${error.error}`}
-                          secondary={`Amount: €${error.payment_data?.amount || 0} - Date: ${error.payment_data?.date || 'N/A'}`}
-                        />
-                      </ListItem>
-                    ))}
-                  </List>
-                </Box>
-              )}
-            </CardContent>
-          </Card>
-        </>
-      )}
-
-      {/* Manual Match Dialog */}
-      <Dialog
-        open={manualMatchDialog.open}
-        onClose={() => setManualMatchDialog({ ...manualMatchDialog, open: false })}
-        maxWidth="md"
-        fullWidth
-      >
+      {/* Processing Progress Dialog (for chunked processing) */}
+      <Dialog open={showProgressDialog} maxWidth="md" fullWidth>
         <DialogTitle>
-          Manual Payment Matching
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <SmartToyIcon color="primary" />
+            Processing Large CSV File
+          </Box>
         </DialogTitle>
         <DialogContent>
-          {manualMatchDialog.payment && (
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Payment Details
-              </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Amount</Typography>
-                  <Typography variant="body1" fontWeight="bold">
-                    €{manualMatchDialog.payment.amount?.toFixed(2)}
-                  </Typography>
-                </Grid>
-                <Grid item xs={6}>
-                  <Typography variant="body2" color="text.secondary">Date</Typography>
-                  <Typography variant="body1">
-                    {new Date(manualMatchDialog.payment.date).toLocaleDateString()}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12}>
-                  <Typography variant="body2" color="text.secondary">Tenant (from Grok AI)</Typography>
-                  <Typography variant="body1">
-                    {manualMatchDialog.payment.tenant_from_grok || 'Unknown'}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12}>
-                  <Typography variant="body2" color="text.secondary">Reference</Typography>
-                  <Typography variant="body1">
-                    {manualMatchDialog.payment.reference || 'N/A'}
-                  </Typography>
-                </Grid>
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="body2" gutterBottom>{status}</Typography>
+            <LinearProgress variant="determinate" value={progress} sx={{ mb: 1 }} />
+            <Typography variant="caption" color="text.secondary">
+              {progress.toFixed(1)}% complete
+            </Typography>
+          </Box>
+
+          {processingDetails.totalChunks > 0 && (
+            <Grid container spacing={2} sx={{ mb: 3 }}>
+              <Grid item xs={3}>
+                <Card variant="outlined">
+                  <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                    <Typography variant="h6">{processingDetails.processedChunks}</Typography>
+                    <Typography variant="caption">Chunks Done</Typography>
+                  </CardContent>
+                </Card>
               </Grid>
-            </Box>
+              <Grid item xs={3}>
+                <Card variant="outlined">
+                  <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                    <Typography variant="h6">{processingDetails.totalChunks}</Typography>
+                    <Typography variant="caption">Total Chunks</Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={3}>
+                <Card variant="outlined">
+                  <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                    <Typography variant="h6">{transactions.length}</Typography>
+                    <Typography variant="caption">Payments Found</Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+              <Grid item xs={3}>
+                <Card variant="outlined">
+                  <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                    <Typography variant="h6">
+                      €{transactions.reduce((sum, t) => sum + (t.amount || 0), 0).toFixed(0)}
+                    </Typography>
+                    <Typography variant="caption">Total Amount</Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
           )}
 
-          <Divider sx={{ my: 2 }} />
+          {/* Real-time transaction preview */}
+          {transactions.length > 0 && (
+            <Box>
+              <Typography variant="subtitle2" gutterBottom>
+                Latest Payments Found ({transactions.slice(-5).length} of {transactions.length}):
+              </Typography>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Amount</TableCell>
+                    <TableCell>Sender</TableCell>
+                    <TableCell>Match</TableCell>
+                    <TableCell>Line</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {transactions.slice(-5).map((transaction, index) => (
+                    <TableRow key={index}>
+                      <TableCell>€{transaction.amount?.toFixed(2)}</TableCell>
+                      <TableCell>{transaction.sender?.substring(0, 20)}...</TableCell>
+                      <TableCell>
+                        {transaction.suggested_tenant ? (
+                          <Chip label={transaction.suggested_tenant} size="small" color="success" />
+                        ) : (
+                          <Chip label="No match" size="small" variant="outlined" />
+                        )}
+                      </TableCell>
+                      <TableCell>{transaction.csv_line}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          {processing && !processingDetails.paused && (
+            <Button
+              startIcon={<PauseIcon />}
+              onClick={pauseProcessing}
+              color="warning"
+            >
+              Pause
+            </Button>
+          )}
+          {processing && processingDetails.paused && (
+            <Button
+              startIcon={<PlayArrowIcon />}
+              onClick={resumeProcessing}
+              color="primary"
+            >
+              Resume
+            </Button>
+          )}
+          <Button
+            startIcon={<StopIcon />}
+            onClick={stopProcessing}
+            color="error"
+          >
+            Stop
+          </Button>
+          <Button onClick={() => setShowProgressDialog(false)}>
+            Minimize
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth>
-                <InputLabel>Select Apartment</InputLabel>
-                <Select
-                  value={manualMatchDialog.selectedApartment}
-                  label="Select Apartment"
-                  onChange={(e) => setManualMatchDialog({
-                    ...manualMatchDialog,
-                    selectedApartment: e.target.value,
-                    selectedTenant: '' // Reset tenant when apartment changes
-                  })}
-                >
-                  {manualMatchDialog.apartments.map((apartment) => (
-                    <MenuItem key={apartment.id} value={apartment.id}>
+      {/* Manual Assignment Dialog */}
+      <Dialog open={assignmentDialog.open} maxWidth="md" fullWidth>
+        <DialogTitle>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <PersonAddIcon color="primary" />
+            Manually Assign Payment
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ mt: 2 }}>
+            {/* Transaction Details */}
+            <Card variant="outlined" sx={{ mb: 3 }}>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>Transaction Details</Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">Original Sender:</Typography>
+                    <Typography variant="body1">{assignmentDialog.transaction?.sender}</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">Original Amount:</Typography>
+                    <Typography variant="body1">€{assignmentDialog.transaction?.amount?.toFixed(2)}</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">Date:</Typography>
+                    <Typography variant="body1">{assignmentDialog.transaction?.date}</Typography>
+                  </Grid>
+                  <Grid item xs={6}>
+                    <Typography variant="body2" color="text.secondary">CSV Line:</Typography>
+                    <Typography variant="body1">{assignmentDialog.transaction?.csv_line}</Typography>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <Typography variant="body2" color="text.secondary">Reference:</Typography>
+                    <Typography variant="body1">{assignmentDialog.transaction?.reference || 'N/A'}</Typography>
+                  </Grid>
+                </Grid>
+              </CardContent>
+            </Card>
+
+            <Divider sx={{ mb: 3 }} />
+
+            {/* Assignment Form */}
+            <Typography variant="h6" gutterBottom>Payment Assignment</Typography>
+
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <Autocomplete
+                  options={tenants}
+                  getOptionLabel={(option) => option.name || ''}
+                  value={assignmentDialog.selectedTenant}
+                  onChange={(event, newValue) => {
+                    setAssignmentDialog(prev => ({ ...prev, selectedTenant: newValue }));
+                  }}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Select Tenant *" fullWidth />
+                  )}
+                  renderOption={(props, option) => (
+                    <li {...props}>
                       <Box>
-                        <Typography variant="body1">{apartment.address}</Typography>
+                        <Typography variant="body2">{option.name}</Typography>
                         <Typography variant="caption" color="text.secondary">
-                          {apartment.tenants || 'No tenants'}
+                          {option.email || 'No email'} - {option.apartment_address || 'No apartment'}
                         </Typography>
                       </Box>
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+                    </li>
+                  )}
+                />
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <Autocomplete
+                  options={apartments}
+                  getOptionLabel={(option) => option.address || option.name || ''}
+                  value={assignmentDialog.selectedApartment}
+                  onChange={(event, newValue) => {
+                    setAssignmentDialog(prev => ({ ...prev, selectedApartment: newValue }));
+                  }}
+                  renderInput={(params) => (
+                    <TextField {...params} label="Select Apartment *" fullWidth />
+                  )}
+                  renderOption={(props, option) => (
+                    <li {...props}>
+                      <Box>
+                        <Typography variant="body2">{option.address || option.name}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          €{option.rent || 'N/A'}/month - {option.status}
+                        </Typography>
+                      </Box>
+                    </li>
+                  )}
+                />
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <TextField
+                  label="Payment Amount *"
+                  type="number"
+                  inputProps={{ step: "0.01", min: "0" }}
+                  value={assignmentDialog.customAmount}
+                  onChange={(e) => setAssignmentDialog(prev => ({
+                    ...prev,
+                    customAmount: e.target.value
+                  }))}
+                  fullWidth
+                  helperText="Adjust if different from original amount"
+                />
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <TextField
+                  label="Payment Date *"
+                  type="date"
+                  value={assignmentDialog.paymentDate}
+                  onChange={(e) => setAssignmentDialog(prev => ({
+                    ...prev,
+                    paymentDate: e.target.value
+                  }))}
+                  fullWidth
+                  InputLabelProps={{ shrink: true }}
+                />
+              </Grid>
+
+              <Grid item xs={12}>
+                <TextField
+                  label="Additional Notes"
+                  multiline
+                  rows={3}
+                  value={assignmentDialog.notes}
+                  onChange={(e) => setAssignmentDialog(prev => ({
+                    ...prev,
+                    notes: e.target.value
+                  }))}
+                  fullWidth
+                  placeholder="Any additional notes about this payment..."
+                />
+              </Grid>
             </Grid>
 
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                label="Tenant Name"
-                value={manualMatchDialog.selectedTenant}
-                onChange={(e) => setManualMatchDialog({
-                  ...manualMatchDialog,
-                  selectedTenant: e.target.value
-                })}
-                placeholder="Enter tenant name"
-                helperText="Enter the name of the tenant who made this payment"
-              />
-            </Grid>
-          </Grid>
+            {/* Assignment Preview */}
+            {assignmentDialog.selectedTenant && assignmentDialog.selectedApartment && assignmentDialog.customAmount && (
+              <Box sx={{ mt: 3, p: 2, bgcolor: 'success.50', borderRadius: 1, border: '1px solid', borderColor: 'success.200' }}>
+                <Typography variant="h6" color="success.main" gutterBottom>Assignment Preview</Typography>
+                <Typography variant="body2">
+                  <strong>€{assignmentDialog.customAmount}</strong> payment from <strong>{assignmentDialog.transaction?.sender}</strong>
+                  {' '}will be assigned to <strong>{assignmentDialog.selectedTenant.name}</strong>
+                  {' '}for apartment <strong>{assignmentDialog.selectedApartment.address || assignmentDialog.selectedApartment.name}</strong>
+                  {' '}on <strong>{assignmentDialog.paymentDate}</strong>
+                </Typography>
+              </Box>
+            )}
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button
-            onClick={() => setManualMatchDialog({ ...manualMatchDialog, open: false })}
+            onClick={closeAssignmentDialog}
             startIcon={<CancelIcon />}
           >
             Cancel
           </Button>
           <Button
-            onClick={submitManualMatch}
+            onClick={handleManualAssignment}
             variant="contained"
             startIcon={<SaveIcon />}
-            disabled={!manualMatchDialog.selectedApartment || !manualMatchDialog.selectedTenant}
+            disabled={!assignmentDialog.selectedTenant || !assignmentDialog.selectedApartment || !assignmentDialog.customAmount || !assignmentDialog.paymentDate}
           >
-            Match Payment
+            Assign Payment
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Results */}
+      {results && (
+        <Box>
+          {/* Summary Cards */}
+          <Grid container spacing={3} sx={{ mb: 4 }}>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" color="primary.main">
+                    {transactions.length}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Rent Payments Found
+                  </Typography>
+                  <Typography variant="caption" color="primary.main">
+                    €{transactions.reduce((sum, t) => sum + (t.amount || 0), 0).toFixed(2)}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" color="success.main">
+                    {transactions.filter(t => t.confidence > 0.8).length}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Auto-Matched
+                  </Typography>
+                  <Typography variant="caption" color="success.main">
+                    {transactions.length > 0 ? Math.round(transactions.filter(t => t.confidence > 0.8).length / transactions.length * 100) : 0}% matched
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" color="warning.main">
+                    {transactions.filter(t => t.confidence <= 0.8 && !t.manually_assigned).length}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Need Manual Review
+                  </Typography>
+                  <Typography variant="caption" color="warning.main">
+                    Requires assignment
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card>
+                <CardContent>
+                  <Typography variant="h6">
+                    {results.summary?.processing_time_seconds || 0}s
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Processing Time
+                  </Typography>
+                  <Typography variant="caption">
+                    {results.summary?.file_size_mb || 0}MB â€¢ {results.summary?.processing_method || 'standard'}
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+
+          {/* Transactions Table */}
+          <Card>
+            <CardContent>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+                <Typography variant="h6">
+                  Found Transactions
+                </Typography>
+
+                {/* Filter Controls */}
+                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                  <FormControl size="small" sx={{ minWidth: 120 }}>
+                    <InputLabel>Filter</InputLabel>
+                    <Select
+                      value={filterStatus}
+                      label="Filter"
+                      onChange={handleFilterChange}
+                    >
+                      <MenuItem value="all">All ({transactions.length})</MenuItem>
+                      <MenuItem value="matched">Auto-Matched ({transactions.filter(t => t.confidence > 0.8).length})</MenuItem>
+                      <MenuItem value="unmatched">Unmatched ({transactions.filter(t => t.confidence <= 0.8).length})</MenuItem>
+                    </Select>
+                  </FormControl>
+                </Box>
+              </Box>
+
+              {transactions.length === 0 ? (
+                <Alert severity="info">No rent payments found</Alert>
+              ) : (
+                <>
+                  <TableContainer component={Paper} variant="outlined">
+                    <Table>
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Date</TableCell>
+                          <TableCell>Amount</TableCell>
+                          <TableCell>Sender</TableCell>
+                          <TableCell>Reference</TableCell>
+                          <TableCell>Assignment Status</TableCell>
+                          <TableCell>CSV Line</TableCell>
+                          <TableCell align="center">Actions</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {displayedTransactions.map((transaction, index) => (
+                          <TableRow key={`${transaction.csv_line}-${index}`}>
+                            <TableCell>
+                              <Typography variant="body2">
+                                {transaction.date}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="body2" fontWeight="bold">
+                                €{transaction.amount?.toFixed(2)}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="body2">
+                                {transaction.sender?.substring(0, 25)}
+                                {transaction.sender?.length > 25 && '...'}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              <Typography variant="caption" color="text.secondary">
+                                {transaction.reference?.substring(0, 30)}
+                                {transaction.reference?.length > 30 && '...'}
+                              </Typography>
+                            </TableCell>
+                            <TableCell>
+                              {transaction.manually_assigned ? (
+                                <Stack direction="column" spacing={0.5}>
+                                  <Chip
+                                    label="Manually Assigned"
+                                    color="info"
+                                    size="small"
+                                  />
+                                  <Typography variant="caption">
+                                    {transaction.suggested_tenant}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {transaction.suggested_apartment}
+                                  </Typography>
+                                </Stack>
+                              ) : transaction.suggested_tenant ? (
+                                <Stack direction="column" spacing={0.5}>
+                                  <Chip
+                                    label="Auto-Matched"
+                                    color="success"
+                                    size="small"
+                                  />
+                                  <Typography variant="caption">
+                                    {transaction.suggested_tenant}
+                                  </Typography>
+                                  <Typography variant="caption" color="text.secondary">
+                                    {transaction.suggested_apartment}
+                                  </Typography>
+                                </Stack>
+                              ) : (
+                                <Stack direction="column" spacing={0.5}>
+                                  <Chip
+                                    label="Needs Assignment"
+                                    color="warning"
+                                    size="small"
+                                  />
+                                  <Typography variant="caption" color="text.secondary">
+                                    Click "Assign" to match
+                                  </Typography>
+                                </Stack>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <Chip
+                                label={`Line ${transaction.csv_line}`}
+                                size="small"
+                                variant="outlined"
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Stack direction="row" spacing={1} justifyContent="center">
+                                <Tooltip title={transaction.manually_assigned ? "Edit Assignment" : "Assign Payment"}>
+                                  <IconButton
+                                    size="small"
+                                    color="primary"
+                                    onClick={() => openAssignmentDialog(transaction)}
+                                  >
+                                    <AssignmentIcon />
+                                  </IconButton>
+                                </Tooltip>
+
+                                <Tooltip title="Delete Transaction">
+                                  <IconButton
+                                    size="small"
+                                    color="error"
+                                    onClick={() => deleteTransaction(transaction)}
+                                  >
+                                    <DeleteIcon />
+                                  </IconButton>
+                                </Tooltip>
+                              </Stack>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+
+                  {/* Pagination */}
+                  <TablePagination
+                    rowsPerPageOptions={[5, 10, 25, 50]}
+                    component="div"
+                    count={filteredTransactions.length}
+                    rowsPerPage={rowsPerPage}
+                    page={page}
+                    onPageChange={handlePageChange}
+                    onRowsPerPageChange={handleRowsPerPageChange}
+                    labelRowsPerPage="Transactions per page:"
+                    showFirstButton
+                    showLastButton
+                  />
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </Box>
+      )}
     </Box>
   );
 };

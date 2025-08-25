@@ -1,4 +1,4 @@
-// src/components/LandlordDetails.jsx
+// src/components/LandlordDetails.jsx - COMPLETE FIXED VERSION
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -22,9 +22,7 @@ import {
   IconButton,
   Tooltip,
   Stack,
-  Alert,
-  Tabs,
-  Tab
+  Alert
 } from '@mui/material';
 import {
   Business as BusinessIcon,
@@ -32,21 +30,23 @@ import {
   Phone as PhoneIcon,
   Email as EmailIcon,
   ArrowBack as ArrowBackIcon,
-  Apartment as ApartmentIcon,
   Edit as EditIcon,
   AccountBalance as BankIcon,
   LocationOn as LocationIcon,
-  AttachMoney as MoneyIcon,
   Visibility as ViewIcon,
-  PieChart as PieChartIcon,
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
+import ApartmentDetailsDialog from '../apartment/ApartmentDetailsDialog'; // Import the apartment details dialog
 
 function LandlordDetails({ landlordId, onBack, showNotification }) {
   const [landlord, setLandlord] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState(0);
+
+  // State for apartment details dialog
+  const [selectedApartment, setSelectedApartment] = useState(null);
+  const [apartmentDetailsOpen, setApartmentDetailsOpen] = useState(false);
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -67,13 +67,51 @@ function LandlordDetails({ landlordId, onBack, showNotification }) {
     }
   };
 
-  const handleTabChange = (event, newValue) => {
-    setActiveTab(newValue);
+  // FIXED: Handle apartment view by opening details dialog
+  const handleViewApartment = (apartment) => {
+    setSelectedApartment(apartment);
+    setApartmentDetailsOpen(true);
   };
 
-  const handleViewApartment = (apartmentId) => {
-    // Navigate to apartment details
-    navigate(`/dashboard`);
+  // Handle apartment dialog close
+  const handleCloseApartmentDetails = () => {
+    setApartmentDetailsOpen(false);
+    setSelectedApartment(null);
+  };
+
+  // Handle tenant navigation
+  const handleGoToTenant = (tenantId) => {
+    setApartmentDetailsOpen(false); // Close dialog first
+    showNotification('Navigating to tenant details...', 'info');
+    navigate(`/tenants/${tenantId}`);
+  };
+
+  // Handle payments navigation
+  const handleGoToPayments = (apartmentId) => {
+    setApartmentDetailsOpen(false); // Close dialog first
+    showNotification('Navigating to payments...', 'info');
+    navigate(`/payments/${apartmentId}`);
+  };
+
+  // Handle contract generation
+  const handleGenerateContract = async (apartmentId) => {
+    try {
+      const response = await api.post(`/generate-contract/${apartmentId}`, {}, { responseType: 'blob' });
+
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `contract_${apartmentId}.docx`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      showNotification('Contract generated successfully', 'success');
+    } catch (error) {
+      console.error('Error generating contract:', error);
+      showNotification('Failed to generate contract', 'error');
+    }
   };
 
   // Format currency
@@ -108,94 +146,85 @@ function LandlordDetails({ landlordId, onBack, showNotification }) {
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
         <Paper sx={{ p: 3 }}>
           <Alert severity="error">
-            Landlord not found or error loading data
+            Landlord not found or error loading data.
           </Alert>
-          <Button
-            variant="outlined"
-            startIcon={<ArrowBackIcon />}
-            onClick={onBack}
-            sx={{ mt: 2 }}
-          >
-            Back to Landlords
-          </Button>
         </Paper>
       </Container>
     );
   }
 
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-      <Paper sx={{ p: 3 }}>
-        {/* Header with back button */}
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Button
-            variant="outlined"
-            startIcon={<ArrowBackIcon />}
-            onClick={onBack}
-          >
-            Back to Landlords List
-          </Button>
-          <Typography variant="h5" component="h1">
-            Landlord Details
+    <>
+      <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+        {/* Header */}
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 3 }}>
+          <IconButton onClick={onBack} sx={{ mr: 2 }}>
+            <ArrowBackIcon />
+          </IconButton>
+          <Typography variant="h4" component="h1" sx={{ flexGrow: 1 }}>
+            {landlord.company_name}
           </Typography>
         </Box>
 
-        {/* Landlord Profile Card */}
-        <Card variant="outlined" sx={{ mb: 4 }}>
-          <CardContent>
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={2} sx={{ display: 'flex', justifyContent: 'center' }}>
-                <Avatar
-                  sx={{
-                    width: 100,
-                    height: 100,
-                    bgcolor: 'primary.main',
-                    fontSize: '2.5rem'
-                  }}
-                >
-                  {landlord.company_name ? landlord.company_name.charAt(0).toUpperCase() : <BusinessIcon fontSize="large" />}
-                </Avatar>
-              </Grid>
-              <Grid item xs={12} md={5}>
-                <Typography variant="h5" gutterBottom>
-                  {landlord.company_name}
-                </Typography>
-                <Typography variant="subtitle1" color="text.secondary" gutterBottom>
-                  {landlord.name}
-                </Typography>
-                <Stack spacing={1.5}>
-                  {landlord.email && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <EmailIcon color="action" />
-                      <Typography variant="body1">{landlord.email}</Typography>
+        {/* Landlord Overview Card */}
+        <Card sx={{ mb: 4 }}>
+          <CardContent sx={{ p: 3 }}>
+            <Grid container spacing={3} alignItems="center">
+              <Grid item xs={12} md={8}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <Avatar sx={{ width: 60, height: 60, mr: 3, bgcolor: 'primary.main' }}>
+                    <BusinessIcon fontSize="large" />
+                  </Avatar>
+                  <Box>
+                    <Typography variant="h5" gutterBottom>
+                      {landlord.name}
+                    </Typography>
+                    <Typography variant="subtitle1" color="text.secondary">
+                      {landlord.company_name}
+                    </Typography>
+                  </Box>
+                </Box>
+
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                      <EmailIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                      <Typography variant="body2">{landlord.email}</Typography>
                     </Box>
-                  )}
-                  {landlord.phone && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <PhoneIcon color="action" />
-                      <Typography variant="body1">{landlord.phone}</Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                      <PhoneIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                      <Typography variant="body2">{landlord.phone}</Typography>
                     </Box>
-                  )}
+                  </Grid>
                   {landlord.company_address && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <LocationIcon color="action" />
-                      <Typography variant="body1">{landlord.company_address}</Typography>
-                    </Box>
+                    <Grid item xs={12}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                        <LocationIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                        <Typography variant="body2">{landlord.company_address}</Typography>
+                      </Box>
+                    </Grid>
                   )}
                   {landlord.iban && (
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <BankIcon color="action" />
-                      <Typography variant="body1">IBAN: {landlord.iban}</Typography>
-                    </Box>
+                    <Grid item xs={12}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                        <BankIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                        <Typography variant="body2">{landlord.iban}</Typography>
+                      </Box>
+                    </Grid>
                   )}
-                </Stack>
+                </Grid>
+
+                {landlord.notes && (
+                  <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
+                    <Typography variant="body2">{landlord.notes}</Typography>
+                  </Box>
+                )}
               </Grid>
 
-              <Grid item xs={12} md={5}>
-                <Typography variant="h6" gutterBottom>
-                  Property Summary
-                </Typography>
-                <Grid container spacing={2} sx={{ mb: 2 }}>
+              <Grid item xs={12} md={4}>
+                <Grid container spacing={2}>
                   <Grid item xs={6}>
                     <Box sx={{ textAlign: 'center', p: 2, borderRadius: 1, bgcolor: 'background.paper', boxShadow: 1 }}>
                       <Typography variant="h4" color="primary.main">
@@ -233,157 +262,81 @@ function LandlordDetails({ landlordId, onBack, showNotification }) {
           </CardContent>
         </Card>
 
-        {/* Tabs for different sections */}
-        <Box sx={{ width: '100%', mb: 3 }}>
-          <Tabs
-            value={activeTab}
-            onChange={handleTabChange}
-            variant="scrollable"
-            scrollButtons="auto"
-          >
-            <Tab icon={<ApartmentIcon />} label="Properties" />
-            <Tab icon={<MoneyIcon />} label="Financial Summary" />
-            <Tab icon={<PieChartIcon />} label="Analytics" />
-          </Tabs>
-        </Box>
-
-        {/* Properties Tab */}
-        {activeTab === 0 && (
-          <>
-            {!landlord.apartments || landlord.apartments.length === 0 ? (
-              <Alert severity="info" sx={{ mt: 2 }}>
-                No properties are currently assigned to this landlord.
-              </Alert>
-            ) : (
-              <TableContainer component={Paper} variant="outlined">
-                <Table>
-                  <TableHead sx={{ bgcolor: 'grey.100' }}>
-                    <TableRow>
-                      <TableCell>Property Address</TableCell>
-                      <TableCell>Status</TableCell>
-                      <TableCell align="right">Monthly Rent</TableCell>
-                      <TableCell align="right">Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {landlord.apartments.map((apartment) => (
-                      <TableRow key={apartment.id} hover>
-                        <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <HomeIcon fontSize="small" color="primary" />
-                            <Typography variant="body1" fontWeight="medium">{apartment.address}</Typography>
-                          </Box>
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            size="small"
-                            label={apartment.status || 'Unknown'}
-                            color={
-                              apartment.status === 'occupied' ? 'success' :
-                                apartment.status === 'vacant' ? 'primary' :
-                                  'default'
-                            }
-                          />
-                        </TableCell>
-                        <TableCell align="right">{formatCurrency(apartment.rent)}</TableCell>
-                        <TableCell align="right">
-                          <Tooltip title="View Property">
-                            <IconButton
-                              size="small"
-                              color="primary"
-                              onClick={() => handleViewApartment(apartment.id)}
-                            >
-                              <ViewIcon />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-          </>
+        {/* Properties Section */}
+        {!landlord.apartments || landlord.apartments.length === 0 ? (
+          <Alert severity="info" sx={{ mt: 2 }}>
+            No properties are currently assigned to this landlord.
+          </Alert>
+        ) : (
+          <TableContainer component={Paper} sx={{ mt: 2 }}>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Address</TableCell>
+                  <TableCell>Rent</TableCell>
+                  <TableCell>Rooms</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell align="center">Actions</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {landlord.apartments.map((apartment) => (
+                  <TableRow key={apartment.id} hover>
+                    <TableCell>
+                      <Typography variant="body2" fontWeight={500}>
+                        {apartment.address}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="success.main" fontWeight={500}>
+                        {formatCurrency(apartment.rent)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {apartment.rooms} rooms
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip
+                        label={apartment.status || 'Available'}
+                        color={apartment.status === 'occupied' ? 'success' : 'default'}
+                        size="small"
+                      />
+                    </TableCell>
+                    <TableCell align="center">
+                      <Tooltip title="View Details">
+                        <IconButton
+                          color="primary"
+                          onClick={() => handleViewApartment(apartment)}
+                          size="small"
+                        >
+                          <ViewIcon />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         )}
+      </Container>
 
-        {/* Financial Summary Tab */}
-        {activeTab === 1 && (
-          <Box sx={{ p: 2 }}>
-            <Alert severity="info" sx={{ mb: 2 }}>
-              Here we would display financial summary data like total rent collected, outstanding balances, payment history, etc.
-            </Alert>
-
-            <Typography variant="h6" gutterBottom>
-              Monthly Income Overview
-            </Typography>
-
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={4}>
-                <Card sx={{ bgcolor: 'success.light', color: 'success.contrastText', height: '100%' }}>
-                  <CardContent>
-                    <Typography variant="h6" component="div">
-                      Total Monthly Revenue
-                    </Typography>
-                    <Typography variant="h3" component="div">
-                      {formatCurrency(calculateTotalRent(landlord.apartments))}
-                    </Typography>
-                    <Typography variant="body2" sx={{ mt: 1 }}>
-                      From {landlord.apartments?.length || 0} properties
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-
-              <Grid item xs={12} md={4}>
-                <Card sx={{ bgcolor: 'info.light', color: 'info.contrastText', height: '100%' }}>
-                  <CardContent>
-                    <Typography variant="h6" component="div">
-                      Average Per Property
-                    </Typography>
-                    <Typography variant="h3" component="div">
-                      {formatCurrency(
-                        landlord.apartments && landlord.apartments.length > 0
-                          ? calculateTotalRent(landlord.apartments) / landlord.apartments.length
-                          : 0
-                      )}
-                    </Typography>
-                    <Typography variant="body2" sx={{ mt: 1 }}>
-                      Monthly average
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-
-              <Grid item xs={12} md={4}>
-                <Card sx={{ bgcolor: 'warning.light', color: 'warning.contrastText', height: '100%' }}>
-                  <CardContent>
-                    <Typography variant="h6" component="div">
-                      Pending Payments
-                    </Typography>
-                    <Typography variant="h3" component="div">
-                      {formatCurrency(0)}
-                    </Typography>
-                    <Typography variant="body2" sx={{ mt: 1 }}>
-                      Current month
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
-          </Box>
-        )}
-
-        {/* Analytics Tab */}
-        {activeTab === 2 && (
-          <Box sx={{ p: 2 }}>
-            <Alert severity="info">
-              This section would display landlord-specific analytics like occupancy rates,
-              payment performance over time, and property value trends.
-            </Alert>
-          </Box>
-        )}
-      </Paper>
-    </Container>
+      {/* Apartment Details Dialog */}
+      <ApartmentDetailsDialog
+        open={apartmentDetailsOpen}
+        onClose={handleCloseApartmentDetails}
+        apartment={selectedApartment}
+        onEdit={() => {}} // Add edit functionality if needed
+        onGoToPayments={handleGoToPayments}
+        onGenerateContract={handleGenerateContract}
+        onExtendContract={() => {}} // Add extend contract functionality if needed
+        onOpenContractManagement={() => {}} // Add contract management if needed
+        onGoToTenant={handleGoToTenant}
+        isAdmin={true} // You might want to pass this as a prop
+      />
+    </>
   );
 }
 

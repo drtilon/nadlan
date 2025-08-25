@@ -198,8 +198,7 @@ def create_app():
             app.register_blueprint(contracts_bp, url_prefix="/api/documents")
             app.register_blueprint(contract_templates_bp, url_prefix="/api/documents")
             app.register_blueprint(logs_bp, url_prefix="/api")
-            app.register_blueprint(csv_payments_bp, url_prefix="/api/")
-            print("asd")
+            app.register_blueprint(csv_payments_bp, url_prefix="/api/csv-payments/")
             app.logger.info("Blueprints registered (including fast analytics)")
         except Exception as e:
             app.logger.error(f"Error registering blueprints: {e}")

@@ -1,25 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
   Button,
-  Card,
-  CardContent,
   Grid,
   Chip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
+  Drawer,
   TextField,
   InputAdornment,
   IconButton,
-  Avatar,
-  Divider,
-  Skeleton,
-  Tooltip,
   Container,
-  Alert,
   Menu,
   MenuItem,
   ListItemIcon,
@@ -27,7 +17,8 @@ import {
   Pagination,
   FormControl,
   Select,
-  Stack
+  Stack,
+  CircularProgress
 } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 
@@ -54,6 +45,8 @@ import ErrorIcon from '@mui/icons-material/Error';
 import CheckIcon from '@mui/icons-material/Check';
 import BusinessIcon from '@mui/icons-material/Business';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import TuneIcon from '@mui/icons-material/Tune';
+import ClearIcon from '@mui/icons-material/Clear';
 
 import api, { getUserData } from '../../utils/api';
 import ApartmentCard from './ApartmentCard';
@@ -61,6 +54,8 @@ import ApartmentDetailsDialog from './ApartmentDetailsDialog';
 import ContractExtensionDialog from '../contract/ContractExtensionDialog';
 import ContractManagementDialog from '../contract/ContractManagementDialog';
 import { APARTMENT_STATUS, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../../utils/constants';
+import ApartmentFilters from './ApartmentFilters';
+import { FILTER_OPTIONS, getFilterDisplayValue, getFilterLabel } from '../../utils/filterConstants';
 
 function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   // Core state
@@ -71,9 +66,12 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   // UI state
   const [selectedApartment, setSelectedApartment] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
 
   // Filter and search state
   const [searchTerm, setSearchTerm] = useState('');
+  const [filters, setFilters] = useState({});
+  const [filterOptions, setFilterOptions] = useState({});
   const [sortBy, setSortBy] = useState('expiry');
   const [filterMenuAnchor, setFilterMenuAnchor] = useState(null);
 
@@ -95,8 +93,31 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   // Navigation hook
   const navigate = useNavigate();
 
-  // Fetch apartments with pagination
-  const fetchApartments = useCallback(async (page = 1, size = pageSize, search = '', sort = sortBy, refresh = false) => {
+  // Debounce utility
+  const debounce = (func, delay) => {
+    let timeoutId;
+    return (...args) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => func(...args), delay);
+    };
+  };
+
+  // Fetch filter options on mount
+  useEffect(() => {
+    async function fetchFilterOptions() {
+      try {
+        const response = await api.get('/filter-options');
+        setFilterOptions(response.data);
+      } catch (error) {
+        console.error('Error fetching filter options:', error);
+        showNotification('Failed to load filter options', 'error');
+      }
+    }
+    fetchFilterOptions();
+  }, [showNotification]);
+
+  // Fetch apartments with pagination, search, sort, and filters
+  const fetchApartments = useCallback(async (page = 1, size = pageSize, search = '', sort = sortBy, filters = {}, refresh = false) => {
     if (refresh) {
       setIsRefreshing(true);
     } else {
@@ -113,31 +134,43 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     }
 
     try {
-      // Build query parameters
+      let sortField = sort;
+      let sortDir = '1'; // asc by default
+      if (sort === 'alphabetical') {
+        sortField = 'address';
+      }
+      if (sort === 'occupancy') {
+        sortDir = '-1'; // desc for highest occupancy first
+      }
+      const sortParam = `${sortField}:${sortDir}`;
+
       const params = new URLSearchParams({
-        page: (page - 1).toString(), // Backend uses 0-based indexing
+        page: (page - 1).toString(),
         limit: size.toString(),
-        sort: sort,
-        ...(search && { search: search.trim() })
+        sort: sortParam,
       });
 
-      const response = await api.get(`/list?${params}`);
+      if (search) {
+        params.append('search', search.trim());
+      }
+
+      Object.entries(filters).forEach(([key, value]) => {
+        if (value) {
+          params.append(key, value);
+        }
+      });
+
+      const response = await api.get(`/list?${params.toString()}`);
 
       if (response.data && response.data.apartments) {
         const processedApartments = response.data.apartments.map(apartment => ({
           ...apartment,
-          // Normalize status
           status: normalizeStatus(apartment.status),
           displayStatus: apartment.status,
-          // Get contract end date from current contract or fallback
           contractEndDate: getContractEndDate(apartment),
-          // Get move in date from current contract or fallback
           moveInDate: getMoveInDate(apartment),
-          // Get current tenants from contract periods
           tenants: getCurrentTenants(apartment),
-          // Calculate expiry status
           expiryStatus: getExpiryStatus(getContractEndDate(apartment)),
-          // Add occupancy data (should come from backend but ensure it exists)
           maxOccupancy: apartment.maxOccupancy || 1,
           current_tenant_count: apartment.current_tenant_count || getCurrentTenants(apartment).length,
           occupancy_ratio: apartment.occupancy_ratio || `${getCurrentTenants(apartment).length}/${apartment.maxOccupancy || 1}`,
@@ -151,7 +184,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
         setDisplayedApartments([]);
         setTotalCount(0);
       }
-
     } catch (error) {
       console.error('Error fetching apartments:', error);
       if (error.response && error.response.status === 401) {
@@ -167,6 +199,11 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     }
   }, [pageSize, sortBy, showNotification]);
 
+  // Debounced fetch function
+  const debouncedFetchApartments = useRef(debounce((page, size, search, sort, filters) => {
+    fetchApartments(page, size, search, sort, filters);
+  }, 300)).current;
+
   // Helper functions
   const normalizeStatus = (status) => {
     if (!status) return 'vacant';
@@ -177,82 +214,65 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     return status;
   };
 
-  const getContractEndDate = (apartment) => {
-    if (apartment.current_contract?.end_date) {
-      return apartment.current_contract.end_date;
-    }
-    return apartment.contractEndDate;
-  };
-
-  const getMoveInDate = (apartment) => {
-    if (apartment.current_contract?.start_date) {
-      return apartment.current_contract.start_date;
-    }
-    return apartment.moveInDate;
-  };
-
-  const getCurrentTenants = (apartment) => {
-    // Try to get tenants from current contract first
-    if (apartment.current_contract?.tenants) {
-      return apartment.current_contract.tenants.map(ct => ct.tenant).filter(Boolean);
-    }
-
-    // Fallback to legacy tenants array
-    if (apartment.tenants && Array.isArray(apartment.tenants)) {
-      return apartment.tenants;
-    }
-
-    return [];
-  };
-
+  const getContractEndDate = (apartment) => apartment.current_contract?.end_date || apartment.contractEndDate;
+  const getMoveInDate = (apartment) => apartment.current_contract?.start_date || apartment.moveInDate;
+  const getCurrentTenants = (apartment) => (apartment.current_contract?.tenants?.map(ct => ct.tenant).filter(Boolean) || apartment.tenants || []);
   const getExpiryStatus = (contractEndDate) => {
     if (!contractEndDate) return { status: 'no_date', daysUntilExpiry: null };
-
     const endDate = new Date(contractEndDate);
     const today = new Date();
-    const timeDiff = endDate.getTime() - today.getTime();
-    const daysUntilExpiry = Math.ceil(timeDiff / (1000 * 3600 * 24));
-
-    if (daysUntilExpiry < 0) {
-      return { status: 'expired', daysUntilExpiry };
-    } else if (daysUntilExpiry <= 30) {
-      return { status: 'expiring_soon', daysUntilExpiry };
-    } else {
-      return { status: 'valid', daysUntilExpiry };
-    }
+    const daysUntilExpiry = Math.ceil((endDate - today) / (1000 * 3600 * 24));
+    return daysUntilExpiry < 0 ? { status: 'expired', daysUntilExpiry } : daysUntilExpiry <= 30 ? { status: 'expiring_soon', daysUntilExpiry } : { status: 'valid', daysUntilExpiry };
   };
 
-  // Debounced search effect
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      setCurrentPage(1);
-      fetchApartments(1, pageSize, searchTerm, sortBy);
-    }, 300);
+  // Handle filter changes
+  const handleFilterChange = useCallback((key, value) => {
+    if (key === 'search') {
+      setSearchTerm(value);
+    } else {
+      setFilters(prev => {
+        const newFilters = { ...prev };
+        if (!value) delete newFilters[key];
+        else newFilters[key] = value;
+        return newFilters;
+      });
+    }
+    setCurrentPage(1);
+  }, []);
 
-    return () => clearTimeout(timeoutId);
-  }, [searchTerm, fetchApartments, pageSize, sortBy]);
+  // Handle clear all filters
+  const handleClearAllFilters = useCallback(() => {
+    setFilters({});
+    setSearchTerm('');
+    setCurrentPage(1);
+  }, []);
+
+  // Trigger debounced search
+  useEffect(() => {
+    debouncedFetchApartments(1, pageSize, searchTerm, sortBy, filters);
+  }, [searchTerm, filters, sortBy, pageSize, debouncedFetchApartments]);
 
   // Handle page changes
   const handlePageChange = useCallback((event, newPage) => {
     setCurrentPage(newPage);
-    fetchApartments(newPage, pageSize, searchTerm, sortBy);
-  }, [fetchApartments, pageSize, searchTerm, sortBy]);
+    fetchApartments(newPage, pageSize, searchTerm, sortBy, filters);
+  }, [fetchApartments, pageSize, searchTerm, sortBy, filters]);
 
   // Handle page size changes
   const handlePageSizeChange = useCallback((event) => {
     const newPageSize = event.target.value;
     setPageSize(newPageSize);
     setCurrentPage(1);
-    fetchApartments(1, newPageSize, searchTerm, sortBy);
-  }, [fetchApartments, searchTerm, sortBy]);
+    fetchApartments(1, newPageSize, searchTerm, sortBy, filters);
+  }, [fetchApartments, searchTerm, sortBy, filters]);
 
   // Handle sort changes
   const handleSortChange = useCallback((newSortBy) => {
     setSortBy(newSortBy);
     setCurrentPage(1);
     setFilterMenuAnchor(null);
-    fetchApartments(1, pageSize, searchTerm, newSortBy);
-  }, [fetchApartments, pageSize, searchTerm]);
+    fetchApartments(1, pageSize, searchTerm, newSortBy, filters);
+  }, [fetchApartments, pageSize, searchTerm, filters]);
 
   // Handle search input changes
   const handleSearchChange = useCallback((event) => {
@@ -263,18 +283,12 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   const handleExtendContract = async (apartmentId, newEndDate) => {
     setIsExtendingContract(true);
     try {
-      const formattedDate = newEndDate.toISOString().split('T')[0];
-
-      await api.put(`/apartments/${apartmentId}/extend-contract`, {
-        contractEndDate: formattedDate
-      });
-
+      await api.put(`/apartments/${apartmentId}/extend-contract`, { contractEndDate: newEndDate.toISOString().split('T')[0] });
       showNotification('Contract extended successfully', 'success');
-      await fetchApartments(currentPage, pageSize, searchTerm, sortBy, true);
+      await fetchApartments(currentPage, pageSize, searchTerm, sortBy, filters, true);
       setExtendContractOpen(false);
       setSelectedApartmentForExtension(null);
       setDetailsOpen(false);
-
     } catch (error) {
       console.error('Error extending contract:', error);
       showNotification('Failed to extend contract', 'error');
@@ -286,28 +300,17 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   // Handle contract generation
   const handleGenerateContract = useCallback(async (apartmentId) => {
     try {
-      const response = await api.post('/documents/createContract', {
-        apartmentId: apartmentId
-      }, {
-        responseType: 'blob'
-      });
-
-      const blob = new Blob([response.data], {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-      });
-
+      const response = await api.post('/documents/createContract', { apartmentId }, { responseType: 'blob' });
+      const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       const apartment = displayedApartments.find(apt => apt.id === apartmentId);
-      const fileName = `Rental_Contract_${apartment ? apartment.address.replace(/[^a-zA-Z0-9]/g, '_') : 'Apartment'}.docx`;
-
       link.href = url;
-      link.setAttribute('download', fileName);
+      link.setAttribute('download', `Rental_Contract_${apartment?.address.replace(/[^a-zA-Z0-9]/g, '_') || 'Apartment'}.docx`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
-
       showNotification('Contract generated successfully', 'success');
     } catch (error) {
       console.error('Error generating contract:', error);
@@ -315,46 +318,25 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     }
   }, [displayedApartments, showNotification]);
 
-  // Handle tenant navigation - FIXED VERSION
+  // Handle tenant navigation
   const handleGoToTenant = (tenantId) => {
-    // Close any open dialogs first
     setContractDialogOpen(false);
     setDetailsOpen(false);
-
-    // Show navigation notification
     showNotification('Navigating to tenant details...', 'info');
-
-    // Navigate to tenant details page
     navigate(`/tenants/${tenantId}`);
   };
 
   // Initial load
   useEffect(() => {
-    fetchApartments(1, pageSize, '', sortBy);
+    fetchApartments(1, pageSize, '', sortBy, filters);
   }, []);
 
   // Utility functions
-  const handleFilterClick = (event) => {
-    setFilterMenuAnchor(event.currentTarget);
-  };
-
-  const handleFilterClose = () => {
-    setFilterMenuAnchor(null);
-  };
-
-  const handleRefresh = () => {
-    fetchApartments(currentPage, pageSize, searchTerm, sortBy, true);
-  };
-
-  const openDetails = (apartment) => {
-    setSelectedApartment(apartment);
-    setDetailsOpen(true);
-  };
-
-  const openExtendContractDialog = (apartment) => {
-    setSelectedApartmentForExtension(apartment);
-    setExtendContractOpen(true);
-  };
+  const handleFilterClick = (event) => setFilterMenuAnchor(event.currentTarget);
+  const handleFilterClose = () => setFilterMenuAnchor(null);
+  const handleRefresh = () => fetchApartments(currentPage, pageSize, searchTerm, sortBy, filters, true);
+  const openDetails = (apartment) => { setSelectedApartment(apartment); setDetailsOpen(true); };
+  const openExtendContractDialog = (apartment) => { setSelectedApartmentForExtension(apartment); setExtendContractOpen(true); };
 
   // Calculate pagination info
   const totalPages = Math.ceil(totalCount / pageSize);
@@ -362,397 +344,133 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   const endIndex = Math.min(currentPage * pageSize, totalCount);
 
   // Get sort display text
-  const getSortDisplayText = (sortBy) => {
-    switch (sortBy) {
-      case 'expiry': return 'Expiry';
-      case 'alphabetical': return 'A-Z';
-      case 'occupancy': return 'Occupancy';
-      default: return 'Default';
-    }
-  };
+  const getSortDisplayText = (sortBy) => ({
+    expiry: 'Expiry',
+    alphabetical: 'A-Z',
+    occupancy: 'Occupancy'
+  }[sortBy] || 'Default');
+
+  // Get active filter count
+  const getActiveFilterCount = () => Object.values(filters).filter(value => value && value.trim()).length + (searchTerm ? 1 : 0);
 
   if (isLoading && !isRefreshing) {
     return (
-      <Container maxWidth="xl" sx={{ py: 4 }}>
-        <Box sx={{ mb: 4 }}>
-          <Skeleton variant="rectangular" width="100%" height={60} sx={{ borderRadius: 1 }} />
-        </Box>
-        <Grid container spacing={3}>
-          {Array.from({ length: pageSize }, (_, index) => (
-            <Grid item xs={12} sm={6} md={4} lg={3} key={index}>
-              <Skeleton variant="rectangular" width="100%" height={200} sx={{ borderRadius: 2 }} />
-            </Grid>
-          ))}
-        </Grid>
+      <Container maxWidth={false} sx={{ py: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+        <CircularProgress />
       </Container>
     );
   }
 
   return (
-    <Container maxWidth="xl" sx={{ py: 4 }}>
-      {/* Header */}
-      <Box
-        sx={{
-          display: 'flex',
-          flexDirection: { xs: 'column', md: 'row' },
-          justifyContent: 'space-between',
-          alignItems: { xs: 'flex-start', md: 'center' },
-          mb: 4,
-          gap: 2
-        }}
-      >
-        <Typography
-          variant="h4"
-          sx={{
-            fontWeight: 700,
-            color: 'text.primary',
-            letterSpacing: '-0.5px'
-          }}
-        >
-          Properties {isRefreshing && <RefreshIcon sx={{ ml: 1, fontSize: '1.5rem', animation: 'spin 1s linear infinite' }} />}
+    <Container maxWidth={false} sx={{ py: 4 }}>
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', md: 'row' }, justifyContent: 'space-between', alignItems: { xs: 'flex-start', md: 'center' }, mb: 4, gap: 2 }}>
+        <Typography variant="h4" sx={{ fontWeight: 700, color: 'text.primary', letterSpacing: '-0.5px', fontSize: '2rem' }}>
+          Properties {isRefreshing && <RefreshIcon sx={{ ml: 1, fontSize: '1.5rem', color: 'primary.main' }} />}
         </Typography>
-
-        <Box
-          sx={{
-            display: 'flex',
-            gap: 2,
-            flexDirection: { xs: 'column', sm: 'row' },
-            width: { xs: '100%', md: 'auto' }
-          }}
-        >
-          <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            sx={{
-              borderRadius: 1,
-              textTransform: 'none',
-              fontWeight: 500,
-              height: '48px',
-              borderColor: 'divider'
-            }}
-          >
+        <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' }, width: { xs: '100%', md: 'auto' } }}>
+          <Button variant="outlined" startIcon={<RefreshIcon />} onClick={handleRefresh} disabled={isRefreshing} sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, height: '48px', borderColor: 'divider' }}>
             Refresh
           </Button>
-          <Button
-            variant="contained"
-            startIcon={<ApartmentIcon />}
-            onClick={() => onEdit(null)}
-            sx={{
-              borderRadius: 1,
-              textTransform: 'none',
-              fontWeight: 500,
-              backgroundColor: 'primary.main',
-              px: 3,
-              height: '48px',
-              boxShadow: 2
-            }}
-          >
+          <Button variant="contained" startIcon={<ApartmentIcon />} onClick={() => onEdit(null)} sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, backgroundColor: 'primary.main', px: 3, height: '48px', boxShadow: 2 }}>
             Add Property
           </Button>
         </Box>
       </Box>
 
-      {/* Search and Filters */}
-      <Box
-        sx={{
-          display: 'flex',
-          flexDirection: { xs: 'column', sm: 'row' },
-          gap: 2,
-          mb: 4,
-          width: '100%'
-        }}
-      >
+      <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, mb: 4, width: '100%' }}>
         <TextField
           fullWidth
           placeholder="Search by address"
           value={searchTerm}
           onChange={handleSearchChange}
           InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon sx={{ color: 'text.secondary' }} />
-              </InputAdornment>
-            ),
-            sx: {
-              borderRadius: 1,
-              height: '48px',
-              backgroundColor: 'background.paper',
-              '& fieldset': {
-                borderColor: 'divider'
-              }
-            }
+            startAdornment: <InputAdornment position="start"><SearchIcon sx={{ color: 'text.secondary' }} /></InputAdornment>,
+            sx: { borderRadius: 1, height: '48px', backgroundColor: 'background.paper', '& fieldset': { borderColor: 'divider' } }
           }}
           sx={{ flexGrow: 1 }}
+          autoFocus // Ensure focus on mount
         />
-
-        <Button
-          variant="outlined"
-          startIcon={<FilterListIcon />}
-          onClick={handleFilterClick}
-          sx={{
-            borderRadius: 1,
-            textTransform: 'none',
-            fontWeight: 500,
-            height: '48px',
-            minWidth: '140px',
-            borderColor: 'divider'
-          }}
-        >
+        <Button variant="outlined" startIcon={<FilterListIcon />} onClick={handleFilterClick} sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, height: '48px', minWidth: '140px', borderColor: 'divider' }}>
           Sort: {getSortDisplayText(sortBy)}
         </Button>
-
-        <Menu
-          anchorEl={filterMenuAnchor}
-          open={Boolean(filterMenuAnchor)}
-          onClose={handleFilterClose}
-          PaperProps={{
-            sx: {
-              borderRadius: 1,
-              minWidth: 200,
-              mt: 1
-            }
-          }}
-        >
-          <MenuItem
-            onClick={() => handleSortChange('expiry')}
-            selected={sortBy === 'expiry'}
-          >
-            <ListItemIcon>
-              <DateRangeIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>
-              By Expiry Date
-              {sortBy === 'expiry' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}
-            </ListItemText>
+        <Button variant="outlined" startIcon={<TuneIcon />} onClick={() => setFilterOpen(true)} sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, height: '48px', minWidth: '140px', borderColor: 'divider' }}>
+          Filters {getActiveFilterCount() > 0 && `(${getActiveFilterCount()})`}
+        </Button>
+        <Menu anchorEl={filterMenuAnchor} open={Boolean(filterMenuAnchor)} onClose={handleFilterClose} PaperProps={{ sx: { borderRadius: 1, minWidth: 200, mt: 1 } }}>
+          <MenuItem onClick={() => handleSortChange('expiry')} selected={sortBy === 'expiry'}>
+            <ListItemIcon><DateRangeIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>By Expiry Date{sortBy === 'expiry' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}</ListItemText>
           </MenuItem>
-          <MenuItem
-            onClick={() => handleSortChange('alphabetical')}
-            selected={sortBy === 'alphabetical'}
-          >
-            <ListItemIcon>
-              <SortByAlphaIcon fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>
-              Alphabetical (A-Z)
-              {sortBy === 'alphabetical' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}
-            </ListItemText>
+          <MenuItem onClick={() => handleSortChange('alphabetical')} selected={sortBy === 'alphabetical'}>
+            <ListItemIcon><SortByAlphaIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>Alphabetical (A-Z){sortBy === 'alphabetical' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}</ListItemText>
           </MenuItem>
-          <MenuItem
-            onClick={() => handleSortChange('occupancy')}
-            selected={sortBy === 'occupancy'}
-          >
-            <ListItemIcon>
-              <People fontSize="small" />
-            </ListItemIcon>
-            <ListItemText>
-              By Occupancy Level
-              {sortBy === 'occupancy' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}
-            </ListItemText>
+          <MenuItem onClick={() => handleSortChange('occupancy')} selected={sortBy === 'occupancy'}>
+            <ListItemIcon><People fontSize="small" /></ListItemIcon>
+            <ListItemText>By Occupancy Level{sortBy === 'occupancy' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}</ListItemText>
           </MenuItem>
         </Menu>
       </Box>
 
-      {/* Results Summary and Page Size Control */}
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          mb: 3,
-          flexDirection: { xs: 'column', sm: 'row' },
-          gap: 2
-        }}
-      >
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3, flexDirection: { xs: 'column', sm: 'row' }, gap: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Typography variant="body2" color="text.secondary">
-            Showing {startIndex}-{endIndex} of {totalCount} properties
-          </Typography>
-          {searchTerm && (
-            <Chip
-              label={`Search: "${searchTerm}"`}
-              size="small"
-              onDelete={() => setSearchTerm('')}
-              color="primary"
-              variant="outlined"
-            />
-          )}
+          <Typography variant="body2" color="text.secondary">Showing {startIndex}-{endIndex} of {totalCount} properties</Typography>
         </Box>
-
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Typography variant="body2" color="text.secondary">
-            Show:
-          </Typography>
+          <Typography variant="body2" color="text.secondary">Show:</Typography>
           <FormControl size="small">
-            <Select
-              value={pageSize}
-              onChange={handlePageSizeChange}
-              sx={{ minWidth: 80 }}
-            >
-              {PAGE_SIZE_OPTIONS.map((size) => (
-                <MenuItem key={size} value={size}>
-                  {size}
-                </MenuItem>
-              ))}
+            <Select value={pageSize} onChange={handlePageSizeChange} sx={{ minWidth: 80 }}>
+              {PAGE_SIZE_OPTIONS.map(size => <MenuItem key={size} value={size}>{size}</MenuItem>)}
             </Select>
           </FormControl>
         </Box>
       </Box>
 
-      {/* Sorting Status Summary */}
-      {sortBy === 'expiry' && (
-        <Box sx={{ mb: 3 }}>
-          <Alert severity="info" sx={{ borderRadius: 1 }}>
-            <Typography variant="body2">
-              Properties are sorted by contract expiry: <strong style={{ color: '#d32f2f' }}>Expired</strong> contracts first,
-              then <strong style={{ color: '#ed6c02' }}>expiring within 30 days</strong>, followed by valid contracts.
-            </Typography>
-          </Alert>
+      {getActiveFilterCount() > 0 && (
+        <Box sx={{ mb: 3, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+          <Typography variant="body2" color="text.secondary">Active Filters ({getActiveFilterCount()}):</Typography>
+          {searchTerm && <Chip label={`Search: "${searchTerm}"`} size="small" onDelete={() => handleFilterChange('search', '')} color="primary" variant="outlined" deleteIcon={<ClearIcon fontSize="small" />} />}
+          {Object.entries(filters).map(([key, value]) => value && <Chip key={key} label={`${getFilterLabel(key)}: ${getFilterDisplayValue(key, value, filterOptions)}`} size="small" onDelete={() => handleFilterChange(key, '')} color="primary" variant="outlined" deleteIcon={<ClearIcon fontSize="small" />} />)}
+          <Button variant="text" size="small" startIcon={<ClearIcon />} onClick={handleClearAllFilters} sx={{ textTransform: 'none' }}>Clear All</Button>
         </Box>
       )}
 
-      {sortBy === 'occupancy' && (
-        <Box sx={{ mb: 3 }}>
-          <Alert severity="info" sx={{ borderRadius: 1 }}>
-            <Typography variant="body2">
-              Properties are sorted by occupancy level: <strong style={{ color: '#d32f2f' }}>Full capacity</strong> first,
-              then by highest occupancy percentage.
-            </Typography>
-          </Alert>
-        </Box>
-      )}
-
-      {/* Apartments Grid */}
       {displayedApartments.length === 0 ? (
-        <Box
-          sx={{
-            py: 10,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 2,
-            backgroundColor: 'background.paper',
-            borderRadius: 2,
-            boxShadow: 1
-          }}
-        >
-          <ApartmentIcon sx={{ fontSize: 64, color: 'text.disabled' }} />
-          <Typography variant="h6" color="text.secondary" align="center">
-            {searchTerm ? 'No properties match your search' : 'No properties found'}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 2 }}>
-            {searchTerm ? 'Try different search terms' : 'Add your first property to get started'}
-          </Typography>
-          {!searchTerm && isAdmin && (
-            <Button
-              variant="contained"
-              startIcon={<ApartmentIcon />}
-              onClick={() => onEdit(null)}
-              sx={{
-                borderRadius: 1,
-                textTransform: 'none',
-                px: 3
-              }}
-            >
-              Add Property
-            </Button>
-          )}
+        <Box sx={{ py: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, backgroundColor: 'background.paper', borderRadius: 2, boxShadow: 1, width: '100%' }}>
+          <ApartmentIcon sx={{ fontSize: 80, color: 'text.disabled' }} />
+          <Typography variant="h6" color="text.secondary" align="center">{searchTerm ? 'No properties match your search' : 'No properties found'}</Typography>
+          <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 2 }}>{searchTerm ? 'Try different search terms' : 'Add your first property to get started'}</Typography>
+          {!searchTerm && isAdmin && <Button variant="contained" startIcon={<ApartmentIcon />} onClick={() => onEdit(null)} sx={{ borderRadius: 1, textTransform: 'none', px: 3 }}>Add Property</Button>}
         </Box>
       ) : (
         <>
-          <Grid container spacing={3}>
-            {displayedApartments.map((apartment) => (
+          <Grid container spacing={4}>
+            {displayedApartments.map(apartment => (
               <Grid item xs={12} sm={6} md={4} lg={3} key={apartment.id}>
-                <ApartmentCard
-                  apartment={apartment}
-                  onEdit={onEdit}
-                  onGoToPayments={onGoToPayments}
-                  onGenerateContract={handleGenerateContract}
-                  onOpenDetails={openDetails}
-                  onGoToTenant={handleGoToTenant}
-                  isAdmin={isAdmin}
-                />
+                <ApartmentCard apartment={apartment} onEdit={onEdit} onGoToPayments={onGoToPayments} onGenerateContract={handleGenerateContract} onOpenDetails={openDetails} onGoToTenant={handleGoToTenant} isAdmin={isAdmin} sx={{ height: '300px' }} />
               </Grid>
             ))}
           </Grid>
-
-          {/* Pagination */}
           {totalPages > 1 && (
             <Box sx={{ mt: 4, display: 'flex', justifyContent: 'center' }}>
               <Stack spacing={2} alignItems="center">
-                <Pagination
-                  count={totalPages}
-                  page={currentPage}
-                  onChange={handlePageChange}
-                  color="primary"
-                  size="large"
-                  showFirstButton
-                  showLastButton
-                  sx={{
-                    '& .MuiPaginationItem-root': {
-                      borderRadius: 1,
-                      fontWeight: 500
-                    }
-                  }}
-                />
-                <Typography variant="body2" color="text.secondary">
-                  Page {currentPage} of {totalPages}
-                </Typography>
+                <Pagination count={totalPages} page={currentPage} onChange={handlePageChange} color="primary" size="large" showFirstButton showLastButton sx={{ '& .MuiPaginationItem-root': { borderRadius: 1, fontWeight: 500 } }} />
+                <Typography variant="body2" color="text.secondary">Page {currentPage} of {totalPages}</Typography>
               </Stack>
             </Box>
           )}
         </>
       )}
 
-      {/* Details Dialog */}
-      <ApartmentDetailsDialog
-        open={detailsOpen}
-        onClose={() => setDetailsOpen(false)}
-        apartment={selectedApartment}
-        onEdit={onEdit}
-        onGoToPayments={onGoToPayments}
-        onGenerateContract={handleGenerateContract}
-        onExtendContract={openExtendContractDialog}
-        onOpenContractManagement={() => setContractDialogOpen(true)}
-        onGoToTenant={handleGoToTenant}
-        isAdmin={isAdmin}
-      />
+      <Drawer anchor="right" open={filterOpen} onClose={() => setFilterOpen(false)} PaperProps={{ sx: { width: { xs: '100vw', sm: 600 }, borderLeft: '1px solid', borderColor: 'divider' } }} transitionDuration={0}>
+        <Box sx={{ p: 3, minWidth: 0 }}>
+          <ApartmentFilters filters={filters} filterOptions={filterOptions} onFilterChange={handleFilterChange} onClearAllFilters={handleClearAllFilters} searchTerm={searchTerm} />
+        </Box>
+      </Drawer>
 
-      {/* Contract Extension Dialog */}
-      <ContractExtensionDialog
-        open={extendContractOpen}
-        onClose={() => {
-          setExtendContractOpen(false);
-          setSelectedApartmentForExtension(null);
-        }}
-        apartment={selectedApartmentForExtension}
-        onExtend={handleExtendContract}
-        isSubmitting={isExtendingContract}
-      />
-
-      {/* Contract Management Dialog */}
-      <ContractManagementDialog
-        open={contractDialogOpen}
-        onClose={() => setContractDialogOpen(false)}
-        apartment={selectedApartment}
-        showNotification={showNotification}
-        onContractChange={() => fetchApartments(currentPage, pageSize, searchTerm, sortBy, true)}
-        onGoToTenant={handleGoToTenant}
-      />
-
-      <style>
-        {`
-          @keyframes spin {
-            from {
-              transform: rotate(0deg);
-            }
-            to {
-              transform: rotate(360deg);
-            }
-          }
-        `}
-      </style>
+      <ApartmentDetailsDialog open={detailsOpen} onClose={() => setDetailsOpen(false)} apartment={selectedApartment} onEdit={onEdit} onGoToPayments={onGoToPayments} onGenerateContract={handleGenerateContract} onExtendContract={openExtendContractDialog} onOpenContractManagement={() => setContractDialogOpen(true)} onGoToTenant={handleGoToTenant} isAdmin={isAdmin} />
+      <ContractExtensionDialog open={extendContractOpen} onClose={() => { setExtendContractOpen(false); setSelectedApartmentForExtension(null); }} apartment={selectedApartmentForExtension} onExtend={handleExtendContract} isSubmitting={isExtendingContract} />
+      <ContractManagementDialog open={contractDialogOpen} onClose={() => setContractDialogOpen(false)} apartment={selectedApartment} showNotification={showNotification} onContractChange={() => fetchApartments(currentPage, pageSize, searchTerm, sortBy, filters, true)} onGoToTenant={handleGoToTenant} />
     </Container>
   );
 }

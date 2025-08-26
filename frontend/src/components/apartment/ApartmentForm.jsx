@@ -429,7 +429,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
 
     try {
       setIsSubmitting(true);
-      await api.delete(`/apartments/${initialData.id}`);
+      await api.delete(`/delete/${initialData.id}`);
       showNotification('Apartment deleted successfully', 'success');
       onSuccess();
     } catch (error) {
@@ -446,21 +446,6 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         <Typography variant="h4" gutterBottom>
           {isEdit ? 'Edit Apartment' : 'Add New Apartment'}
         </Typography>
-        {!isAdmin && (
-          <Box sx={{
-            p: 2,
-            bgcolor: 'info.light',
-            borderRadius: 1,
-            mb: 2,
-            border: '1px solid',
-            borderColor: 'info.main'
-          }}>
-            <Typography variant="body2" color="info.dark">
-              📝 <strong>User Mode:</strong> You can edit apartment details and landlord information,
-              but financial management settings (profit calculations) are only visible to administrators for privacy.
-            </Typography>
-          </Box>
-        )}
       </Box>
 
       <form onSubmit={handleSubmit}>

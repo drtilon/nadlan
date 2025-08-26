@@ -8,7 +8,7 @@ import json
 
 class Landlord(db.Model):
     __tablename__ = "landlords"
-    __table_args__ = {'extend_existing': True}
+    __table_args__ = {"extend_existing": True}
 
     id = db.Column(db.Integer, primary_key=True)
     company_name = db.Column(db.String(100), nullable=False)
@@ -21,7 +21,9 @@ class Landlord(db.Model):
 
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationship - NO backref here to avoid conflict
     # apartments will be accessible via backref from Apartment model
@@ -40,17 +42,20 @@ class Landlord(db.Model):
         result["apartments_count"] = len(self.apartments) if self.apartments else 0
 
         if include_apartments and self.apartments:
-            result["apartments"] = [apt.to_dict(include_landlord=False, include_tenants=False) for apt in self.apartments]
+            result["apartments"] = [
+                apt.to_dict(include_landlord=False, include_tenants=False)
+                for apt in self.apartments
+            ]
 
         return result
 
     def __repr__(self):
-        return f'<Landlord {self.id}: {self.company_name}>'
+        return f"<Landlord {self.id}: {self.company_name}>"
 
 
 class Apartment(db.Model):
     __tablename__ = "apartments"
-    __table_args__ = {'extend_existing': True}
+    __table_args__ = {"extend_existing": True}
 
     id = db.Column(db.Integer, primary_key=True)
 
@@ -59,14 +64,20 @@ class Apartment(db.Model):
     house_number = db.Column(db.String(20), nullable=False, default="1")
     zip_code = db.Column(db.String(20), nullable=False, default="00000")
     city = db.Column(db.String(50), nullable=False, default="Tel Aviv")
-    state = db.Column(db.String(50), nullable=True)  # Optional for international addresses
+    state = db.Column(
+        db.String(50), nullable=True
+    )  # Optional for international addresses
     country = db.Column(db.String(50), nullable=False, default="Israel")
-    building = db.Column(db.String(50), nullable=True)  # Optional (building name/number)
-    floor = db.Column(db.String(10), nullable=True)     # Optional (floor number)
-    side = db.Column(db.String(10), nullable=True)      # Optional (A, B, left, right, etc.)
+    building = db.Column(
+        db.String(50), nullable=True
+    )  # Optional (building name/number)
+    floor = db.Column(db.String(10), nullable=True)  # Optional (floor number)
+    side = db.Column(db.String(10), nullable=True)  # Optional (A, B, left, right, etc.)
 
     # Full address - computed and stored for performance and search optimization
-    full_address = db.Column(db.String(500), nullable=True)  # Computed address stored in DB
+    full_address = db.Column(
+        db.String(500), nullable=True
+    )  # Computed address stored in DB
 
     rooms = db.Column(db.Integer, nullable=False)
     size = db.Column(db.Float, nullable=False)
@@ -88,14 +99,20 @@ class Apartment(db.Model):
     # Status and model
     notes = db.Column(db.Text, nullable=True)
     status = db.Column(db.String(50), nullable=False)
-    model = db.Column(db.String(50), nullable=True, default="management")  # Management or Rental model
+    model = db.Column(
+        db.String(50), nullable=True, default="management"
+    )  # Management or Rental model
 
     # Gender preference field for apartments
-    genderPreference = db.Column(db.String(20), nullable=True, default="mixed")  # 'mixed', 'men_only', 'women_only'
+    genderPreference = db.Column(
+        db.String(20), nullable=True, default="mixed"
+    )  # 'mixed', 'men_only', 'women_only'
 
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationships - WITH backref to create landlord.apartments automatically
     tenants = db.relationship("Tenant", backref="apartment", lazy=True)
@@ -117,7 +134,7 @@ class Apartment(db.Model):
             self.country,
             self.building,
             self.floor,
-            self.side
+            self.side,
         ]
         # Filter out None/empty values and join with commas
         self.full_address = ", ".join(filter(lambda x: x and str(x).strip(), parts))
@@ -153,18 +170,26 @@ class Apartment(db.Model):
         parts.append(self.country)
         return ", ".join(parts)
 
-    def to_dict(self, include_landlord=True, include_tenants=True, include_contract_periods=True):
-        """Convert to dictionary with optional related data to prevent circular references"""
-        result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
-        # Add computed addresses
-        result["address"] = self.address  # Full computed address
-        result["short_address"] = self.get_short_address()
-        result["street_address"] = self.get_street_address()
-        result["location_info"] = self.get_location_info()
+    def to_dict(self, include_landlord=False, include_tenants=False, include_contract_periods=False, user_role=None):
+        """
+        Convert apartment to dictionary with role-based sensitive data filtering.
 
-        # Add address components for frontend
-        result["address_components"] = {
+        Args:
+            include_landlord (bool): Whether to include landlord data
+            include_tenants (bool): Whether to include tenants data
+            include_contract_periods (bool): Whether to include contract periods
+            user_role (str): User role for filtering sensitive data ('admin', 'user', etc.)
+        """
+        from flask import g
+
+        # Get user role from Flask global context if not provided
+        if user_role is None:
+            user_role = g.get('user', {}).get('role', 'user') if hasattr(g, 'user') else 'user'
+
+        # Base apartment data (safe for all users)
+        result = {
+            "id": self.id,
             "street_name": self.street_name,
             "house_number": self.house_number,
             "zip_code": self.zip_code,
@@ -173,8 +198,39 @@ class Apartment(db.Model):
             "country": self.country,
             "building": self.building,
             "floor": self.floor,
-            "side": self.side
+            "side": self.side,
+            "full_address": self.full_address,
+            "address": self.address,  # Computed property
+            "rooms": self.rooms,
+            "size": float(self.size) if self.size else 0.0,
+            "maxOccupancy": self.maxOccupancy,
+            "rent": float(self.rent) if self.rent else 0.0,  # Basic rent is OK for users to see
+            "deposit": float(self.deposit) if self.deposit else 0.0,
+            "status": self.status,
+            "notes": self.notes,
+            "genderPreference": self.genderPreference or "mixed",
+            "landlord_id": self.landlord_id,
+            "address_components": {
+                "street_name": self.street_name,
+                "house_number": self.house_number,
+                "zip_code": self.zip_code,
+                "city": self.city,
+                "state": self.state,
+                "country": self.country,
+                "building": self.building,
+                "floor": self.floor,
+                "side": self.side,
+            }
         }
+
+        # CRITICAL: Only include sensitive financial data for admin users
+        # These fields reveal profit calculations and business model
+        if user_role == "admin":
+            result.update({
+                "managementFee": float(self.managementFee) if self.managementFee else 0.0,
+                "rentCost": float(self.rentCost) if self.rentCost else 0.0,
+                "model": self.model or "management"
+            })
 
         # Convert date objects to string format
         if self.moveInDate:
@@ -189,41 +245,62 @@ class Apartment(db.Model):
         # Add tenants data if requested
         if include_tenants and self.tenants:
             result["tenants"] = [
-                tenant.to_dict(include_apartment=False, include_contracts=False) if hasattr(tenant, 'to_dict') else {
-                    'id': tenant.id,
-                    'name': tenant.name,
-                    'email': tenant.email,
-                    'phone': tenant.phone
+                tenant.to_dict(include_apartment=False, include_contracts=False)
+                if hasattr(tenant, "to_dict")
+                else {
+                    "id": tenant.id,
+                    "name": tenant.name,
+                    "email": tenant.email,
+                    "phone": tenant.phone,
                 }
                 for tenant in self.tenants
             ]
 
         # Add landlord data if requested and available
         if include_landlord and self.landlord:
-            result["landlord"] = self.landlord.to_dict(include_apartments=False) if hasattr(self.landlord, 'to_dict') else {
-                'id': self.landlord.id,
-                'name': self.landlord.name,
-                'company_name': self.landlord.company_name,
-                'email': self.landlord.email,
-                'phone': self.landlord.phone
-            }
+            landlord_data = (
+                self.landlord.to_dict(include_apartments=False)
+                if hasattr(self.landlord, "to_dict")
+                else {
+                    "id": self.landlord.id,
+                    "name": self.landlord.name,
+                    "company_name": self.landlord.company_name,
+                    "email": self.landlord.email,
+                    "phone": self.landlord.phone,
+                }
+            )
+
+            # Filter sensitive landlord data for non-admin users
+            if user_role != "admin":
+                sensitive_landlord_fields = ["email", "phone", "iban", "company_address"]
+                for field in sensitive_landlord_fields:
+                    landlord_data.pop(field, None)
+
+            result["landlord"] = landlord_data
 
         # Add contract periods if requested and available
-        if include_contract_periods and hasattr(self, 'contract_periods') and self.contract_periods:
+        if (
+            include_contract_periods
+            and hasattr(self, "contract_periods")
+            and self.contract_periods
+        ):
             result["contract_periods"] = [
-                cp.to_dict(include_apartment=False) if hasattr(cp, 'to_dict') else {'id': cp.id}
+                cp.to_dict(include_apartment=False)
+                if hasattr(cp, "to_dict")
+                else {"id": cp.id}
                 for cp in self.contract_periods
             ]
 
         return result
 
+
     def __repr__(self):
-        return f'<Apartment {self.id}: {self.get_short_address()}>'
+        return f"<Apartment {self.id}: {self.get_short_address()}>"
 
 
 class Tenant(db.Model):
     __tablename__ = "tenants"
-    __table_args__ = {'extend_existing': True}
+    __table_args__ = {"extend_existing": True}
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), nullable=False)
@@ -237,7 +314,9 @@ class Tenant(db.Model):
 
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     def to_dict(self, include_apartment=True, include_contracts=True):
         """Convert to dictionary with optional related data"""
@@ -267,22 +346,22 @@ class Tenant(db.Model):
         # Add apartment data if requested and available
         if include_apartment and self.apartment:
             result["apartment"] = {
-                'id': self.apartment.id,
-                'address': self.apartment.address,
-                'short_address': self.apartment.get_short_address()
+                "id": self.apartment.id,
+                "address": self.apartment.address,
+                "short_address": self.apartment.get_short_address(),
             }
 
         return result
 
     def __repr__(self):
-        return f'<Tenant {self.id}: {self.name}>'
-
+        return f"<Tenant {self.id}: {self.name}>"
 
 
 class ContractPeriod(db.Model):
     """Contract periods for apartments - tracks different rental periods"""
+
     __tablename__ = "contract_periods"
-    __table_args__ = {'extend_existing': True}
+    __table_args__ = {"extend_existing": True}
 
     id = db.Column(db.Integer, primary_key=True)
     apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=False)
@@ -291,14 +370,23 @@ class ContractPeriod(db.Model):
     end_date = db.Column(db.Date, nullable=True)
     monthly_rent = db.Column(db.Numeric(10, 2), nullable=False)
     security_deposit = db.Column(db.Numeric(10, 2), default=0.00)
-    status = db.Column(db.Enum('active', 'completed', 'terminated', 'pending'), default='active')
+    status = db.Column(
+        db.Enum("active", "completed", "terminated", "pending"), default="active"
+    )
     notes = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
     created_by = db.Column(db.String(80), nullable=True)
 
     # Relationships
-    contract_tenants = db.relationship("ContractTenant", backref="contract_period", lazy=True, cascade="all, delete-orphan")
+    contract_tenants = db.relationship(
+        "ContractTenant",
+        backref="contract_period",
+        lazy=True,
+        cascade="all, delete-orphan",
+    )
     payments = db.relationship("Payment", backref="contract_period", lazy=True)
 
     def to_dict(self, include_apartment=True, include_tenants=True):
@@ -310,7 +398,9 @@ class ContractPeriod(db.Model):
             "start_date": self.start_date.isoformat() if self.start_date else None,
             "end_date": self.end_date.isoformat() if self.end_date else None,
             "monthly_rent": float(self.monthly_rent) if self.monthly_rent else 0,
-            "security_deposit": float(self.security_deposit) if self.security_deposit else 0,
+            "security_deposit": float(self.security_deposit)
+            if self.security_deposit
+            else 0,
             "status": self.status,
             "notes": self.notes,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -318,13 +408,12 @@ class ContractPeriod(db.Model):
             "created_by": self.created_by,
             "is_current": self.is_current_contract(),
             "duration_days": self.get_duration_days(),
-            "payments_count": len(self.payments) if self.payments else 0
+            "payments_count": len(self.payments) if self.payments else 0,
         }
 
         if include_tenants:
             result["tenants"] = [
-                ct.to_dict(include_contract=False)
-                for ct in self.contract_tenants
+                ct.to_dict(include_contract=False) for ct in self.contract_tenants
             ]
 
         if include_apartment and self.apartment:
@@ -335,9 +424,11 @@ class ContractPeriod(db.Model):
     def is_current_contract(self):
         """Check if this contract is currently active"""
         today = date.today()
-        return (self.start_date <= today and
-                (self.end_date is None or self.end_date >= today) and
-                self.status == 'active')
+        return (
+            self.start_date <= today
+            and (self.end_date is None or self.end_date >= today)
+            and self.status == "active"
+        )
 
     def get_duration_days(self):
         """Get the duration of the contract in days"""
@@ -353,14 +444,19 @@ class ContractPeriod(db.Model):
 
 class ContractTenant(db.Model):
     """Junction table linking tenants to contract periods"""
+
     __tablename__ = "contract_tenants"
     __table_args__ = (
-        db.UniqueConstraint('contract_period_id', 'tenant_id', name='unique_contract_tenant'),
-        {'extend_existing': True}
+        db.UniqueConstraint(
+            "contract_period_id", "tenant_id", name="unique_contract_tenant"
+        ),
+        {"extend_existing": True},
     )
 
     id = db.Column(db.Integer, primary_key=True)
-    contract_period_id = db.Column(db.Integer, db.ForeignKey("contract_periods.id"), nullable=False)
+    contract_period_id = db.Column(
+        db.Integer, db.ForeignKey("contract_periods.id"), nullable=False
+    )
     tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id"), nullable=False)
     is_primary = db.Column(db.Boolean, default=False)
     move_in_date = db.Column(db.Date, nullable=True)
@@ -379,15 +475,23 @@ class ContractTenant(db.Model):
             "contract_period_id": self.contract_period_id,
             "tenant_id": self.tenant_id,
             "is_primary": self.is_primary,
-            "move_in_date": self.move_in_date.isoformat() if self.move_in_date else None,
-            "move_out_date": self.move_out_date.isoformat() if self.move_out_date else None,
-            "rent_share_percentage": float(self.rent_share_percentage) if self.rent_share_percentage else 100.0,
+            "move_in_date": self.move_in_date.isoformat()
+            if self.move_in_date
+            else None,
+            "move_out_date": self.move_out_date.isoformat()
+            if self.move_out_date
+            else None,
+            "rent_share_percentage": float(self.rent_share_percentage)
+            if self.rent_share_percentage
+            else 100.0,
             "notes": self.notes,
-            "created_at": self.created_at.isoformat() if self.created_at else None
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
         if include_tenant and self.tenant:
-            result["tenant"] = self.tenant.to_dict(include_apartment=False, include_contracts=False)
+            result["tenant"] = self.tenant.to_dict(
+                include_apartment=False, include_contracts=False
+            )
 
         if include_contract and self.contract_period:
             result["contract_number"] = self.contract_period.contract_number
@@ -396,10 +500,9 @@ class ContractTenant(db.Model):
         return result
 
 
-
 class User(db.Model):
     __tablename__ = "users"
-    __table_args__ = {'extend_existing': True}
+    __table_args__ = {"extend_existing": True}
 
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
@@ -429,14 +532,17 @@ class Payment(db.Model):
     """
     Updated Payment model that supports contract periods and both individual and batch payments.
     """
+
     __tablename__ = "payments"
-    __table_args__ = {'extend_existing': True}
+    __table_args__ = {"extend_existing": True}
 
     id = db.Column(db.Integer, primary_key=True)
     apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=False)
 
     # NEW: Link to contract period
-    contract_period_id = db.Column(db.Integer, db.ForeignKey("contract_periods.id"), nullable=True)
+    contract_period_id = db.Column(
+        db.Integer, db.ForeignKey("contract_periods.id"), nullable=True
+    )
 
     # Core payment fields
     month = db.Column(db.String(50), nullable=False)  # Month name or unique identifier
@@ -454,18 +560,26 @@ class Payment(db.Model):
     paymentDate = db.Column(db.DateTime, nullable=True)
     paymentMethod = db.Column(db.String(50), nullable=True, default="bank_transfer")
     notes = db.Column(db.Text, nullable=True)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Individual payment fields (new)
     amount = db.Column(db.Float, nullable=True)  # For individual payments
     tenant_name = db.Column(db.String(255), nullable=True)  # For individual payments
-    payment_type = db.Column(db.String(50), nullable=True, default="rent")  # rent, deposit, utilities, other
+    payment_type = db.Column(
+        db.String(50), nullable=True, default="rent"
+    )  # rent, deposit, utilities, other
 
     def to_dict(self, include_apartment=True, include_contract=True):
         """Convert to dictionary with optional related data to prevent circular references"""
         # Determine if this is an individual payment
-        is_individual = bool(hasattr(self, 'amount') and self.amount and
-                           hasattr(self, 'tenant_name') and self.tenant_name)
+        is_individual = bool(
+            hasattr(self, "amount")
+            and self.amount
+            and hasattr(self, "tenant_name")
+            and self.tenant_name
+        )
 
         result = {
             "id": self.id,
@@ -475,10 +589,10 @@ class Payment(db.Model):
             "year": self.year,
             "status": self.status,
             "paymentDate": self.paymentDate.isoformat() if self.paymentDate else None,
-            "paymentMethod": getattr(self, 'paymentMethod', None) or "bank_transfer",
-            "notes": getattr(self, 'notes', None) or "",
+            "paymentMethod": getattr(self, "paymentMethod", None) or "bank_transfer",
+            "notes": getattr(self, "notes", None) or "",
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-            "isIndividual": is_individual
+            "isIndividual": is_individual,
         }
 
         # Add contract information if requested and available
@@ -486,8 +600,10 @@ class Payment(db.Model):
             result["contract_info"] = {
                 "contract_number": self.contract_period.contract_number,
                 "start_date": self.contract_period.start_date.isoformat(),
-                "end_date": self.contract_period.end_date.isoformat() if self.contract_period.end_date else None,
-                "tenants": self.contract_period.get_tenants_list()
+                "end_date": self.contract_period.end_date.isoformat()
+                if self.contract_period.end_date
+                else None,
+                "tenants": self.contract_period.get_tenants_list(),
             }
 
         # Add apartment info if requested and available
@@ -496,63 +612,78 @@ class Payment(db.Model):
 
         if is_individual:
             # Individual payment
-            amount_value = getattr(self, 'amount', 0) or 0
-            tenant_name_value = getattr(self, 'tenant_name', '') or ''
-            payment_type_value = getattr(self, 'payment_type', 'rent') or 'rent'
+            amount_value = getattr(self, "amount", 0) or 0
+            tenant_name_value = getattr(self, "tenant_name", "") or ""
+            payment_type_value = getattr(self, "payment_type", "rent") or "rent"
 
-            result.update({
-                "amount": float(amount_value),
-                "tenant_name": tenant_name_value,
-                "payment_type": payment_type_value,
-                "amountPaid": float(amount_value),
-                "tenant_names": [tenant_name_value] if tenant_name_value else []
-            })
+            result.update(
+                {
+                    "amount": float(amount_value),
+                    "tenant_name": tenant_name_value,
+                    "payment_type": payment_type_value,
+                    "amountPaid": float(amount_value),
+                    "tenant_names": [tenant_name_value] if tenant_name_value else [],
+                }
+            )
         else:
             # Batch payment (legacy format)
             try:
                 tenants_data = json.loads(self.tenants) if self.tenants else []
                 total_paid = sum(float(t.get("amountPaid", 0)) for t in tenants_data)
-                tenant_names = [t.get("name", "") for t in tenants_data if t.get("name")]
+                tenant_names = [
+                    t.get("name", "") for t in tenants_data if t.get("name")
+                ]
 
-                result.update({
-                    "tenants": tenants_data,
-                    "amountPaid": total_paid,
-                    "tenant_names": tenant_names,
-                    "internet": float(self.internet) if self.internet is not None else 0.0,
-                    "electricity": float(self.electricity) if self.electricity is not None else 0.0,
-                    "other": float(self.other) if self.other is not None else 0.0,
-                })
+                result.update(
+                    {
+                        "tenants": tenants_data,
+                        "amountPaid": total_paid,
+                        "tenant_names": tenant_names,
+                        "internet": float(self.internet)
+                        if self.internet is not None
+                        else 0.0,
+                        "electricity": float(self.electricity)
+                        if self.electricity is not None
+                        else 0.0,
+                        "other": float(self.other) if self.other is not None else 0.0,
+                    }
+                )
 
                 # Parse extra payments
                 try:
-                    extra_payments_str = getattr(self, 'extraPayments', None)
-                    extra_payments = json.loads(extra_payments_str) if extra_payments_str else {}
+                    extra_payments_str = getattr(self, "extraPayments", None)
+                    extra_payments = (
+                        json.loads(extra_payments_str) if extra_payments_str else {}
+                    )
                     result["extraPayments"] = extra_payments
                 except:
                     result["extraPayments"] = {
                         "internet": result["internet"],
                         "electricity": result["electricity"],
-                        "other": result["other"]
+                        "other": result["other"],
                     }
             except Exception as e:
                 # Fallback for malformed data
-                result.update({
-                    "tenants": [],
-                    "amountPaid": 0.0,
-                    "tenant_names": [],
-                    "internet": 0.0,
-                    "electricity": 0.0,
-                    "other": 0.0,
-                    "extraPayments": {}
-                })
+                result.update(
+                    {
+                        "tenants": [],
+                        "amountPaid": 0.0,
+                        "tenant_names": [],
+                        "internet": 0.0,
+                        "electricity": 0.0,
+                        "other": 0.0,
+                        "extraPayments": {},
+                    }
+                )
 
         return result
 
 
 class Contract(db.Model):
     """Legacy contract files table - kept for document storage"""
+
     __tablename__ = "contracts"
-    __table_args__ = {'extend_existing': True}
+    __table_args__ = {"extend_existing": True}
 
     id = db.Column(db.Integer, primary_key=True)
     apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=False)
@@ -565,7 +696,9 @@ class Contract(db.Model):
     uploaded_by = db.Column(db.Integer, nullable=True)
 
     # NEW: Link to contract period for better organization
-    contract_period_id = db.Column(db.Integer, db.ForeignKey("contract_periods.id"), nullable=True)
+    contract_period_id = db.Column(
+        db.Integer, db.ForeignKey("contract_periods.id"), nullable=True
+    )
 
     def to_dict(self):
         return {
@@ -582,7 +715,7 @@ class Contract(db.Model):
 
 class ContractTemplate(db.Model):
     __tablename__ = "contract_templates"
-    __table_args__ = {'extend_existing': True}
+    __table_args__ = {"extend_existing": True}
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(255), nullable=False, unique=True)
@@ -592,7 +725,9 @@ class ContractTemplate(db.Model):
     file_size = db.Column(db.Integer, nullable=True)
     is_default = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
     created_by = db.Column(db.String(80), nullable=True)
 
     def to_dict(self):
@@ -606,5 +741,5 @@ class ContractTemplate(db.Model):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "created_by": self.created_by,
-            "has_file": bool(self.file_path and self.file_name)
+            "has_file": bool(self.file_path and self.file_name),
         }

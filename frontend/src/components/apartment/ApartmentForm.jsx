@@ -1,3 +1,4 @@
+// ApartmentForm.jsx - Complete fixed version
 import React, { useState, useEffect } from 'react';
 import {
   Typography,
@@ -28,13 +29,13 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   const isAdmin = userData && userData.role === 'admin';
 
   const emptyForm = {
-    // Address components (replacing single address field)
+    // Address components
     street_name: '',
     house_number: '',
     zip_code: '',
     city: '',
     state: '',
-    country: '',
+    country: 'Israel',
     building: '',
     floor: '',
     side: '',
@@ -44,11 +45,14 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     size: 0,
     maxOccupancy: 1,
 
-    // Financial
+    // Financial (basic fields only)
     rent: 0,
     deposit: 0,
+
+    // Admin-only financial fields (will be filtered out for users)
     managementFee: 0.00,
     rentCost: 0.00,
+    model: PROPERTY_MODELS.MANAGEMENT,
 
     // Other fields
     landlord_id: null,
@@ -56,11 +60,8 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     contractEndDate: '',
     notes: '',
     status: APARTMENT_STATUS.VACANT,
-    model: PROPERTY_MODELS.MANAGEMENT,
     genderPreference: 'mixed'
   };
-
-  const [tenantData, setTenantData] = useState([]);
 
   // Clean and process initial data
   const cleanedInitialData = isEdit ? {
@@ -71,7 +72,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     zip_code: initialData.zip_code || initialData.address_components?.zip_code || '',
     city: initialData.city || initialData.address_components?.city || '',
     state: initialData.state || initialData.address_components?.state || '',
-    country: initialData.country || initialData.address_components?.country || '',
+    country: initialData.country || initialData.address_components?.country || 'Israel',
     building: initialData.building || initialData.address_components?.building || '',
     floor: initialData.floor || initialData.address_components?.floor || '',
     side: initialData.side || initialData.address_components?.side || '',
@@ -83,97 +84,94 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     landlord_id: initialData.landlord?.id || initialData.landlord_id,
     maxOccupancy: initialData.maxOccupancy || 1,
 
-    // Ensure financial fields have default values
-    managementFee: initialData.managementFee || 0.00,
-    rentCost: initialData.rentCost || 0.00,
-    model: initialData.model || PROPERTY_MODELS.MANAGEMENT,
-    genderPreference: initialData.genderPreference || 'mixed'
-  } : emptyForm;
+    // Financial fields - only include if admin and data exists
+    managementFee: isAdmin && initialData.managementFee !== undefined ? initialData.managementFee : 0.00,
+    rentCost: isAdmin && initialData.rentCost !== undefined ? initialData.rentCost : 0.00,
+    model: isAdmin && initialData.model ? initialData.model : PROPERTY_MODELS.MANAGEMENT,
 
-  // Remove any invalid/legacy fields
-  if (cleanedInitialData.rentInSentance) {
-    delete cleanedInitialData.rentInSentance;
-  }
-  if (cleanedInitialData.address) {
-    delete cleanedInitialData.address;
-  }
+    // Date formatting
+    moveInDate: initialData.moveInDate ?
+      (typeof initialData.moveInDate === 'string' ?
+        initialData.moveInDate.split('T')[0] :
+        initialData.moveInDate) : '',
+    contractEndDate: initialData.contractEndDate ?
+      (typeof initialData.contractEndDate === 'string' ?
+        initialData.contractEndDate.split('T')[0] :
+        initialData.contractEndDate) : '',
+  } : {};
 
-  const [formData, setFormData] = useState(cleanedInitialData);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [availableTenants, setAvailableTenants] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({ ...emptyForm, ...cleanedInitialData });
+  const [tenantData, setTenantData] = useState([]);
   const [tenantFormOpen, setTenantFormOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [availableTenants, setAvailableTenants] = useState([]);
   const [addedTenantIds, setAddedTenantIds] = useState(new Set());
 
-  // Fetch tenants
+  // Initialize tenant data for edit mode
   useEffect(() => {
-    const fetchTenants = async () => {
+    const initializeTenants = () => {
+      if (isEdit && initialData.tenants && Array.isArray(initialData.tenants)) {
+        const processedTenants = initialData.tenants.map((tenant, index) => ({
+          id: tenant.id,
+          name: tenant.name || '',
+          firstName: tenant.firstName || '',
+          lastName: tenant.lastName || '',
+          email: tenant.email || '',
+          phone: tenant.phone || '',
+          bornOn: tenant.bornOn || '',
+          refundIban: tenant.refundIban || '',
+          isPrimary: index === 0 || tenant.isPrimary || false
+        }));
+
+        setTenantData(processedTenants);
+
+        // Track existing tenant IDs
+        const existingIds = processedTenants
+          .filter(t => t.id && !String(t.id).startsWith('temp-'))
+          .map(t => t.id);
+        setAddedTenantIds(new Set(existingIds));
+      }
+    };
+
+    initializeTenants();
+  }, [isEdit, initialData.tenants]);
+
+  // Fetch available tenants
+  useEffect(() => {
+    const fetchAvailableTenants = async () => {
       try {
         setLoading(true);
+        // Use existing tenant endpoint from tenants.py
         const response = await api.get('/tenants/list');
 
-        const processedTenants = response.data.map(tenant => {
-          let firstName = '', lastName = '';
-          if (tenant.name && !tenant.firstName && !tenant.lastName) {
-            const nameParts = tenant.name.split(' ');
-            firstName = nameParts[0] || '';
-            lastName = nameParts.slice(1).join(' ') || '';
-          }
-
-          return {
-            ...tenant,
-            firstName: tenant.firstName || firstName,
-            lastName: tenant.lastName || lastName
-          };
-        });
-
-        setAvailableTenants(processedTenants);
+        if (response.data && Array.isArray(response.data)) {
+          setAvailableTenants(response.data);
+        } else {
+          console.warn('Invalid tenant data received:', response.data);
+          setAvailableTenants([]);
+        }
       } catch (error) {
         console.error('Error fetching tenants:', error);
-        showNotification('Error fetching tenants', 'error');
+        setAvailableTenants([]);
+        showNotification('Error loading tenants', 'error');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchTenants();
+    fetchAvailableTenants();
   }, [showNotification]);
 
-  // Process initial tenant data
-  useEffect(() => {
-    if (isEdit && initialData && availableTenants.length > 0) {
-      let tenantsToProcess = [];
-
-      if (initialData.tenants && initialData.tenants.length > 0) {
-        tenantsToProcess = initialData.tenants.map((tenant, index) => ({
-          ...tenant,
-          firstName: tenant.firstName || (tenant.name ? tenant.name.split(' ')[0] : ''),
-          lastName: tenant.lastName || (tenant.name ? tenant.name.split(' ').slice(1).join(' ') : ''),
-          isPrimary: tenant.isPrimary === undefined ? index === 0 : tenant.isPrimary
-        }));
-      }
-
-      if (tenantsToProcess.length > 0 && tenantData.length === 0) {
-        setTenantData(tenantsToProcess);
-        const tenantIdSet = new Set(tenantsToProcess.map(t => t.id).filter(id => !id.toString().startsWith('temp-')));
-        setAddedTenantIds(tenantIdSet);
-      }
-    }
-  }, [isEdit, initialData, availableTenants]);
-
-  // Handle input changes for the main form fields
-  const handleChange = (e, isNumber) => {
-    const { name, value } = e.target;
-
-    if (name === 'rentInSentance') return;
-
-    const processedValue = isNumber ? (value ? parseFloat(value) : 0) : value;
+  // Handle form field changes
+  const handleChange = (event, isNumber = false) => {
+    const { name, value } = event.target;
+    let processedValue = isNumber ? (value ? parseFloat(value) : 0) : value;
 
     // Special handling for rooms change - suggest maxOccupancy
     if (name === 'rooms' && isNumber && processedValue > 0) {
-      // Auto-suggest maxOccupancy based on rooms if maxOccupancy is still default
       if (formData.maxOccupancy <= 1) {
-        const suggestedOccupancy = Math.max(1, processedValue + 1); // rooms + 1 as a reasonable default
+        const suggestedOccupancy = Math.max(1, processedValue + 1);
         setFormData(prev => ({
           ...prev,
           rooms: processedValue,
@@ -183,7 +181,8 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       }
     }
 
-    if (name === 'model') {
+    // Only allow admin users to modify financial model fields
+    if (name === 'model' && isAdmin) {
       if (processedValue === PROPERTY_MODELS.MANAGEMENT) {
         setFormData(prev => ({
           ...prev,
@@ -203,6 +202,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         }));
       }
     } else {
+      // For non-admin users or other fields, just update normally
       setFormData(prev => ({
         ...prev,
         [name]: processedValue
@@ -229,145 +229,156 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     );
   };
 
-  // Add a selected tenant
+  // Add a selected tenant - FIXED VERSION
   const handleTenantSelection = (tenant) => {
-    if (tenant) {
-      if (tenant.id && addedTenantIds.has(tenant.id)) {
-        showNotification('This tenant is already added to the apartment', 'warning');
-        return;
-      }
-
-      // Check if adding this tenant would exceed max occupancy
-      if (tenantData.length >= formData.maxOccupancy) {
-        showNotification(`Cannot add more tenants. Maximum occupancy is ${formData.maxOccupancy}`, 'warning');
-        return;
-      }
-
-      const isPrimary = tenantData.length === 0;
-
-      const enrichedTenant = {
-        ...tenant,
-        firstName: tenant.firstName || (tenant.name ? tenant.name.split(' ')[0] : ''),
-        lastName: tenant.lastName || (tenant.name ? tenant.name.split(' ').slice(1).join(' ') : ''),
-        isPrimary
-      };
-
-      setTenantData([...tenantData, enrichedTenant]);
-
-      if (tenant.id) {
-        setAddedTenantIds(new Set([...addedTenantIds, tenant.id]));
-      }
-    }
-  };
-
-  // Add a newly created tenant
-  const handleNewTenantCreated = (newTenant) => {
-    if (newTenant.id && addedTenantIds.has(newTenant.id)) {
-      showNotification('This tenant is already added to the apartment', 'warning');
-      setTenantFormOpen(false);
+    if (!tenant) {
+      console.warn('No tenant selected');
       return;
     }
 
-    // Check if adding this tenant would exceed max occupancy
+    // Check if tenant is already added
+    if (tenant.id && addedTenantIds.has(tenant.id)) {
+      showNotification('This tenant is already added to the apartment', 'warning');
+      return;
+    }
+
+    // Check occupancy limit
     if (tenantData.length >= formData.maxOccupancy) {
       showNotification(`Cannot add more tenants. Maximum occupancy is ${formData.maxOccupancy}`, 'warning');
-      setTenantFormOpen(false);
       return;
     }
 
-    const isPrimary = tenantData.length === 0;
+    // Create new tenant entry with proper structure
+    const newTenant = {
+      id: tenant.id,
+      name: tenant.name || '',
+      firstName: tenant.firstName || '',
+      lastName: tenant.lastName || '',
+      email: tenant.email || '',
+      phone: tenant.phone || '',
+      bornOn: tenant.bornOn || '',
+      refundIban: tenant.refundIban || '',
+      isPrimary: tenantData.length === 0, // First tenant is primary
+      isExistingTenant: true
+    };
 
-    setTenantData([...tenantData, {
-      ...newTenant,
-      isPrimary
-    }]);
+    // Add tenant to the list
+    setTenantData(prev => [...prev, newTenant]);
 
-    if (newTenant.id) {
-      setAddedTenantIds(new Set([...addedTenantIds, newTenant.id]));
+    // Track the added tenant ID
+    if (tenant.id) {
+      setAddedTenantIds(prev => new Set(prev).add(tenant.id));
     }
 
-    setTenantFormOpen(false);
+    console.log('Added tenant:', newTenant);
   };
 
-  // Remove a tenant
+  // Remove a tenant - FIXED VERSION
   const removeTenant = (index) => {
-    const removedTenant = tenantData[index];
-    const newTenantData = tenantData.filter((item, i) => i !== index);
-
-    if (removedTenant.isPrimary && newTenantData.length > 0) {
-      newTenantData[0].isPrimary = true;
+    if (index < 0 || index >= tenantData.length) {
+      console.warn('Invalid tenant index for removal:', index);
+      return;
     }
 
-    setTenantData(newTenantData);
+    const tenantToRemove = tenantData[index];
+    console.log('Removing tenant:', tenantToRemove);
 
-    if (removedTenant.id) {
-      const newAddedTenantIds = new Set(addedTenantIds);
-      newAddedTenantIds.delete(removedTenant.id);
-      setAddedTenantIds(newAddedTenantIds);
+    setTenantData(prev => {
+      const newData = prev.filter((_, i) => i !== index);
+
+      // If we removed the primary tenant, make the first remaining tenant primary
+      if (tenantToRemove.isPrimary && newData.length > 0) {
+        newData[0].isPrimary = true;
+      }
+
+      return newData;
+    });
+
+    // Remove from added tenant IDs if it was an existing tenant
+    if (tenantToRemove.id && !String(tenantToRemove.id).startsWith('temp-')) {
+      setAddedTenantIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(tenantToRemove.id);
+        return newSet;
+      });
     }
   };
 
-  // Handle form submission
+  // Add a new tenant with dialog
+  const addNewTenant = () => {
+    if (tenantData.length >= formData.maxOccupancy) {
+      showNotification(`Cannot add more tenants. Maximum occupancy is ${formData.maxOccupancy}`, 'warning');
+      return;
+    }
+    setTenantFormOpen(true);
+  };
+
+  // Handle new tenant creation from dialog - FIXED VERSION
+  const handleTenantCreated = (newTenant) => {
+    if (!newTenant) {
+      console.warn('No tenant data received from dialog');
+      return;
+    }
+
+    const tenantWithTempId = {
+      ...newTenant,
+      id: `temp-${Date.now()}`,
+      isPrimary: tenantData.length === 0,
+      isExistingTenant: false
+    };
+
+    setTenantData(prev => [...prev, tenantWithTempId]);
+    setTenantFormOpen(false);
+
+    console.log('Created new tenant:', tenantWithTempId);
+  };
+
+  // Handle form submission - FIXED VERSION
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setIsSubmitting(true);
+    if (isSubmitting) return;
 
     try {
-      // Validate required address fields
-      if (!formData.street_name || !formData.house_number || !formData.city || !formData.zip_code) {
-        showNotification('Street name, house number, city, and ZIP code are required', 'error');
-        setIsSubmitting(false);
-        return;
-      }
+      setIsSubmitting(true);
 
-      if (!formData.maxOccupancy || formData.maxOccupancy < 1) {
+      // Basic validations
+      if (formData.maxOccupancy < 1) {
         showNotification('Maximum occupancy must be at least 1', 'error');
-        setIsSubmitting(false);
         return;
       }
 
-      // Check if tenants exceed max occupancy
       if (tenantData.length > formData.maxOccupancy) {
         showNotification(`Number of tenants (${tenantData.length}) exceeds maximum occupancy (${formData.maxOccupancy})`, 'error');
-        setIsSubmitting(false);
         return;
       }
 
+      // Clean form data
       const cleanedFormData = { ...formData };
-
-      // Remove any invalid/legacy fields
       delete cleanedFormData.rentInSentance;
-      delete cleanedFormData.address; // Remove legacy address field if present
+      delete cleanedFormData.address;
 
-      // Ensure managementFee and rentCost are always sent (for backend validation)
-      // For non-admin users, these will use default values
+      // For non-admin users, remove sensitive fields
       if (!isAdmin) {
-        // Set default values based on model for non-admin users
-        if (cleanedFormData.model === PROPERTY_MODELS.MANAGEMENT) {
-          cleanedFormData.managementFee = 0.00;
-          cleanedFormData.rentCost = 0.00;
-        } else {
-          cleanedFormData.managementFee = 0.00;
-          cleanedFormData.rentCost = 0.00;
-        }
-        // Force management model for non-admin users
-        cleanedFormData.model = PROPERTY_MODELS.MANAGEMENT;
+        delete cleanedFormData.managementFee;
+        delete cleanedFormData.rentCost;
+        delete cleanedFormData.model;
       }
 
+      // Process tenants for backend
       const processedTenants = tenantData.map(tenant => {
         const isExistingTenant = tenant.id && !String(tenant.id).startsWith('temp-');
 
         if (isExistingTenant) {
           return {
             id: tenant.id,
-            name: tenant.name || `${tenant.firstName} ${tenant.lastName}`.trim(),
+            name: tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim(),
             email: tenant.email || '',
             phone: tenant.phone || '',
             isExistingTenant: true
           };
         } else {
           return {
-            name: tenant.name || `${tenant.firstName} ${tenant.lastName}`.trim(),
+            name: tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim(),
             email: tenant.email || '',
             phone: tenant.phone || '',
             bornOn: tenant.bornOn || '',
@@ -382,8 +393,14 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         new_tenants: processedTenants
       };
 
+      console.log('Submitting payload:', payload);
+
       if (isEdit) {
-        await api.put(`/edit/${initialData.id}`, payload);
+        // Use role-specific endpoint
+        const endpoint = isAdmin ?
+          `/admin/edit/${initialData.id}` :
+          `/user/edit/${initialData.id}`;
+        await api.put(endpoint, payload);
         showNotification('Apartment updated successfully', 'success');
       } else {
         await api.post('/add', payload);
@@ -392,70 +409,101 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
 
       onSuccess();
     } catch (error) {
-      console.error(error);
+      console.error('Submit error:', error);
       showNotification(`Error: ${error.response?.data?.message || error.message}`, 'error');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Handle delete apartment
+  // Handle delete apartment - admin only
   const handleDelete = async () => {
-    if (!window.confirm("Are you sure you want to delete this apartment?")) {
+    if (!isAdmin) {
+      showNotification('Only administrators can delete apartments', 'error');
       return;
     }
-    setIsSubmitting(true);
+
+    if (!window.confirm("Are you sure you want to delete this apartment? This action cannot be undone.")) {
+      return;
+    }
+
     try {
-      await api.delete(`/delete/${initialData.id}`);
-      showNotification("Apartment deleted successfully", "success");
+      setIsSubmitting(true);
+      await api.delete(`/apartments/${initialData.id}`);
+      showNotification('Apartment deleted successfully', 'success');
       onSuccess();
     } catch (error) {
-      console.error(error);
-      showNotification(`Error deleting apartment: ${error.message}`, "error");
+      console.error('Error deleting apartment:', error);
+      showNotification(`Error deleting apartment: ${error.response?.data?.message || error.message}`, 'error');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Props to pass to ApartmentDetailsForm
-  const formProps = {
-    formData,
-    tenantData,
-    handleChange,
-    handleTenantChange,
-    handleSubmit,
-    handleDelete,
-    isEdit,
-    isSubmitting,
-    isAdmin,
-    tenantSelection: (
-      <TenantSelector
-        tenantData={tenantData}
-        availableTenants={availableTenants}
-        addedTenantIds={addedTenantIds}
-        loading={loading}
-        onTenantSelection={handleTenantSelection}
-        onSetTenantAsPrimary={setTenantAsPrimary}
-        onRemoveTenant={removeTenant}
-        onOpenTenantForm={() => setTenantFormOpen(true)}
-        maxOccupancy={formData.maxOccupancy}
-        currentTenantCount={tenantData.length}
-      />
-    )
-  };
-
   return (
-    <Paper sx={{ p: 4, mb: 4 }}>
-      <Typography variant="h5" gutterBottom align="center" sx={{ mb: 3 }}>
-        {isEdit ? 'Edit Apartment Details' : 'Add New Apartment'}
-      </Typography>
-      <ApartmentDetailsForm {...formProps} />
+    <Paper elevation={3} sx={{ p: 3, maxWidth: 1200, mx: 'auto' }}>
+      <Box sx={{ mb: 3 }}>
+        <Typography variant="h4" gutterBottom>
+          {isEdit ? 'Edit Apartment' : 'Add New Apartment'}
+        </Typography>
+        {!isAdmin && (
+          <Box sx={{
+            p: 2,
+            bgcolor: 'info.light',
+            borderRadius: 1,
+            mb: 2,
+            border: '1px solid',
+            borderColor: 'info.main'
+          }}>
+            <Typography variant="body2" color="info.dark">
+              📝 <strong>User Mode:</strong> You can edit apartment details and landlord information,
+              but financial management settings (profit calculations) are only visible to administrators for privacy.
+            </Typography>
+          </Box>
+        )}
+      </Box>
 
+      <form onSubmit={handleSubmit}>
+        <ApartmentDetailsForm
+          formData={formData}
+          handleChange={handleChange}
+          tenantData={tenantData}
+          handleTenantChange={handleTenantChange}
+          setTenantAsPrimary={setTenantAsPrimary}
+          removeTenant={removeTenant}
+          addNewTenant={addNewTenant}
+          handleTenantSelection={handleTenantSelection}
+          availableTenants={availableTenants}
+          loading={loading}
+          isSubmitting={isSubmitting}
+          isEdit={isEdit}
+          handleDelete={handleDelete}
+          showNotification={showNotification}
+          isAdmin={isAdmin}
+          addedTenantIds={addedTenantIds}
+          // Pass tenant selection component as prop
+          tenantSelection={
+            <TenantSelector
+              tenantData={tenantData}
+              availableTenants={availableTenants}
+              addedTenantIds={addedTenantIds}
+              loading={loading}
+              onTenantSelection={handleTenantSelection}
+              onSetTenantAsPrimary={setTenantAsPrimary}
+              onRemoveTenant={removeTenant}
+              onOpenTenantForm={addNewTenant}
+            />
+          }
+        />
+      </form>
+
+      {/* Tenant Form Dialog */}
       <TenantFormDialog
         open={tenantFormOpen}
         onClose={() => setTenantFormOpen(false)}
-        onSave={handleNewTenantCreated}
+        onTenantCreated={handleTenantCreated}
         showNotification={showNotification}
+        createOnly={true}
       />
     </Paper>
   );

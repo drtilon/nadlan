@@ -143,7 +143,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       try {
         setLoading(true);
         // Use existing tenant endpoint from tenants.py
-        const response = await api.get('/tenants/list');
+        const response = await api.get('/tenants/available');
 
         if (response.data && Array.isArray(response.data)) {
           setAvailableTenants(response.data);

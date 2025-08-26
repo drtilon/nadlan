@@ -11,55 +11,77 @@ from activity_logger import ActivityLogger
 
 tenants_bp = Blueprint("tenants_bp", __name__)
 
+@tenants_bp.route("/tenants/available", methods=["GET"])
+@token_required
+def get_available_tenants():
+    """
+    Get tenants that are not currently assigned to any apartment
+    """
+    try:
+        # Get tenants where apartment_id is NULL (not assigned to any apartment)
+        available_tenants = Tenant.query.filter_by(apartment_id=None).all()
+
+        # Convert to dictionary format
+        tenants_data = []
+        for tenant in available_tenants:
+            tenant_dict = tenant.to_dict(include_apartment=False, include_contracts=False)
+            tenants_data.append(tenant_dict)
+
+        # Log activity
+        ActivityLogger.log_activity(
+            action="list_available",
+            entity_type="tenant",
+            details={"count": len(tenants_data)}
+        )
+
+        current_app.logger.info(f"Retrieved {len(tenants_data)} available (unassigned) tenants")
+        return jsonify(tenants_data), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error listing available tenants: {e}")
+        return jsonify({"message": "Error listing available tenants", "error": str(e)}), 500
+
 
 @tenants_bp.route("/tenants/list", methods=["GET"])
 @token_required
 def list_tenants() -> Tuple[Response, int]:
     """
-    Returns a list of all tenants in the system.
+    Lists all tenants with optional filtering.
     Now allows default users to see tenant information.
     """
     try:
-        # Query all tenants from the database
-        tenants = Tenant.query.all()
+        # Check for filter parameter
+        filter_type = request.args.get("filter", "all")  # 'all', 'available', 'assigned'
+
+        if filter_type == "available":
+            # Only tenants not assigned to any apartment
+            tenants = Tenant.query.filter_by(apartment_id=None).all()
+        elif filter_type == "assigned":
+            # Only tenants assigned to apartments
+            tenants = Tenant.query.filter(Tenant.apartment_id.isnot(None)).all()
+        else:
+            # All tenants (default behavior)
+            tenants = Tenant.query.all()
 
         # Convert to dictionary format
         tenants_data = []
         for tenant in tenants:
-            tenant_dict = {
-                "id": tenant.id,
-                "name": tenant.name,
-                "email": tenant.email,
-                "phone": tenant.phone,
-                "apartment_id": tenant.apartment_id,
-                "bornOn": tenant.bornOn,
-                "refundIban": tenant.refundIban,
-            }
-
-            # If tenant is associated with an apartment, add apartment address
-            if tenant.apartment_id:
-                apartment = Apartment.query.get(tenant.apartment_id)
-                if apartment:
-                    tenant_dict["apartment_address"] = apartment.address
-
+            tenant_dict = tenant.to_dict(include_apartment=True, include_contracts=False)
             tenants_data.append(tenant_dict)
-
-        # REMOVED: No longer filtering sensitive information for non-admin users
-        # All authenticated users can now see tenant details
 
         # Log this activity
         ActivityLogger.log_activity(
             action="list",
             entity_type="tenant",
-            details={"count": len(tenants_data)}
+            details={"count": len(tenants_data), "filter": filter_type}
         )
 
+        current_app.logger.info(f"Retrieved {len(tenants_data)} tenants (filter: {filter_type})")
         return jsonify(tenants_data), 200
 
     except Exception as e:
         current_app.logger.error(f"Error listing tenants: {e}")
         return jsonify({"message": "Error listing tenants", "error": str(e)}), 500
-
 
 @tenants_bp.route("/tenants/add", methods=["POST"])
 @token_required

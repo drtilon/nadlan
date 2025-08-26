@@ -5,7 +5,7 @@ from .auth import token_required, role_required
 from extentions import db
 from models.models import Apartment, Payment, Tenant, ContractPeriod
 from datetime import datetime, date, timedelta
-from sqlalchemy import func, text, and_, or_, case, desc, asc
+from sqlalchemy import func, text, and_, or_, case, desc, asc,extract
 from typing import Optional, Dict, List, Any, Union
 import json
 from decimal import Decimal
@@ -154,7 +154,7 @@ def calculate_outstanding_for_contract(apartment: Apartment, contract: ContractP
 @token_required
 @role_required("admin")
 def get_financial_overview():
-    """Get simplified financial overview with contract period support"""
+    """Get simplified financial overview - shows ALL payments collected this month"""
     try:
         current_date: datetime = datetime.now()
         current_year: int = request.args.get("year", current_date.year, type=int)
@@ -175,8 +175,22 @@ def get_financial_overview():
         else:
             current_month_end = date(current_year, current_month + 1, 1) - timedelta(days=1)
 
-        # Calculate collected amount for current month (only from active contracts)
+        # FIXED: Calculate ALL payments made THIS MONTH (regardless of which contract they're for)
+        current_month_payments = Payment.query.filter(
+            and_(
+                extract('month', Payment.paymentDate) == current_month,
+                extract('year', Payment.paymentDate) == current_year,
+                Payment.status.in_(["paid", "completed", "partial"])
+            )
+        ).all()
+
+        # Calculate total collected this month from ALL payments
         current_month_collected = 0.0
+        for payment in current_month_payments:
+            collected_amount = extract_payment_amount(payment)
+            current_month_collected += collected_amount
+
+        # Calculate outstanding from active contracts
         current_month_outstanding = 0.0
         apartments_with_contracts = 0
         apartments_with_payments = 0
@@ -188,20 +202,10 @@ def get_financial_overview():
             if current_contract:
                 apartments_with_contracts += 1
 
-                # Get payments for this contract in current month
-                current_month_payments = get_contract_payments(
-                    apartment.id,
-                    current_contract.id,
-                    current_month_start,
-                    current_month_end
-                )
-
-                if current_month_payments:
+                # Check if this apartment made any payments this month
+                apartment_payments_this_month = [p for p in current_month_payments if p.apartment_id == apartment.id]
+                if apartment_payments_this_month:
                     apartments_with_payments += 1
-
-                # Add to collected amount
-                collected_this_month = sum(extract_payment_amount(p) for p in current_month_payments)
-                current_month_collected += collected_this_month
 
                 # Calculate outstanding for this contract
                 outstanding = calculate_outstanding_for_contract(
@@ -214,28 +218,19 @@ def get_financial_overview():
         # Calculate current month profit (same as before)
         current_month_profit = sum(calculate_apartment_profit(apt) for apt in apartments)
 
-        # Get monthly breakdown for the year
+        # FIXED: Get monthly breakdown showing ALL payments made in each month
         monthly_breakdown = []
         for month_idx, month in enumerate(month_names):
-            month_start = date(current_year, month_idx + 1, 1)
-            if month_idx == 11:  # December
-                month_end = date(current_year + 1, 1, 1) - timedelta(days=1)
-            else:
-                month_end = date(current_year, month_idx + 2, 1) - timedelta(days=1)
+            # Get ALL payments made in this month (not just from specific contracts)
+            monthly_payments = Payment.query.filter(
+                and_(
+                    extract('month', Payment.paymentDate) == month_idx + 1,
+                    extract('year', Payment.paymentDate) == current_year,
+                    Payment.status.in_(["paid", "completed", "partial"])
+                )
+            ).all()
 
-            # Calculate collected for this month across all active contracts
-            month_collected = 0.0
-
-            for apartment in apartments:
-                current_contract = get_current_contract_for_apartment(apartment.id)
-                if current_contract:
-                    month_payments = get_contract_payments(
-                        apartment.id,
-                        current_contract.id,
-                        month_start,
-                        month_end
-                    )
-                    month_collected += sum(extract_payment_amount(p) for p in month_payments)
+            month_collected = sum(extract_payment_amount(p) for p in monthly_payments)
 
             monthly_breakdown.append({
                 "month": month,
@@ -258,7 +253,8 @@ def get_financial_overview():
                 "apartments_with_contracts": apartments_with_contracts,
                 "apartments_with_payments": apartments_with_payments,
                 "year_queried": current_year,
-                "current_month": month_names[current_month - 1]
+                "current_month": month_names[current_month - 1],
+                "current_month_payments_count": len(current_month_payments)
             }
         }
 

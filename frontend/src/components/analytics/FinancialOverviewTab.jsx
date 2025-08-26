@@ -178,7 +178,7 @@ function FinancialOverviewTab({ loading, financialData, selectedYear }) {
 
         <Grid item xs={12} md={4}>
           <MetricCard
-            title="Current Month Outstanding"
+            title="Current Outstanding Till This Month"
             value={financialData.current_month?.outstanding || 0}
             icon={<WarningIcon />}
             color={COLORS.error}

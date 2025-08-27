@@ -1,4 +1,4 @@
-// components/EnhancedTenantForm.jsx - UPDATED with Passport ID field
+// components/tenant/EnhancedTenantForm.jsx - FIXED VERSION
 import React, { useState, useEffect } from 'react';
 import {
   Grid,
@@ -9,9 +9,21 @@ import {
   LinearProgress,
   Divider,
   Typography,
-  Box
+  Box,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Chip
 } from '@mui/material';
-import { PersonAdd as PersonAddIcon, Save as SaveIcon, ContactPage as PassportIcon, Wc as GenderIcon } from '@mui/icons-material';
+import {
+  PersonAdd as PersonAddIcon,
+  Save as SaveIcon,
+  ContactPage as PassportIcon,
+  Wc as GenderIcon,
+  Home as HomeIcon,
+  AttachMoney as MoneyIcon
+} from '@mui/icons-material';
 
 function EnhancedTenantForm({
   formData,
@@ -30,10 +42,10 @@ function EnhancedTenantForm({
   // Split name into first and last name when editing
   useEffect(() => {
     if (editingTenant && formData.name) {
-      const nameParts = formData.name.split(' ', 2);
+      const nameParts = formData.name.split(' ');
       setNameFields({
         firstName: nameParts[0] || '',
-        lastName: nameParts.length > 1 ? nameParts[1] : ''
+        lastName: nameParts.slice(1).join(' ') || ''
       });
     } else if (!editingTenant) {
       setNameFields({
@@ -41,7 +53,7 @@ function EnhancedTenantForm({
         lastName: ''
       });
     }
-  }, [editingTenant]);
+  }, [editingTenant, formData.name]);
 
   // Update full name when first or last name changes
   useEffect(() => {
@@ -67,6 +79,16 @@ function EnhancedTenantForm({
       [name]: value
     }));
   };
+
+  // Get current apartment details
+  const getCurrentApartment = () => {
+    if (formData.apartment_id) {
+      return apartments.find(apt => apt.id === parseInt(formData.apartment_id));
+    }
+    return null;
+  };
+
+  const currentApartment = getCurrentApartment();
 
   return (
     <>
@@ -237,36 +259,113 @@ function EnhancedTenantForm({
           <Grid item xs={12}>
             <Box sx={{ mt: 2 }}>
               <Typography variant="subtitle1" gutterBottom fontWeight="medium">
-                Property Assignment
+                Assigned Property & Contract
               </Typography>
               <Divider sx={{ mb: 2 }} />
             </Box>
           </Grid>
 
           <Grid item xs={12}>
-            <TextField
-              select
-              fullWidth
-              label="Assigned Apartment"
-              name="apartment_id"
-              value={formData.apartment_id || ''}
-              onChange={handleInputChange}
-              variant="filled"
-              InputLabelProps={{
-                sx: { fontSize: '1rem', fontWeight: 'medium' }
-              }}
-              SelectProps={{
-                native: true,
-              }}
-            >
-              <option value=""></option>
-              {apartments.map((apartment) => (
-                <option key={apartment.id} value={apartment.id}>
-                  {apartment.address}
-                </option>
-              ))}
-            </TextField>
+            <FormControl fullWidth variant="filled">
+              <InputLabel sx={{ fontSize: '1rem', fontWeight: 'medium' }}>
+                Assigned Apartment
+              </InputLabel>
+              <Select
+                name="apartment_id"
+                value={formData.apartment_id || ''}
+                onChange={handleInputChange}
+                label="Assigned Apartment"
+              >
+                <MenuItem value="">
+                  <em>No apartment assigned</em>
+                </MenuItem>
+                {apartments.map((apartment) => (
+                  <MenuItem key={apartment.id} value={apartment.id}>
+                    <Box sx={{ width: '100%' }}>
+                      <Typography variant="body1">
+                        {apartment.address}
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 1, mt: 0.5, flexWrap: 'wrap' }}>
+                        <Chip
+                          label={`€${apartment.rent || apartment.monthly_rent || 0}/month`}
+                          size="small"
+                          icon={<MoneyIcon />}
+                          color="primary"
+                          variant="outlined"
+                        />
+                        {apartment.status && (
+                          <Chip
+                            label={apartment.status}
+                            size="small"
+                            color={apartment.status === 'occupied' ? 'success' : 'default'}
+                            variant="outlined"
+                          />
+                        )}
+                        {apartment.tenants && apartment.tenants.length > 0 && (
+                          <Chip
+                            label={`${apartment.tenants.length} tenant(s)`}
+                            size="small"
+                            variant="outlined"
+                          />
+                        )}
+                      </Box>
+                    </Box>
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
           </Grid>
+
+          {/* Show current apartment details if selected */}
+          {currentApartment && (
+            <Grid item xs={12}>
+              <Paper variant="outlined" sx={{ p: 2, bgcolor: 'background.default' }}>
+                <Typography variant="subtitle2" gutterBottom color="primary">
+                  Selected Apartment Details:
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">
+                      Address
+                    </Typography>
+                    <Typography variant="body1">
+                      {currentApartment.address}
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <Typography variant="body2" color="text.secondary">
+                      Monthly Rent
+                    </Typography>
+                    <Typography variant="body1">
+                      €{currentApartment.rent || currentApartment.monthly_rent || 0}
+                    </Typography>
+                  </Grid>
+                  {currentApartment.landlord_name && (
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body2" color="text.secondary">
+                        Landlord
+                      </Typography>
+                      <Typography variant="body1">
+                        {currentApartment.landlord_name}
+                      </Typography>
+                    </Grid>
+                  )}
+                  {currentApartment.contract_info && (
+                    <Grid item xs={12} sm={6}>
+                      <Typography variant="body2" color="text.secondary">
+                        Contract Status
+                      </Typography>
+                      <Chip
+                        label={currentApartment.contract_info.status || 'No Contract'}
+                        size="small"
+                        color={currentApartment.contract_info.status === 'active' ? 'success' : 'default'}
+                      />
+                    </Grid>
+                  )}
+                </Grid>
+              </Paper>
+            </Grid>
+          )}
         </Grid>
       </DialogContent>
 
@@ -282,9 +381,9 @@ function EnhancedTenantForm({
           onClick={handleSubmit}
           variant="contained"
           color="primary"
-          disabled={formSubmitting}
+          disabled={formSubmitting || !nameFields.firstName || !nameFields.lastName}
           startIcon={formSubmitting ?
-            <LinearProgress size={20} /> :
+            <CircularProgress size={20} /> :
             (editingTenant ? <SaveIcon /> : <PersonAddIcon />)
           }
         >

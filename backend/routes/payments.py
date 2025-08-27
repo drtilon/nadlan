@@ -86,103 +86,111 @@ def get_payment_history(apartment_id):
         current_app.logger.error(f"Error retrieving payment history: {e}")
         return jsonify({"message": "Error retrieving payment history", "error": str(e)}), 500
 
-@payments_bp.route("/payment", methods=["POST"])
+@payments_bp.route("/payment/individual", methods=["POST"])
 @token_required
-@role_required("admin")
 def add_individual_payment():
-    """
-    Add an individual payment record.
-    FIXED: Use payment_date instead of paymentDate
-    """
+    """Add an individual payment for a specific tenant"""
     try:
         data = request.get_json()
         if not data:
             return jsonify({"message": "No data provided"}), 400
 
-        # Required fields
-        required_fields = ['apartment_id', 'amount', 'tenant_name']
-        for field in required_fields:
-            if field not in data:
-                return jsonify({"message": f"Missing required field: {field}"}), 400
-
-        apartment_id = data['apartment_id']
-        amount = float(data['amount'])
-        tenant_name = data['tenant_name']
+        # Extract and validate required fields
+        apartment_id = data.get('apartment_id')
+        tenant_name = data.get('tenant_name')
+        amount = data.get('amount')
         payment_method = data.get('payment_method', 'bank_transfer')
+        payment_date_str = data.get('payment_date')
         payment_type = data.get('payment_type', 'rent')
-        notes = data.get('notes', '')
         month = data.get('month')
-        year = data.get('year', datetime.now().year)
+        year = data.get('year')
+        notes = data.get('notes', '')
+
+        if not all([apartment_id, tenant_name, amount, payment_date_str]):
+            return jsonify({"message": "Missing required fields: apartment_id, tenant_name, amount, payment_date"}), 400
+
+        # Validate apartment exists
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
+
+        # Validate tenant exists
+        tenant = Tenant.query.filter_by(name=tenant_name).first()
+        if not tenant:
+            return jsonify({"message": "Tenant not found"}), 404
 
         # Parse payment date
-        payment_date = None
-        if data.get('payment_date'):
-            try:
-                if 'T' in data['payment_date'] or 'Z' in data['payment_date']:
-                    payment_date = datetime.fromisoformat(data['payment_date'].replace('Z', '+00:00'))
-                else:
-                    payment_date = datetime.strptime(data['payment_date'], '%Y-%m-%d')
-            except ValueError:
-                payment_date = datetime.utcnow()
+        try:
+            payment_date = datetime.strptime(payment_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
 
-        # Create tenant data structure for individual payment
+        # Validate amount
+        try:
+            amount = float(amount)
+            if amount <= 0:
+                return jsonify({"message": "Amount must be greater than 0"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"message": "Invalid amount"}), 400
+
+        # Create unique month identifier for individual payments
+        month_identifier = f"individual_{tenant_name}_{payment_date.strftime('%Y%m%d_%H%M%S')}"
+
+        # Create tenant data structure
         tenant_data = [{
-            "name": tenant_name,
+            "id": tenant.id,
+            "name": tenant.name,
             "amountPaid": amount,
             "amountDue": amount,
             "paid": True
         }]
 
-        # For non-rent payments, create unique identifier
-        if payment_type != 'rent':
-            month = f"{payment_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        elif not month:
-            month = datetime.now().strftime('%B')
-
-        # Create new payment record - FIXED: Use new model structure
+        # Create new payment record
         new_payment = Payment(
             apartment_id=apartment_id,
-            month=month,
-            year=year,
-            amount=amount,
-            payment_date=payment_date,
-            payment_method=payment_method,
-            payment_type=payment_type,
+            month=month_identifier,
+            year=payment_date.year,
+            status='paid',
+            tenants=json.dumps(tenant_data),
+            internet=0.0,
+            electricity=0.0,
+            other=0.0,
+            extraPayments="{}",
+            paymentDate=payment_date,
+            paymentMethod=payment_method,
             notes=notes,
-            created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
 
-        # Add legacy fields for backward compatibility if they exist
-        if hasattr(new_payment, 'status'):
-            new_payment.status = 'paid'
-        if hasattr(new_payment, 'tenants'):
-            new_payment.tenants = json.dumps(tenant_data)
-        if hasattr(new_payment, 'tenant_name'):
-            new_payment.tenant_name = tenant_name
+        # Set the amount field if it exists
+        if hasattr(new_payment, 'amount'):
+            new_payment.amount = amount
 
         db.session.add(new_payment)
-        db.session.flush()
-        payment_id = new_payment.id
         db.session.commit()
 
-        # Log the payment addition
-        ActivityLogger.log_payment_action(
-            action="add_individual",
-            payment_id=payment_id,
-            apartment_id=apartment_id,
+        # Log activity
+        ActivityLogger.log_activity(
+            action="add_individual_payment",
+            entity_type="payment",
+            entity_id=new_payment.id,
             details={
+                "apartment_id": apartment_id,
+                "tenant_name": tenant_name,
                 "amount": amount,
-                "tenant": tenant_name,
                 "payment_type": payment_type,
-                "month": month,
-                "year": year
+                "payment_date": payment_date.isoformat()
             }
         )
 
         return jsonify({
             "message": "Individual payment added successfully",
-            "payment_id": payment_id
+            "payment_id": new_payment.id,
+            "tenant_name": tenant_name,
+            "apartment_address": apartment.address,
+            "amount": amount,
+            "payment_date": payment_date.isoformat(),
+            "payment_type": payment_type
         }), 201
 
     except Exception as e:

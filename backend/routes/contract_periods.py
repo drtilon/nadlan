@@ -246,101 +246,6 @@ def delete_contract_period(contract_id):
         db.session.rollback()
         return jsonify({"message": "Error deleting contract period", "error": str(e)}), 500
 
-# ================ NEW MOVE-OUT ENDPOINTS ================
-
-@contract_periods_bp.route("/contract-tenants/<int:contract_tenant_id>/move-out", methods=["PUT"])
-@token_required
-def move_out_tenant(contract_tenant_id):
-    """Move out a tenant by setting their move_out_date"""
-    try:
-        contract_tenant = ContractTenant.query.get(contract_tenant_id)
-        if not contract_tenant:
-            return jsonify({"message": "Contract tenant record not found"}), 404
-
-        tenant = contract_tenant.tenant
-        contract = db.session.query(ContractPeriod).get(contract_tenant.contract_period_id)
-
-        if not tenant:
-            return jsonify({"message": "Associated tenant not found"}), 404
-        if not contract:
-            return jsonify({"message": "Associated contract not found"}), 404
-
-        data = request.get_json()
-        move_out_date_str = data.get('move_out_date')
-
-        if not move_out_date_str:
-            return jsonify({"message": "move_out_date is required"}), 400
-
-        try:
-            move_out_date = datetime.strptime(move_out_date_str, '%Y-%m-%d').date()
-        except ValueError:
-            return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
-
-        if contract_tenant.move_in_date and move_out_date < contract_tenant.move_in_date:
-            return jsonify({"message": "Move-out date cannot be before move-in date"}), 400
-
-        if move_out_date > date.today():
-            return jsonify({"message": "Move-out date cannot be in the future"}), 400
-
-        # Update the move-out date
-        contract_tenant.move_out_date = move_out_date
-
-        # Add notes about the move-out
-        notes = data.get('notes', '')
-        if notes:
-            existing_notes = contract_tenant.notes or ''
-            contract_tenant.notes = f"{existing_notes}\n\nMoved out on {move_out_date}: {notes}".strip()
-        else:
-            existing_notes = contract_tenant.notes or ''
-            contract_tenant.notes = f"{existing_notes}\n\nMoved out on {move_out_date}".strip()
-
-        # IMPORTANT: Update tenant's apartment_id to None if they're no longer in any active contract
-        active_contracts = db.session.query(ContractTenant)\
-            .join(ContractPeriod)\
-            .filter(
-                ContractTenant.tenant_id == tenant.id,
-                ContractTenant.move_out_date.is_(None),
-                ContractPeriod.status == 'active'
-            ).count()
-
-        if active_contracts == 0:  # No active contracts after this move-out
-            tenant.apartment_id = None
-
-        db.session.commit()
-
-        ActivityLogger.log_activity(
-            action="move_out",
-            entity_type="tenant",
-            entity_id=tenant.id,
-            details={
-                "move_out_date": move_out_date.isoformat(),
-                "contract_tenant_id": contract_tenant_id,
-                "contract_id": contract.id,
-                "apartment_id": contract.apartment_id,
-                "notes": notes
-            }
-        )
-
-        current_app.logger.info(f"Tenant {tenant.name} moved out on {move_out_date} from contract {contract.contract_number}")
-
-        return jsonify({
-            "message": f"Tenant {tenant.name} moved out successfully",
-            "tenant": {
-                "id": tenant.id,
-                "name": tenant.name,
-                "move_out_date": move_out_date.isoformat()
-            },
-            "contract": {
-                "id": contract.id,
-                "contract_number": contract.contract_number
-            }
-        }), 200
-
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.error(f"Error moving out tenant: {e}")
-        return jsonify({"message": "Error moving out tenant", "error": str(e)}), 500
-
 @contract_periods_bp.route("/tenants/<int:tenant_id>/move-history", methods=["GET"])
 @token_required
 def get_tenant_move_history(tenant_id):
@@ -424,6 +329,87 @@ def get_tenant_move_history(tenant_id):
         current_app.logger.error(f"Error retrieving tenant move history: {e}")
         return jsonify({"message": "Error retrieving tenant move history", "error": str(e)}), 500
 
+# routes/contract_periods.py - ADD THESE MISSING ENDPOINTS
+
+# Add this import at the top if not already present
+from datetime import datetime, date
+import json
+
+# EXISTING MOVE-OUT ENDPOINT (already in your code, but fixed)
+@contract_periods_bp.route("/contract-tenants/<int:contract_tenant_id>/move-out", methods=["PUT"])
+@token_required
+def move_out_tenant(contract_tenant_id):
+    """Move out a tenant by setting their move_out_date"""
+    try:
+        contract_tenant = ContractTenant.query.get(contract_tenant_id)
+        if not contract_tenant:
+            return jsonify({"message": "Contract tenant record not found"}), 404
+
+        tenant = contract_tenant.tenant
+        contract = db.session.query(ContractPeriod).get(contract_tenant.contract_period_id)
+
+        if not tenant:
+            return jsonify({"message": "Associated tenant not found"}), 404
+        if not contract:
+            return jsonify({"message": "Associated contract not found"}), 404
+
+        data = request.get_json()
+        move_out_date_str = data.get('move_out_date')
+        notes = data.get('notes', '')
+
+        if not move_out_date_str:
+            return jsonify({"message": "move_out_date is required"}), 400
+
+        try:
+            move_out_date = datetime.strptime(move_out_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+        # Validate move_out_date is not before move_in_date
+        if contract_tenant.move_in_date and move_out_date <= contract_tenant.move_in_date:
+            return jsonify({"message": "Move-out date must be after move-in date"}), 400
+
+        # Update the contract tenant record
+        contract_tenant.move_out_date = move_out_date
+        if notes:
+            existing_notes = contract_tenant.notes or ""
+            contract_tenant.notes = f"{existing_notes}\nMoved out: {notes}".strip()
+
+        # Also update legacy tenant apartment_id to None if this was their current apartment
+        if tenant.apartment_id == contract.apartment_id:
+            tenant.apartment_id = None
+
+        db.session.commit()
+
+        ActivityLogger.log_activity(
+            action="move_out",
+            entity_type="tenant",
+            entity_id=tenant.id,
+            details={
+                "contract_tenant_id": contract_tenant_id,
+                "apartment_id": contract.apartment_id,
+                "apartment_address": contract.apartment.address if contract.apartment else None,
+                "move_out_date": move_out_date.isoformat(),
+                "notes": notes
+            }
+        )
+
+        return jsonify({
+            "message": f"Tenant {tenant.name} moved out successfully",
+            "tenant_name": tenant.name,
+            "apartment_address": contract.apartment.address if contract.apartment else None,
+            "move_out_date": move_out_date.isoformat(),
+            "contract_id": contract.id,
+            "contract_number": contract.contract_number
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error moving out tenant: {e}")
+        return jsonify({"message": "Error moving out tenant", "error": str(e)}), 500
+
+
+# EXISTING TRANSFER ENDPOINT (already in your code, but enhanced)
 @contract_periods_bp.route("/tenants/<int:tenant_id>/transfer", methods=["POST"])
 @token_required
 @role_required("admin")
@@ -442,6 +428,7 @@ def transfer_tenant_to_apartment(tenant_id):
         move_out_date_str = data.get('move_out_date')
         move_in_date_str = data.get('move_in_date')
         notes = data.get('notes', '')
+        assign_to_new_contract = data.get('assign_to_new_contract', True)
 
         if not new_apartment_id:
             return jsonify({"message": "new_apartment_id is required"}), 400
@@ -456,73 +443,60 @@ def transfer_tenant_to_apartment(tenant_id):
         except ValueError:
             return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
 
-        if move_in_date < move_out_date:
-            return jsonify({"message": "Move-in date cannot be before move-out date"}), 400
+        # Validate dates
+        if move_in_date <= move_out_date:
+            return jsonify({"message": "Move-in date must be after move-out date"}), 400
 
         # Step 1: Move out from current apartment
-        current_contract_tenants = ContractTenant.query.join(ContractPeriod).filter(
-            ContractTenant.tenant_id == tenant_id,
-            ContractTenant.move_out_date.is_(None),
-            ContractPeriod.status == 'active'
-        ).all()
-
-        moved_out_contracts = []
-        for ct in current_contract_tenants:
-            ct.move_out_date = move_out_date
-            if notes:
-                existing_notes = ct.notes or ''
-                ct.notes = f"{existing_notes}\n\nMoved out on {move_out_date}: {notes}".strip()
-            moved_out_contracts.append(ct.contract_period_id)
-
-        # Step 2: Update tenant's apartment_id
-        old_apartment_id = tenant.apartment_id
-        tenant.apartment_id = new_apartment_id
-
-        # Step 3: Optionally move into new apartment
-        new_contract_tenant = None
-        if data.get('assign_to_new_contract', True):
-            active_contract = ContractPeriod.query.filter_by(
-                apartment_id=new_apartment_id,
-                status='active'
-            ).filter(
-                ContractPeriod.start_date <= move_in_date
-            ).filter(
-                or_(
-                    ContractPeriod.end_date.is_(None),
-                    ContractPeriod.end_date >= move_in_date
-                )
+        old_apartment_id = None
+        current_contract_tenant = db.session.query(ContractTenant)\
+            .join(ContractPeriod)\
+            .filter(
+                ContractTenant.tenant_id == tenant_id,
+                ContractTenant.move_out_date.is_(None),
+                ContractPeriod.status == 'active'
             ).first()
 
-            if active_contract:
-                existing_assignment = ContractTenant.query.filter_by(
-                    contract_period_id=active_contract.id,
-                    tenant_id=tenant_id
+        if current_contract_tenant:
+            old_apartment_id = current_contract_tenant.contract_period.apartment_id
+            current_contract_tenant.move_out_date = move_out_date
+            if notes:
+                existing_notes = current_contract_tenant.notes or ""
+                current_contract_tenant.notes = f"{existing_notes}\nTransferred: {notes}".strip()
+
+        # Step 2: Update legacy apartment_id
+        tenant.apartment_id = new_apartment_id
+
+        # Step 3: Assign to new apartment's contract if requested
+        new_contract_tenant = None
+        if assign_to_new_contract:
+            # Find active contract in new apartment
+            active_contract = db.session.query(ContractPeriod)\
+                .filter(
+                    ContractPeriod.apartment_id == new_apartment_id,
+                    ContractPeriod.status == 'active'
                 ).first()
 
-                if not existing_assignment:
-                    active_tenants_count = ContractTenant.query.filter_by(
-                        contract_period_id=active_contract.id
-                    ).filter(ContractTenant.move_out_date.is_(None)).count()
+            if active_contract:
+                # Calculate rent share (default to equal share among all tenants)
+                existing_tenants = db.session.query(ContractTenant)\
+                    .filter(
+                        ContractTenant.contract_period_id == active_contract.id,
+                        ContractTenant.move_out_date.is_(None)
+                    ).count()
 
-                    rent_share = 100.0 / (active_tenants_count + 1)
+                rent_share = 100.0 / (existing_tenants + 1)
 
-                    existing_tenants = ContractTenant.query.filter_by(
-                        contract_period_id=active_contract.id
-                    ).filter(ContractTenant.move_out_date.is_(None)).all()
-
-                    for et in existing_tenants:
-                        et.rent_share_percentage = rent_share
-
-                    new_contract_tenant = ContractTenant(
-                        contract_period_id=active_contract.id,
-                        tenant_id=tenant_id,
-                        is_primary=False,
-                        move_in_date=move_in_date,
-                        rent_share_percentage=rent_share,
-                        notes=f"Transferred from apartment {old_apartment_id} on {move_out_date}",
-                        created_at=datetime.utcnow()
-                    )
-                    db.session.add(new_contract_tenant)
+                new_contract_tenant = ContractTenant(
+                    contract_period_id=active_contract.id,
+                    tenant_id=tenant_id,
+                    is_primary=False,
+                    move_in_date=move_in_date,
+                    rent_share_percentage=rent_share,
+                    notes=f"Transferred from apartment {old_apartment_id} on {move_out_date}",
+                    created_at=datetime.utcnow()
+                )
+                db.session.add(new_contract_tenant)
 
         db.session.commit()
 

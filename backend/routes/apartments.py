@@ -1,1063 +1,467 @@
-# routes/apartments.py - UPDATED WITH LANDLORD SEMANTIC SEARCH
+# routes/apartments.py - FIXED VERSION with Complete Filtering Support
 import json
 import math
 from datetime import datetime, date, timedelta
-from flask import Blueprint, request, jsonify, current_app, g, Response
-from models.models import Apartment, Tenant, Landlord
+from flask import Blueprint, request, jsonify, current_app, g
+from models.models import Apartment, Tenant, Landlord, ContractPeriod, ContractTenant, Payment
 from .auth import token_required, role_required
 from extentions import db
-from activity_logger import ActivityLogger
-from typing import Tuple
-from sqlalchemy import or_, asc, desc, func, distinct
-from .contract_automation import (
-    create_automatic_contract,
-    update_contract_tenants,
-    extend_contract_date,
-    get_or_create_active_contract
-)
-apartments_bp = Blueprint("apartments_bp", __name__)
+from typing import Tuple, Optional
+from sqlalchemy import and_, or_, func
 
-# Constants
-APARTMENT_STATUS = {
-    'VACANT': 'vacant',
-    'OCCUPIED': 'occupied',
-    'CONTRACT_SENT': 'contract_sent'
-}
-
-PROPERTY_MODELS = {
-    'MANAGEMENT': 'management',
-    'RENTAL': 'rental'
-}
-
-# Constants for pagination
-DEFAULT_PAGE_SIZE = 12
-MAX_PAGE_SIZE = 100
-PAGE_SIZE_OPTIONS = [6, 12, 24, 48]
-
-# Status mappings for the new filter system
-STATUS_MAPPING = {
-    'Available': ['vacant', 'available'],
-    'Occupied': ['occupied'],
-    'Expiring': ['expiring_soon', 'contract_sent']  # For contracts expiring soon
-}
-
-def debug_print(message):
-    """Debug printing function"""
-    current_app.logger.info(f"[APARTMENTS DEBUG] {message}")
-
-
-def get_expiry_status(contract_end_date):
-    """Helper function to determine contract expiry status"""
-    if not contract_end_date:
-        return {'status': 'no_date', 'daysUntilExpiry': None}
-
-    today = date.today()
-    if isinstance(contract_end_date, str):
-        try:
-            contract_end_date = datetime.strptime(contract_end_date, '%Y-%m-%d').date()
-        except ValueError:
-            return {'status': 'invalid_date', 'daysUntilExpiry': None}
-
-    days_until_expiry = (contract_end_date - today).days
-
-    if days_until_expiry < 0:
-        return {'status': 'expired', 'daysUntilExpiry': days_until_expiry}
-    elif days_until_expiry <= 30:
-        return {'status': 'expiring_soon', 'daysUntilExpiry': days_until_expiry}
-    else:
-        return {'status': 'valid', 'daysUntilExpiry': days_until_expiry}
-
-
-def apply_filters(query, filters):
-    """Apply comprehensive filters to the apartment query"""
-
-    # Landlord text search filter - search by name or company
-    if filters.get('landlord'):
-        val = f"%{filters['landlord']}%"
-        query = query.join(Landlord).filter(
-            or_(
-                Landlord.name.ilike(val),
-                Landlord.company_name.ilike(val)
-            )
-        )
-
-    # Location filters
-    if filters.get('state'):
-        query = query.filter(Apartment.state.ilike(f"%{filters['state']}%"))
-
-    if filters.get('city'):
-        query = query.filter(Apartment.city.ilike(f"%{filters['city']}%"))
-
-    if filters.get('zip_code'):
-        query = query.filter(Apartment.zip_code.ilike(f"%{filters['zip_code']}%"))
-
-    # Gender filter
-    if filters.get('gender'):
-        if filters['gender'] in ['Female', 'Male']:
-            gender_mapping = {'Female': 'women_only', 'Male': 'men_only'}
-            query = query.filter(Apartment.genderPreference == gender_mapping[filters['gender']])
-        elif filters['gender'] == 'Mixed':
-            query = query.filter(Apartment.genderPreference == 'mixed')
-
-    # Rooms filter
-    if filters.get('rooms'):
-        if filters['rooms'] == '5+':
-            query = query.filter(Apartment.rooms >= 5)
-        else:
-            try:
-                rooms_count = int(filters['rooms'])
-                query = query.filter(Apartment.rooms == rooms_count)
-            except ValueError:
-                pass
-
-    # Size filter (m²)
-    if filters.get('size_range'):
-        size_range = filters['size_range']
-        if size_range == '<50':
-            query = query.filter(Apartment.size < 50)
-        elif size_range == '50–100':
-            query = query.filter(Apartment.size >= 50, Apartment.size < 100)
-        elif size_range == '100–150':
-            query = query.filter(Apartment.size >= 100, Apartment.size < 150)
-        elif size_range == '150+':
-            query = query.filter(Apartment.size >= 150)
-
-    # Floor filter
-    if filters.get('floor'):
-        query = query.filter(Apartment.floor == filters['floor'])
-
-    # Status filter - enhanced to support Available/Occupied/Expiring
-    if filters.get('status'):
-        status = filters['status']
-        if status == 'Available':
-            query = query.filter(Apartment.status.in_(['vacant', 'available']))
-        elif status == 'Occupied':
-            query = query.filter(Apartment.status == 'occupied')
-        elif status == 'Expiring':
-            # For expiring, we need to check contractEndDate
-            today = date.today()
-            expiring_date = today + timedelta(days=30)
-            query = query.filter(
-                Apartment.contractEndDate.between(today, expiring_date)
-            )
-
-    return query
-
-
-@apartments_bp.route("/filter-options", methods=["GET"])
-@token_required
-def get_filter_options() -> Tuple[Response, int]:
-    """
-    Get all available filter options for dropdowns
-    """
-    try:
-        # Get all unique landlords
-        landlords = db.session.query(
-            Landlord.id,
-            Landlord.company_name,
-            Landlord.name
-        ).all()
-
-        # Get all unique states
-        states = db.session.query(distinct(Apartment.state)).filter(
-            Apartment.state.isnot(None)
-        ).all()
-
-        # Get all unique cities
-        cities = db.session.query(distinct(Apartment.city)).filter(
-            Apartment.city.isnot(None)
-        ).all()
-
-        # Get all unique zip codes
-        zip_codes = db.session.query(distinct(Apartment.zip_code)).filter(
-            Apartment.zip_code.isnot(None)
-        ).all()
-
-        # Get all unique floors
-        floors = db.session.query(distinct(Apartment.floor)).filter(
-            Apartment.floor.isnot(None)
-        ).all()
-
-        response_data = {
-            "landlords": [
-                {
-                    "id": landlord.id,
-                    "name": f"{landlord.company_name} ({landlord.name})"
-                }
-                for landlord in landlords
-            ],
-            "states": [state[0] for state in states if state[0]],
-            "cities": [city[0] for city in cities if city[0]],
-            "zip_codes": [zip_code[0] for zip_code in zip_codes if zip_code[0]],
-            "floors": [floor[0] for floor in floors if floor[0]],
-            "genders": ["Female", "Male", "Mixed"],
-            "rooms": ["1", "2", "3", "4", "5+"],
-            "size_ranges": ["<50", "50–100", "100–150", "150+"],
-            "statuses": ["Available", "Occupied", "Expiring"]
-        }
-
-        return jsonify(response_data), 200
-
-    except Exception as e:
-        current_app.logger.error(f"Error getting filter options: {e}")
-        return jsonify({"message": "Error getting filter options", "error": str(e)}), 500
+apartments_bp = Blueprint("apartments", __name__)
 
 
 @apartments_bp.route("/list", methods=["GET"])
 @token_required
-def list_apartments_paginated() -> Tuple[Response, int]:
-    """
-    Get paginated apartment list with comprehensive search, sorting, and filtering.
-    Supports all the new filter dropdowns and sorting options.
-    """
+def list_apartments():
+    """List apartments with pagination and comprehensive filtering - used by ApartmentList.jsx"""
     try:
-        # Parse pagination parameters
-        page = max(0, int(request.args.get('page', 0)))
-        limit = min(int(request.args.get('limit', DEFAULT_PAGE_SIZE)), MAX_PAGE_SIZE)
-        offset = page * limit
+        # Get query parameters
+        page = request.args.get("page", 0, type=int)  # Frontend sends 0-based
+        limit = request.args.get("limit", 12, type=int)
+        sort = request.args.get("sort", "")
+        search = request.args.get("search", "")
 
-        # Parse search and filter parameters
-        search = request.args.get('search', '').strip()
-        sort = request.args.get('sort', 'id:1')  # Default to id ascending
-
-        # Parse sort parameter (e.g., 'expiry:1' or 'expiry:-1')
-        sort_field, sort_direction = sort.split(':') if ':' in sort else (sort, '1')
-        sort_direction = asc if sort_direction == '1' else desc
-
-        # Parse comprehensive filters
-        filters = {
-            'landlord': request.args.get('landlord'),
-            'state': request.args.get('state'),
-            'city': request.args.get('city'),
-            'zip_code': request.args.get('zip_code'),
-            'gender': request.args.get('gender'),
-            'rooms': request.args.get('rooms'),
-            'size_range': request.args.get('size_range'),
-            'floor': request.args.get('floor'),
-            'status': request.args.get('status')
-        }
-
-        # Remove empty filters
-        filters = {k: v for k, v in filters.items() if v and v.strip()}
-
-        debug_print(f"Listing apartments: page={page}, limit={limit}, sort={sort}, search={search}, filters={filters}")
+        # NEW: Get all filter parameters
+        landlord = request.args.get("landlord", "")
+        state = request.args.get("state", "")
+        city = request.args.get("city", "")
+        zip_code = request.args.get("zip_code", "")
+        gender = request.args.get("gender", "")
+        rooms = request.args.get("rooms", "")
+        size_range = request.args.get("size_range", "")
+        floor = request.args.get("floor", "")
+        status = request.args.get("status", "")
 
         # Build base query
-        query = Apartment.query
+        query = Apartment.query.join(Landlord, Apartment.landlord_id == Landlord.id, isouter=True)
 
-        # Apply search across address components
+        # Apply search filter (existing functionality)
         if search:
-            search_term = f'%{search}%'
             query = query.filter(
                 or_(
-                    Apartment.street_name.ilike(search_term),
-                    Apartment.house_number.ilike(search_term),
-                    Apartment.city.ilike(search_term),
-                    Apartment.zip_code.ilike(search_term),
-                    Apartment.country.ilike(search_term),
-                    Apartment.building.ilike(search_term),
-                    Apartment.full_address.ilike(search_term),
-                    Apartment.notes.ilike(search_term)
+                    Apartment.street_name.ilike(f"%{search}%"),
+                    Apartment.address.ilike(f"%{search}%"),
+                    Apartment.city.ilike(f"%{search}%")
                 )
             )
 
-        # Apply comprehensive filters
-        query = apply_filters(query, filters)
+        # NEW: Apply all the filter parameters
 
-        # Apply sorting
-        if sort_field == 'expiry':
-            query = query.order_by(sort_direction(Apartment.contractEndDate))
-        elif sort_field == 'address':
-            query = query.order_by(sort_direction(Apartment.street_name), asc(Apartment.house_number))
-        elif sort_field == 'city':
-            query = query.order_by(sort_direction(Apartment.city), asc(Apartment.street_name))
-        elif sort_field == 'rent':
-            query = query.order_by(sort_direction(Apartment.rent))
-        elif sort_field == 'status':
-            query = query.order_by(sort_direction(Apartment.status))
-        elif sort_field == 'landlord':
-            query = query.join(Landlord).order_by(sort_direction(Landlord.company_name))
-        elif sort_field == 'rooms':
-            query = query.order_by(sort_direction(Apartment.rooms))
-        elif sort_field == 'size':
-            query = query.order_by(sort_direction(Apartment.size))
-        elif sort_field == 'occupancy':
-            query = query.outerjoin(Tenant).group_by(Apartment.id).order_by(sort_direction(func.count(Tenant.id)))
-        else:  # default to ID
-            query = query.order_by(sort_direction(Apartment.id))
-
-        # Get total count for pagination
-        total_count = query.count()
-
-        # Apply pagination
-        apartments = query.offset(offset).limit(limit).all()
-
-        # Process apartments data with enhanced information
-        apartments_data = []
-        for apartment in apartments:
-            apartment_dict = apartment.to_dict(
-                include_landlord=True,
-                include_tenants=True,
-                user_role=g.user.get("role", "user")
+        # Landlord filter (search in both name and company_name)
+        if landlord:
+            query = query.filter(
+                or_(
+                    Landlord.name.ilike(f"%{landlord}%"),
+                    Landlord.company_name.ilike(f"%{landlord}%")
+                )
             )
 
-            # Add expiry status
-            apartment_dict['expiryStatus'] = get_expiry_status(apartment.contractEndDate)
+        # State filter
+        if state:
+            query = query.filter(Apartment.state.ilike(f"%{state}%"))
 
-            # Add occupancy information
-            current_tenants = apartment.tenants or []
-            apartment_dict['current_tenant_count'] = len(current_tenants)
-            apartment_dict['occupancy_ratio'] = f"{len(current_tenants)}/{apartment.maxOccupancy}"
-            apartment_dict['is_full'] = len(current_tenants) >= apartment.maxOccupancy
+        # City filter
+        if city:
+            query = query.filter(Apartment.city.ilike(f"%{city}%"))
 
-            apartments_data.append(apartment_dict)
+        # Zip code filter
+        if zip_code:
+            query = query.filter(Apartment.zip_code.ilike(f"%{zip_code}%"))
 
-        # Calculate pagination metadata
-        total_pages = math.ceil(total_count / limit) if total_count > 0 else 0
-        has_next = (offset + limit) < total_count
-        has_prev = page > 0
+        # Gender preference filter
+        if gender:
+            query = query.filter(Apartment.genderPreference == gender)
 
-        response_data = {
-            'apartments': apartments_data,
-            'pagination': {
-                'current_page': page + 1,  # Frontend uses 1-based indexing
-                'total_pages': total_pages,
-                'total_items': total_count,
-                'items_per_page': limit,
-                'has_next_page': has_next,
-                'has_prev_page': has_prev,
-                'start_index': offset + 1 if apartments_data else 0,
-                'end_index': min(offset + limit, total_count),
-                'page_size_options': PAGE_SIZE_OPTIONS,
-            },
-            'total': total_count,
-            'metadata': {
-                'search_term': search,
-                'sort_by': sort,
-                'filters': filters,
-                'page_size_options': PAGE_SIZE_OPTIONS
+        # Rooms filter
+        if rooms:
+            try:
+                rooms_int = int(rooms)
+                query = query.filter(Apartment.bedrooms == rooms_int)
+            except ValueError:
+                pass  # Ignore invalid room numbers
+
+        # Size filter with range support
+        if size_range:
+            # Parse size ranges like "50-100", "100+", etc.
+            if size_range == "50-":  # Less than 50
+                query = query.filter(Apartment.area < 50)
+            elif size_range == "50-100":  # Between 50-100
+                query = query.filter(and_(Apartment.area >= 50, Apartment.area <= 100))
+            elif size_range == "100-150":  # Between 100-150
+                query = query.filter(and_(Apartment.area >= 100, Apartment.area <= 150))
+            elif size_range == "150+":  # Greater than 150
+                query = query.filter(Apartment.area > 150)
+            elif size_range.endswith("+"):  # Handle generic "X+" format
+                try:
+                    min_size = int(size_range[:-1])
+                    query = query.filter(Apartment.area >= min_size)
+                except ValueError:
+                    pass
+            elif "-" in size_range:  # Handle generic "X-Y" format
+                try:
+                    min_size, max_size = map(int, size_range.split("-"))
+                    query = query.filter(and_(Apartment.area >= min_size, Apartment.area <= max_size))
+                except ValueError:
+                    pass
+
+        # Floor filter
+        if floor:
+            try:
+                floor_int = int(floor)
+                query = query.filter(Apartment.floor == floor_int)
+            except ValueError:
+                # If not a number, try string match
+                query = query.filter(Apartment.floor.ilike(f"%{floor}%"))
+
+        # Status filter - this is complex because we need to determine occupancy
+        if status:
+            if status.lower() in ['vacant', 'available']:
+                # Filter for apartments with no current tenants
+                subquery = db.session.query(ContractTenant.contract_period_id).join(
+                    ContractPeriod
+                ).filter(
+                    and_(
+                        ContractPeriod.apartment_id == Apartment.id,
+                        ContractPeriod.status == 'active',
+                        or_(
+                            ContractPeriod.end_date.is_(None),
+                            ContractPeriod.end_date >= datetime.now().date()
+                        )
+                    )
+                ).exists()
+                query = query.filter(~subquery)
+
+            elif status.lower() in ['occupied', 'rented']:
+                # Filter for apartments with current tenants
+                subquery = db.session.query(ContractTenant.contract_period_id).join(
+                    ContractPeriod
+                ).filter(
+                    and_(
+                        ContractPeriod.apartment_id == Apartment.id,
+                        ContractPeriod.status == 'active',
+                        or_(
+                            ContractPeriod.end_date.is_(None),
+                            ContractPeriod.end_date >= datetime.now().date()
+                        )
+                    )
+                ).exists()
+                query = query.filter(subquery)
+
+        # Apply sorting (existing functionality)
+        if sort == "expiry:1":
+            # MySQL-compatible sorting - handle NULLs manually
+            query = query.outerjoin(ContractPeriod).order_by(
+                db.case(
+                    (ContractPeriod.end_date.is_(None), 1),
+                    else_=0
+                ),
+                ContractPeriod.end_date.asc()
+            )
+        elif sort == "address:1":
+            query = query.order_by(Apartment.street_name.asc())
+        elif sort == "rent:1":
+            query = query.order_by(Apartment.rent.asc())
+        elif sort == "rent:-1":
+            query = query.order_by(Apartment.rent.desc())
+        elif sort == "size:1":
+            query = query.order_by(Apartment.area.asc())
+        elif sort == "size:-1":
+            query = query.order_by(Apartment.area.desc())
+
+        # Get total count before pagination
+        total = query.count()
+
+        # Apply pagination
+        offset = page * limit
+        apartments = query.offset(offset).limit(limit).all()
+
+        current_app.logger.info(f"Filtering apartments - Total: {total}, Page: {page}, Limit: {limit}")
+        current_app.logger.info(f"Applied filters - landlord: {landlord}, city: {city}, rooms: {rooms}, size_range: {size_range}, status: {status}")
+
+        # Build response
+        apartments_data = []
+        for apt in apartments:
+            # Get current contract and tenants
+            current_contracts = apt.get_current_contract_periods()
+            current_tenants = apt.get_current_tenants()
+
+            # Determine actual status based on current occupancy
+            actual_status = "occupied" if current_tenants else "vacant"
+
+            apt_dict = {
+                "id": apt.id,
+                "address": apt.address or f"{apt.street_name} {apt.house_number}, {apt.city}",
+                "rooms": apt.bedrooms,
+                "size": float(apt.area) if apt.area else 0,
+                "rent": float(apt.rent) if apt.rent else 0,
+                "deposit": float(apt.security_deposit) if hasattr(apt, 'security_deposit') else 0,
+                "status": actual_status,
+                "maxOccupancy": apt.maxOccupancy,
+                "current_tenant_count": len(current_tenants),
+                "is_full": len(current_tenants) >= apt.maxOccupancy,
+                "floor": apt.floor,
+                "city": apt.city,
+                "state": apt.state,
+                "zip_code": apt.zip_code,
+                "genderPreference": apt.genderPreference,
+                "tenants": [
+                    {
+                        "id": t.id,
+                        "name": t.name,
+                        "email": t.email,
+                        "phone": t.phone
+                    } for t in current_tenants
+                ],
+                "moveInDate": current_contracts[0].start_date.isoformat() if current_contracts else None,
+                "contractEndDate": current_contracts[0].end_date.isoformat() if current_contracts and current_contracts[0].end_date else None,
+                "landlord": {
+                    "id": apt.landlord.id,
+                    "name": apt.landlord.name,
+                    "company_name": apt.landlord.company_name
+                } if apt.landlord else None
             }
-        }
+            apartments_data.append(apt_dict)
 
-        # Log activity
-        ActivityLogger.log_activity(
-            action="list",
-            entity_type="apartment",
-            details={
-                "total_count": total_count,
-                "page": page,
-                "limit": limit,
-                "search": search if search else None,
-                "sort": sort,
-                "filters": filters
-            }
-        )
-
-        debug_print(f"Listed {len(apartments_data)} apartments, total={total_count}")
-        return jsonify(response_data), 200
+        return jsonify({
+            "apartments": apartments_data,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "totalPages": math.ceil(total / limit) if limit > 0 else 1
+        }), 200
 
     except Exception as e:
         current_app.logger.error(f"Error listing apartments: {e}")
-        return jsonify({"message": "Error listing apartments", "error": str(e)}), 500
+        return jsonify({"error": "Failed to list apartments"}), 500
+
+
+@apartments_bp.route("/filter-options", methods=["GET"])
+@token_required
+def get_filter_options():
+    """Get filter options for ApartmentFilters.jsx - Enhanced with more options"""
+    try:
+        # Get unique values from database
+        cities = db.session.query(Apartment.city).distinct().filter(Apartment.city.isnot(None)).all()
+        floors = db.session.query(Apartment.floor).distinct().filter(Apartment.floor.isnot(None)).all()
+        states = db.session.query(Apartment.state).distinct().filter(Apartment.state.isnot(None)).all()
+
+        # Get landlord info
+        landlords = db.session.query(Landlord.name, Landlord.company_name).distinct().all()
+        landlord_options = []
+        for landlord in landlords:
+            if landlord.name:
+                landlord_options.append(landlord.name)
+            if landlord.company_name and landlord.company_name != landlord.name:
+                landlord_options.append(landlord.company_name)
+
+        return jsonify({
+            "cities": [city[0] for city in cities if city[0]],
+            "floors": [str(floor[0]) for floor in floors if floor[0] is not None],
+            "states": [state[0] for state in states if state[0]],
+            "statuses": ["vacant", "occupied"],
+            "landlords": sorted(list(set(landlord_options)))  # Remove duplicates and sort
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error fetching filter options: {e}")
+        return jsonify({"error": "Failed to fetch filter options"}), 500
 
 
 @apartments_bp.route("/add", methods=["POST"])
 @token_required
-def add_apartment() -> Tuple[Response, int]:
-    """Add a new apartment with tenants and automatically create contract period"""
+def add_apartment():
+    """Add new apartment - used by ApartmentForm.jsx"""
     try:
         data = request.get_json()
-        if not data:
-            return jsonify({"message": "Invalid request: No data provided"}), 400
+        new_apartment_data = data.get("new_apartment", {})
+        new_tenants = data.get("new_tenants", [])
 
-        apartment_data = data.get("new_apartment", {})
-        tenants_data = data.get("new_tenants", [])
+        # Create apartment
+        apartment = Apartment(
+            street_name=new_apartment_data.get("street_name"),
+            house_number=new_apartment_data.get("house_number"),
+            city=new_apartment_data.get("city"),
+            zip_code=new_apartment_data.get("zip_code"),
+            floor=new_apartment_data.get("floor"),
+            bedrooms=new_apartment_data.get("rooms"),
+            area=new_apartment_data.get("size"),
+            rent=new_apartment_data.get("rent"),
+            maxOccupancy=new_apartment_data.get("maxOccupancy", 1),
+            genderPreference=new_apartment_data.get("genderPreference"),
+            landlord_id=new_apartment_data.get("landlord_id"),
+            state=new_apartment_data.get("state"),
+        )
 
-        if not apartment_data:
-            return jsonify({"message": "No apartment data provided"}), 400
-
-        # Get user role for logging
-        user_role = g.user.get("role", "user")
-        debug_print(f"Adding apartment with role: {user_role}")
-
-        # Remove landlord object if it exists (we only need landlord_id)
-        apartment_data.pop("landlord", None)
-
-        # Set secure defaults for non-admin users
-        if user_role != "admin":
-            apartment_data["managementFee"] = 0.00
-            apartment_data["rentCost"] = 0.00
-            apartment_data["model"] = PROPERTY_MODELS['MANAGEMENT']
-
-        # Ensure required fields have defaults
-        apartment_data.setdefault("status", APARTMENT_STATUS['VACANT'])
-        apartment_data.setdefault("genderPreference", "mixed")
-
-        # Clean apartment data for date fields
-        if 'moveInDate' in apartment_data:
-            apartment_data['moveInDate'] = clean_date_field(apartment_data['moveInDate'])
-        if 'contractEndDate' in apartment_data:
-            apartment_data['contractEndDate'] = clean_date_field(apartment_data['contractEndDate'])
-
-        # Create new apartment
-        apartment = Apartment(**apartment_data)
-        apartment.update_full_address()
+        # Build address
+        apartment.address = f"{apartment.street_name} {apartment.house_number}, {apartment.city}"
 
         db.session.add(apartment)
-        db.session.flush()  # Get the apartment ID before committing
+        db.session.flush()
 
-        # Add tenants if provided - FIXED: Filter out frontend-only fields
-        tenant_ids = []
-        for tenant_data in tenants_data:
-            tenant_data['apartment_id'] = apartment.id
-
-            # FIXED: Filter out frontend-only fields that don't exist in Tenant model
-            frontend_only_fields = ['isExistingTenant', 'isPrimary', 'firstName', 'lastName']
-            cleaned_tenant_data = {
-                key: value for key, value in tenant_data.items()
-                if key not in frontend_only_fields and hasattr(Tenant, key)
-            }
-
-            # Handle date fields
-            if 'bornOn' in cleaned_tenant_data:
-                cleaned_tenant_data['bornOn'] = clean_date_field(cleaned_tenant_data['bornOn']) or ''
-
-            # Ensure required fields are present
-            cleaned_tenant_data.setdefault('name', '')
-            cleaned_tenant_data.setdefault('email', '')
-            cleaned_tenant_data.setdefault('phone', '')
-            cleaned_tenant_data.setdefault('bornOn', '')
-            cleaned_tenant_data.setdefault('refundIban', '')
-
-            current_app.logger.info(f"Creating tenant with data: {cleaned_tenant_data}")
-
-            tenant = Tenant(**cleaned_tenant_data)
-            db.session.add(tenant)
+        # Add tenants if provided
+        if new_tenants:
+            # Create contract period
+            contract_period = ContractPeriod(
+                apartment_id=apartment.id,
+                start_date=datetime.now().date(),
+                status='active'
+            )
+            db.session.add(contract_period)
             db.session.flush()
-            tenant_ids.append(tenant.id)
 
-        # AUTOMATIC CONTRACT PERIOD CREATION - NEW FEATURE
-        contract_created = False
-        contract_id = None
-        contract_number = None
-
-        if tenant_ids:  # Only create contract period if there are tenants
-            try:
-                from .contract_automation import create_automatic_contract
-
-                contract = create_automatic_contract(
-                    apartment_id=apartment.id,
-                    tenant_ids=tenant_ids
-                )
-                if contract:
-                    contract_created = True
-                    contract_id = contract.id
-                    contract_number = contract.contract_number
-
-                    # Update apartment status to occupied if contract was created
-                    apartment.status = APARTMENT_STATUS['OCCUPIED']
-
-                    debug_print(f"Auto-created contract period {contract_number} for apartment {apartment.id}")
+            # Add tenants
+            for tenant_data in new_tenants:
+                # Check if tenant exists
+                existing_tenant = Tenant.query.filter_by(email=tenant_data.get("email")).first()
+                if existing_tenant:
+                    tenant_id = existing_tenant.id
                 else:
-                    debug_print(f"Failed to auto-create contract period for apartment {apartment.id}")
-            except ImportError:
-                current_app.logger.warning("Contract automation module not found - skipping contract creation")
-            except Exception as contract_error:
-                # Log error but don't fail the apartment creation
-                current_app.logger.error(f"Contract period auto-creation failed for apartment {apartment.id}: {contract_error}")
+                    # Create new tenant
+                    new_tenant = Tenant(
+                        name=tenant_data.get("name", ""),
+                        email=tenant_data.get("email", ""),
+                        phone=tenant_data.get("phone", "")
+                    )
+                    db.session.add(new_tenant)
+                    db.session.flush()
+                    tenant_id = new_tenant.id
+
+                # Create contract-tenant relationship
+                contract_tenant = ContractTenant(
+                    contract_period_id=contract_period.id,
+                    tenant_id=tenant_id,
+                    is_primary=True if len(new_tenants) == 1 else False,
+                    move_in_date=contract_period.start_date,
+                    rent_share_percentage=100.0 / len(new_tenants)
+                )
+                db.session.add(contract_tenant)
 
         db.session.commit()
 
-        # Prepare response message
-        response_message = f"Apartment added successfully"
-        if contract_created:
-            response_message += f" with auto-generated contract period"
-
-        ActivityLogger.log_apartment_action(
-            action="create",
-            apartment_id=apartment.id,
-            details={
-                "apartment_data": apartment_data,
-                "tenants": tenant_ids,
-                "user_role": user_role,
-                "contract_created": contract_created,
-                "contract_id": contract_id,
-                "contract_number": contract_number
-            }
-        )
-
-        debug_print(f"Added apartment {apartment.id} with {len(tenant_ids)} tenants" +
-                   (f" and contract period {contract_number}" if contract_created else ""))
-
         return jsonify({
-            "message": response_message,
-            "id": apartment.id,
-            "contract_created": contract_created,
-            "contract_id": contract_id,
-            "contract_number": contract_number
+            "message": "Apartment added successfully",
+            "apartment_id": apartment.id
         }), 201
 
     except Exception as e:
-        current_app.logger.error(f"Error adding apartment: {e}", exc_info=True)
         db.session.rollback()
-        return jsonify({"message": "Error adding apartment", "error": str(e)}), 500
+        current_app.logger.error(f"Error adding apartment: {e}")
+        return jsonify({"error": str(e)}), 500
 
-def clean_date_field(value):
-    """Convert empty string dates to None for database compatibility"""
-    if value == '' or value is None:
-        return None
-    if isinstance(value, str):
-        try:
-            datetime.strptime(value, '%Y-%m-%d')
-            return value
-        except ValueError:
-            return None
-    return value
 
 @apartments_bp.route("/admin/edit/<int:apartment_id>", methods=["PUT"])
 @token_required
 @role_required("admin")
-def admin_edit_apartment(apartment_id: int) -> Tuple[Response, int]:
-    """Admin edit apartment - with proper foreign key constraint handling"""
-    try:
-        apartment = Apartment.query.get(apartment_id)
-        if not apartment:
-            return jsonify({"message": "Apartment not found"}), 404
-
-        data = request.get_json()
-        if not data:
-            return jsonify({"message": "Invalid request: No data provided"}), 400
-
-        # Handle both data structures for compatibility
-        apartment_data = data.get("apartment", {}) or data.get("new_apartment", {})
-        tenants_data = data.get("tenants", []) or data.get("new_tenants", [])
-
-        if not apartment_data:
-            return jsonify({"message": "No apartment data provided"}), 400
-
-        current_app.logger.info(f"Admin editing apartment {apartment_id}: {len(tenants_data)} tenants provided")
-
-        # Store original data for logging
-        original_tenants = [tenant.id for tenant in apartment.tenants]
-
-        # Update apartment fields
-        updateable_fields = [
-            'street_name', 'house_number', 'zip_code', 'city', 'state', 'country',
-            'building', 'floor', 'side', 'rooms', 'size', 'maxOccupancy',
-            'rent', 'deposit', 'managementFee', 'rentCost', 'notes', 'status',
-            'model', 'genderPreference', 'landlord_id'
-        ]
-
-        for field in updateable_fields:
-            if field in apartment_data and hasattr(apartment, field):
-                value = apartment_data[field]
-                setattr(apartment, field, value)
-
-        # Handle date fields separately with cleaning
-        if 'moveInDate' in apartment_data:
-            apartment.moveInDate = clean_date_field(apartment_data['moveInDate'])
-        if 'contractEndDate' in apartment_data:
-            apartment.contractEndDate = clean_date_field(apartment_data['contractEndDate'])
-
-        # Update full address after changes
-        apartment.update_full_address()
-
-        # FIXED: Handle tenant deletion with proper foreign key constraint handling
-        current_app.logger.info(f"Handling tenant updates for apartment {apartment_id}")
-
-        # Step 1: Get existing tenant IDs for this apartment
-        existing_tenant_ids = [tenant.id for tenant in apartment.tenants]
-        current_app.logger.info(f"Existing tenant IDs: {existing_tenant_ids}")
-
-        # Step 2: Delete contract_tenant assignments first (to avoid FK constraint)
-        if existing_tenant_ids:
-            from models.models import ContractTenant
-            deleted_assignments = ContractTenant.query.filter(
-                ContractTenant.tenant_id.in_(existing_tenant_ids)
-            ).delete(synchronize_session=False)
-            current_app.logger.info(f"Deleted {deleted_assignments} contract tenant assignments")
-
-        # Step 3: Now delete the tenants (FK constraints are resolved)
-        if existing_tenant_ids:
-            deleted_tenants = Tenant.query.filter_by(apartment_id=apartment_id).delete()
-            current_app.logger.info(f"Deleted {deleted_tenants} tenants")
-
-        # Step 4: Create new tenants
-        new_tenant_ids = []
-        current_app.logger.info(f"Creating {len(tenants_data)} new tenants")
-
-        for i, tenant_data in enumerate(tenants_data):
-            # Clean the tenant data
-            clean_tenant_data = {
-                'apartment_id': apartment_id,
-                'name': tenant_data.get('name', ''),
-                'email': tenant_data.get('email', ''),
-                'phone': tenant_data.get('phone', ''),
-                'bornOn': tenant_data.get('bornOn', ''),
-                'refundIban': tenant_data.get('refundIban', '')
-            }
-
-            # Create new tenant
-            tenant = Tenant(**clean_tenant_data)
-            db.session.add(tenant)
-            db.session.flush()  # Get the ID
-            new_tenant_ids.append(tenant.id)
-            current_app.logger.info(f"Created tenant {tenant.id}: {tenant.name}")
-
-        # Step 5: Commit all changes
-        db.session.commit()
-        current_app.logger.info(f"Successfully committed changes for apartment {apartment_id}")
-
-        # AUTOMATIC CONTRACT PERIOD UPDATES
-        contract_updated = False
-        contract_number = None
-
-        # Update contract period tenants if tenants changed
-        tenants_changed = set(original_tenants) != set(new_tenant_ids)
-        current_app.logger.info(f"Tenants changed: {tenants_changed}")
-
-        if tenants_changed and new_tenant_ids:  # Only if we have tenants
-            try:
-                # Import here to avoid circular imports
-                from .contract_automation import update_contract_tenants, get_or_create_active_contract
-
-                current_app.logger.info("Attempting to update contract period tenants...")
-                contract_updated = update_contract_tenants(apartment_id, new_tenant_ids)
-
-                if contract_updated:
-                    current_contract = get_or_create_active_contract(apartment_id, new_tenant_ids)
-                    if current_contract:
-                        contract_number = current_contract.contract_number
-                        current_app.logger.info(f"Contract period updated: {contract_number}")
-
-            except ImportError:
-                current_app.logger.warning("Contract automation module not found - skipping contract updates")
-            except Exception as contract_error:
-                current_app.logger.error(f"Contract period tenant update failed: {contract_error}")
-
-        # Prepare response message
-        response_message = "Apartment updated successfully"
-        if contract_updated:
-            response_message += " (contract period tenants updated)"
-
-        current_app.logger.info(f"Successfully updated apartment {apartment_id}")
-
-        # Log activity
-        ActivityLogger.log_apartment_action(
-            action="admin_update",
-            apartment_id=apartment_id,
-            details={
-                "original_tenants": original_tenants,
-                "new_tenants": new_tenant_ids,
-                "user_role": "admin",
-                "contract_updated": contract_updated,
-                "contract_number": contract_number,
-                "tenants_changed": tenants_changed
-            }
-        )
-
-        return jsonify({
-            "message": response_message,
-            "contract_updated": contract_updated,
-            "contract_number": contract_number
-        }), 200
-
-    except Exception as e:
-        current_app.logger.error(f"Error in admin edit apartment: {e}", exc_info=True)
-        db.session.rollback()
-        return jsonify({"message": "Error editing apartment", "error": str(e)}), 500
+def admin_edit_apartment(apartment_id):
+    """Admin edit apartment - used by ApartmentForm.jsx"""
+    return edit_apartment_common(apartment_id, is_admin=True)
 
 
 @apartments_bp.route("/user/edit/<int:apartment_id>", methods=["PUT"])
 @token_required
-def user_edit_apartment(apartment_id: int) -> Tuple[Response, int]:
-    """User edit apartment - with proper foreign key constraint handling"""
+def user_edit_apartment(apartment_id):
+    """User edit apartment - used by ApartmentForm.jsx"""
+    return edit_apartment_common(apartment_id, is_admin=False)
+
+
+def edit_apartment_common(apartment_id, is_admin=False):
+    """Common edit logic for both admin and user"""
     try:
         apartment = Apartment.query.get(apartment_id)
         if not apartment:
-            return jsonify({"message": "Apartment not found"}), 404
+            return jsonify({"error": "Apartment not found"}), 404
 
         data = request.get_json()
-        if not data:
-            return jsonify({"message": "Invalid request: No data provided"}), 400
+        new_apartment_data = data.get("new_apartment", {})
 
-        # Handle both data structures for compatibility
-        apartment_data = data.get("apartment", {}) or data.get("new_apartment", {})
-        tenants_data = data.get("tenants", []) or data.get("new_tenants", [])
+        # Update apartment fields
+        apartment.street_name = new_apartment_data.get("street_name", apartment.street_name)
+        apartment.house_number = new_apartment_data.get("house_number", apartment.house_number)
+        apartment.city = new_apartment_data.get("city", apartment.city)
+        apartment.zip_code = new_apartment_data.get("zip_code", apartment.zip_code)
+        apartment.floor = new_apartment_data.get("floor", apartment.floor)
+        apartment.bedrooms = new_apartment_data.get("rooms", apartment.bedrooms)
+        apartment.area = new_apartment_data.get("size", apartment.area)
+        apartment.rent = new_apartment_data.get("rent", apartment.rent)
+        apartment.maxOccupancy = new_apartment_data.get("maxOccupancy", apartment.maxOccupancy)
+        apartment.genderPreference = new_apartment_data.get("genderPreference", apartment.genderPreference)
+        apartment.state = new_apartment_data.get("state", apartment.state)
 
-        current_app.logger.info(f"User editing apartment {apartment_id}: {len(tenants_data)} tenants provided")
+        # Update address
+        apartment.address = f"{apartment.street_name} {apartment.house_number}, {apartment.city}"
 
-        # Store original data for logging
-        original_tenants = [tenant.id for tenant in apartment.tenants]
+        # Admin-only fields
+        if is_admin:
+            apartment.landlord_id = new_apartment_data.get("landlord_id", apartment.landlord_id)
 
-        # Users can only update basic apartment info
-        user_allowed_fields = [
-            'street_name', 'house_number', 'zip_code', 'city', 'state', 'country',
-            'building', 'floor', 'side', 'rooms', 'size', 'maxOccupancy',
-            'rent', 'deposit', 'notes', 'status', 'genderPreference', 'landlord_id'
-        ]
-
-        for field in user_allowed_fields:
-            if field in apartment_data and hasattr(apartment, field):
-                value = apartment_data[field]
-                setattr(apartment, field, value)
-
-        # Handle date fields separately with cleaning
-        if 'moveInDate' in apartment_data:
-            apartment.moveInDate = clean_date_field(apartment_data['moveInDate'])
-        if 'contractEndDate' in apartment_data:
-            apartment.contractEndDate = clean_date_field(apartment_data['contractEndDate'])
-
-        # Update full address after changes
-        apartment.update_full_address()
-
-        # FIXED: Handle tenant deletion with proper foreign key constraint handling
-        current_app.logger.info(f"Handling tenant updates for apartment {apartment_id}")
-
-        # Step 1: Get existing tenant IDs for this apartment
-        existing_tenant_ids = [tenant.id for tenant in apartment.tenants]
-        current_app.logger.info(f"Existing tenant IDs: {existing_tenant_ids}")
-
-        # Step 2: Delete contract_tenant assignments first (to avoid FK constraint)
-        if existing_tenant_ids:
-            from models.models import ContractTenant
-            deleted_assignments = ContractTenant.query.filter(
-                ContractTenant.tenant_id.in_(existing_tenant_ids)
-            ).delete(synchronize_session=False)
-            current_app.logger.info(f"Deleted {deleted_assignments} contract tenant assignments")
-
-        # Step 3: Now delete the tenants (FK constraints are resolved)
-        if existing_tenant_ids:
-            deleted_tenants = Tenant.query.filter_by(apartment_id=apartment_id).delete()
-            current_app.logger.info(f"Deleted {deleted_tenants} tenants")
-
-        # Step 4: Create new tenants
-        new_tenant_ids = []
-        current_app.logger.info(f"Creating {len(tenants_data)} new tenants")
-
-        for tenant_data in tenants_data:
-            # Clean the tenant data
-            clean_tenant_data = {
-                'apartment_id': apartment_id,
-                'name': tenant_data.get('name', ''),
-                'email': tenant_data.get('email', ''),
-                'phone': tenant_data.get('phone', ''),
-                'bornOn': tenant_data.get('bornOn', ''),
-                'refundIban': tenant_data.get('refundIban', '')
-            }
-
-            # Create new tenant
-            tenant = Tenant(**clean_tenant_data)
-            db.session.add(tenant)
-            db.session.flush()
-            new_tenant_ids.append(tenant.id)
-
-        # Step 5: Commit all changes
         db.session.commit()
 
-        # AUTOMATIC CONTRACT PERIOD UPDATES
-        contract_updated = False
-        contract_number = None
-
-        # Update contract period tenants if tenants changed
-        tenants_changed = set(original_tenants) != set(new_tenant_ids)
-
-        if tenants_changed and new_tenant_ids:  # Only if we have tenants
-            try:
-                from .contract_automation import update_contract_tenants, get_or_create_active_contract
-
-                contract_updated = update_contract_tenants(apartment_id, new_tenant_ids)
-
-                if contract_updated:
-                    current_contract = get_or_create_active_contract(apartment_id, new_tenant_ids)
-                    if current_contract:
-                        contract_number = current_contract.contract_number
-
-            except ImportError:
-                current_app.logger.warning("Contract automation module not found - skipping contract updates")
-            except Exception as contract_error:
-                current_app.logger.error(f"Contract period tenant update failed: {contract_error}")
-
-        # Prepare response message
-        response_message = "Apartment updated successfully"
-        if contract_updated:
-            response_message += " (contract period tenants updated)"
-
-        current_app.logger.info(f"Successfully updated apartment {apartment_id}")
-
-        # Log activity
-        ActivityLogger.log_apartment_action(
-            action="user_update",
-            apartment_id=apartment_id,
-            details={
-                "original_tenants": original_tenants,
-                "new_tenants": new_tenant_ids,
-                "user_role": "user",
-                "contract_updated": contract_updated,
-                "contract_number": contract_number,
-                "tenants_changed": tenants_changed
-            }
-        )
-
-        return jsonify({
-            "message": response_message,
-            "contract_updated": contract_updated,
-            "contract_number": contract_number
-        }), 200
+        return jsonify({"message": "Apartment updated successfully"}), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in user edit apartment: {e}", exc_info=True)
         db.session.rollback()
-        return jsonify({"message": "Error editing apartment", "error": str(e)}), 500
-
-
-@apartments_bp.route("/edit/<int:apartment_id>", methods=["PUT"])
-@token_required
-def edit_apartment(apartment_id: int) -> Tuple[Response, int]:
-    """Legacy edit endpoint - redirects to appropriate endpoint based on user role"""
-    user_role = g.user.get("role", "user")
-
-    if user_role == "admin":
-        return admin_edit_apartment(apartment_id)
-    else:
-        return user_edit_apartment(apartment_id)
-
-
-@apartments_bp.route("/apartments/<int:apartment_id>", methods=["GET"])
-@token_required
-def get_apartment(apartment_id: int) -> Tuple[Response, int]:
-    """Returns apartment details - sensitive financial data filtered based on user role"""
-    try:
-        apartment = Apartment.query.get(apartment_id)
-        if not apartment:
-            return jsonify({"message": "Apartment not found"}), 404
-
-        user_role = g.user.get("role", "user")
-        apartment_data = apartment.to_dict(
-            include_landlord=True,
-            include_tenants=True,
-            user_role=user_role
-        )
-
-        # Add expiry status
-        apartment_data['expiryStatus'] = get_expiry_status(apartment.contractEndDate)
-
-        ActivityLogger.log_apartment_action(
-            action="view",
-            apartment_id=apartment_id,
-            details={"user_role": user_role}
-        )
-
-        return jsonify(apartment_data), 200
-
-    except Exception as e:
-        current_app.logger.error(f"Error getting apartment: {e}")
-        return jsonify({"message": "Error getting apartment", "error": str(e)}), 500
+        current_app.logger.error(f"Error editing apartment: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @apartments_bp.route("/delete/<int:apartment_id>", methods=["DELETE"])
 @token_required
 @role_required("admin")
-def delete_apartment(apartment_id: int) -> Tuple[Response, int]:
-    """Delete apartment (admin only)"""
+def delete_apartment(apartment_id):
+    """Delete apartment - used by ApartmentForm.jsx"""
     try:
         apartment = Apartment.query.get(apartment_id)
         if not apartment:
-            return jsonify({"message": "Apartment not found"}), 404
+            return jsonify({"error": "Apartment not found"}), 404
 
-        # Store data for logging before deletion
-        apartment_data = apartment.to_dict(include_tenants=True, user_role="admin")
+        # Check for active contracts
+        active_contracts = [cp for cp in apartment.contract_periods if cp.status == 'active']
+        if active_contracts:
+            return jsonify({"error": "Cannot delete apartment with active contracts"}), 400
 
         db.session.delete(apartment)
         db.session.commit()
 
-        ActivityLogger.log_apartment_action(
-            action="delete",
-            apartment_id=apartment_id,
-            details={
-                "deleted_apartment": apartment_data,
-                "user_role": "admin"
-            }
-        )
-
-        debug_print(f"Deleted apartment {apartment_id}")
         return jsonify({"message": "Apartment deleted successfully"}), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error deleting apartment: {e}")
         db.session.rollback()
-        return jsonify({"message": "Error deleting apartment", "error": str(e)}), 500
+        current_app.logger.error(f"Error deleting apartment: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 @apartments_bp.route("/apartments/<int:apartment_id>/extend-contract", methods=["PUT"])
 @token_required
-@role_required("admin")
-def extend_apartment_contract_period(apartment_id: int) -> Tuple[Response, int]:
-    """
-    Extend the contract period expiration date for an apartment
-    This endpoint specifically handles contract period date extensions
-    """
+def extend_contract(apartment_id):
+    """Extend contract end date - used by ContractExtensionDialog"""
     try:
         apartment = Apartment.query.get(apartment_id)
         if not apartment:
-            return jsonify({"message": "Apartment not found"}), 404
+            return jsonify({"error": "Apartment not found"}), 404
 
         data = request.get_json()
-        if not data:
-            return jsonify({"message": "No data provided"}), 400
+        new_end_date = data.get("contractEndDate")
 
-        # Validate required fields
-        new_end_date_str = data.get("new_end_date")
-        if not new_end_date_str:
-            return jsonify({"message": "new_end_date is required"}), 400
+        if not new_end_date:
+            return jsonify({"error": "New end date required"}), 400
 
-        # Parse the new end date
-        try:
-            new_end_date = datetime.strptime(new_end_date_str, "%Y-%m-%d").date()
-        except ValueError:
-            return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
+        # Find active contract period
+        active_contract = None
+        for cp in apartment.contract_periods:
+            if cp.status == 'active':
+                active_contract = cp
+                break
 
-        # Validate that the new date is in the future
-        if new_end_date <= date.today():
-            return jsonify({"message": "New end date must be in the future"}), 400
-
-        # Get optional notes
-        notes = data.get("notes", "")
-
-        # Get current active contract period (or create one if none exists)
-        from models.models import ContractPeriod
-        current_contract = ContractPeriod.query.filter_by(
-            apartment_id=apartment_id,
-            status='active'
-        ).filter(
-            ContractPeriod.start_date <= date.today()
-        ).filter(
-            db.or_(
-                ContractPeriod.end_date.is_(None),
-                ContractPeriod.end_date >= date.today()
-            )
-        ).order_by(ContractPeriod.created_at.desc()).first()
-
-        if not current_contract:
-            return jsonify({"message": "No active contract period found"}), 404
-
-        old_end_date = current_contract.end_date
-
-        # Extend the contract period
-        extension_successful = extend_contract_date(
-            apartment_id=apartment_id,
-            new_end_date=new_end_date,
-            notes=f"Extended via API. {notes}".strip()
-        )
-
-        if not extension_successful:
-            return jsonify({"message": "Failed to extend contract period"}), 500
-
-        # Also update the apartment's contractEndDate for consistency
-        apartment.contractEndDate = new_end_date
-        db.session.commit()
-
-        # Log the action
-        ActivityLogger.log_apartment_action(
-            action="extend_contract_period",
-            apartment_id=apartment_id,
-            details={
-                "contract_number": current_contract.contract_number,
-                "old_end_date": old_end_date.isoformat() if old_end_date else None,
-                "new_end_date": new_end_date.isoformat(),
-                "notes": notes,
-                "user_role": g.user.get("role", "admin")
-            }
-        )
-
-        current_app.logger.info(
-            f"Contract period extended for apartment {apartment_id}: "
-            f"{old_end_date} -> {new_end_date}"
-        )
-
-        return jsonify({
-            "message": "Contract period extended successfully",
-            "apartment_id": apartment_id,
-            "contract_number": current_contract.contract_number,
-            "old_end_date": old_end_date.isoformat() if old_end_date else None,
-            "new_end_date": new_end_date.isoformat(),
-            "extension_days": (new_end_date - (old_end_date or date.today())).days
-        }), 200
+        if active_contract:
+            active_contract.end_date = datetime.strptime(new_end_date, '%Y-%m-%d').date()
+            db.session.commit()
+            return jsonify({"message": "Contract extended successfully"}), 200
+        else:
+            return jsonify({"error": "No active contract found"}), 404
 
     except Exception as e:
-        current_app.logger.error(f"Error extending contract period for apartment {apartment_id}: {e}")
         db.session.rollback()
-        return jsonify({"message": "Error extending contract period", "error": str(e)}), 500
-
-
-# Add this endpoint to get contract period information for an apartment:
-
-@apartments_bp.route("/apartments/<int:apartment_id>/contract", methods=["GET"])
-@token_required
-def get_apartment_contract_period(apartment_id: int) -> Tuple[Response, int]:
-    """
-    Get the current active contract period for an apartment
-    """
-    try:
-        apartment = Apartment.query.get(apartment_id)
-        if not apartment:
-            return jsonify({"message": "Apartment not found"}), 404
-
-        # Get current active contract period
-        from models.models import ContractPeriod, ContractTenant
-        current_contract = ContractPeriod.query.filter_by(
-            apartment_id=apartment_id,
-            status='active'
-        ).filter(
-            ContractPeriod.start_date <= date.today()
-        ).filter(
-            db.or_(
-                ContractPeriod.end_date.is_(None),
-                ContractPeriod.end_date >= date.today()
-            )
-        ).order_by(ContractPeriod.created_at.desc()).first()
-
-        if not current_contract:
-            return jsonify({
-                "message": "No active contract period found",
-                "has_contract": False,
-                "apartment_id": apartment_id
-            }), 404
-
-        # Get contract period tenants
-        contract_tenants = ContractTenant.query.filter_by(
-            contract_period_id=current_contract.id
-        ).all()
-
-        tenants_data = []
-        for ct in contract_tenants:
-            if ct.tenant:
-                tenants_data.append({
-                    "id": ct.tenant.id,
-                    "name": ct.tenant.name,
-                    "email": ct.tenant.email,
-                    "is_primary": ct.is_primary,
-                    "rent_share_percentage": float(ct.rent_share_percentage) if ct.rent_share_percentage else 0.0,
-                    "move_in_date": ct.move_in_date.isoformat() if ct.move_in_date else None
-                })
-
-        contract_data = {
-            "id": current_contract.id,
-            "contract_number": current_contract.contract_number,
-            "apartment_id": current_contract.apartment_id,
-            "start_date": current_contract.start_date.isoformat() if current_contract.start_date else None,
-            "end_date": current_contract.end_date.isoformat() if current_contract.end_date else None,
-            "monthly_rent": float(current_contract.monthly_rent) if current_contract.monthly_rent else 0,
-            "security_deposit": float(current_contract.security_deposit) if current_contract.security_deposit else 0,
-            "status": current_contract.status,
-            "notes": current_contract.notes,
-            "tenants": tenants_data,
-            "has_contract": True,
-            "days_until_expiry": (current_contract.end_date - date.today()).days if current_contract.end_date else None
-        }
-
-        return jsonify(contract_data), 200
-
-    except Exception as e:
-        current_app.logger.error(f"Error getting contract period for apartment {apartment_id}: {e}")
-        return jsonify({"message": "Error getting contract period", "error": str(e)}), 500
+        current_app.logger.error(f"Error extending contract: {e}")
+        return jsonify({"error": str(e)}), 500

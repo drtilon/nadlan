@@ -52,7 +52,7 @@ def login():
         return jsonify({"message": "Your account is pending admin approval."}), 403
 
     # Verify password
-    if user and bcrypt.check_password_hash(user.password, password):
+    if user and user.check_password(password):
         role = user.role  # Retrieve role from database
 
         # Get token expiration time from config (in hours)

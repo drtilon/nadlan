@@ -1,4 +1,4 @@
-// ApartmentDetailsForm.jsx - COMPLETE FIXED VERSION
+// ApartmentDetailsForm.jsx - FIXED VERSION removing primary tenant references
 import React, { useState, useEffect } from 'react';
 import {
   Typography,
@@ -45,7 +45,7 @@ const ApartmentDetailsForm = ({
   tenantData,
   handleChange,
   handleTenantChange,
-  setTenantAsPrimary,
+  // REMOVED: setTenantAsPrimary - no more primary tenants
   removeTenant,
   addNewTenant,
   handleTenantSelection,
@@ -79,7 +79,6 @@ const ApartmentDetailsForm = ({
   const fetchLandlords = async () => {
     setLoadingLandlords(true);
     try {
-      // Use existing landlords endpoint from landlords.py
       const response = await api.get('/landlords/list');
       setLandlords(response.data || []);
     } catch (error) {
@@ -114,100 +113,58 @@ const ApartmentDetailsForm = ({
         </Paper>
       </Grid>
 
-      {/* Address Section */}
-      <Grid item xs={12} sm={6}>
+      {/* Address Fields */}
+      <Grid item xs={12} sm={8}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>Street Name *</Typography>
           <TextField
             name="street_name"
             value={formData.street_name || ''}
             onChange={handleChange}
-            required
             variant="outlined"
             fullWidth
+            required
             placeholder="Enter street name"
             InputProps={{
-              startAdornment: <LocationIcon sx={{ mr: 1, color: 'action.active' }} />,
+              startAdornment: <LocationIcon sx={{ mr: 1, color: 'action.active' }} />
             }}
           />
         </Box>
       </Grid>
 
-      <Grid item xs={12} sm={3}>
+      <Grid item xs={12} sm={4}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>House Number *</Typography>
           <TextField
             name="house_number"
             value={formData.house_number || ''}
             onChange={handleChange}
-            required
             variant="outlined"
             fullWidth
+            required
             placeholder="123"
           />
         </Box>
       </Grid>
 
-      <Grid item xs={12} sm={3}>
-        <Box>
-          <Typography variant="body1" sx={{ mb: 1 }}>Building</Typography>
-          <TextField
-            name="building"
-            value={formData.building || ''}
-            onChange={handleChange}
-            variant="outlined"
-            fullWidth
-            placeholder="Building A"
-          />
-        </Box>
-      </Grid>
-
-      <Grid item xs={12} sm={3}>
-        <Box>
-          <Typography variant="body1" sx={{ mb: 1 }}>Floor</Typography>
-          <TextField
-            name="floor"
-            value={formData.floor || ''}
-            onChange={handleChange}
-            variant="outlined"
-            fullWidth
-            placeholder="2"
-          />
-        </Box>
-      </Grid>
-
-      <Grid item xs={12} sm={3}>
-        <Box>
-          <Typography variant="body1" sx={{ mb: 1 }}>Side</Typography>
-          <TextField
-            name="side"
-            value={formData.side || ''}
-            onChange={handleChange}
-            variant="outlined"
-            fullWidth
-            placeholder="A"
-          />
-        </Box>
-      </Grid>
-
-      <Grid item xs={12} sm={3}>
+      <Grid item xs={12} sm={6}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>City *</Typography>
           <TextField
             name="city"
             value={formData.city || ''}
             onChange={handleChange}
-            required
             variant="outlined"
             fullWidth
-            placeholder="Tel Aviv"
+            required
+            placeholder="Enter city"
           />
         </Box>
       </Grid>
 
-      <Grid item xs={12} sm={3}>
+      <Grid item xs={12} sm={6}>
         <Box>
-          <Typography variant="body1" sx={{ mb: 1 }}>ZIP Code</Typography>
+          <Typography variant="body1" sx={{ mb: 1 }}>Zip Code</Typography>
           <TextField
             name="zip_code"
             value={formData.zip_code || ''}
@@ -219,184 +176,165 @@ const ApartmentDetailsForm = ({
         </Box>
       </Grid>
 
-      {/* Property Details */}
-      <Grid item xs={12} sm={3}>
+      <Grid item xs={12} sm={4}>
         <Box>
-          <Typography variant="body1" sx={{ mb: 1 }}>Rooms *</Typography>
+          <Typography variant="body1" sx={{ mb: 1 }}>Floor</Typography>
           <TextField
-            name="rooms"
-            type="number"
-            value={formData.rooms || 0}
-            onChange={(e) => handleChange(e, true)}
-            required
+            name="floor"
+            value={formData.floor || ''}
+            onChange={handleChange}
             variant="outlined"
             fullWidth
-            InputLabelProps={{ shrink: true }}
-            placeholder="2"
-            inputProps={{ min: 0, max: 20 }}
+            placeholder="Ground, 1st, 2nd, etc."
           />
         </Box>
       </Grid>
 
-      <Grid item xs={12} sm={3}>
+      <Grid item xs={12} sm={4}>
+        <Box>
+          <Typography variant="body1" sx={{ mb: 1 }}>Building</Typography>
+          <TextField
+            name="building"
+            value={formData.building || ''}
+            onChange={handleChange}
+            variant="outlined"
+            fullWidth
+            placeholder="Building name/number"
+          />
+        </Box>
+      </Grid>
+
+      <Grid item xs={12} sm={4}>
+        <Box>
+          <Typography variant="body1" sx={{ mb: 1 }}>Side/Unit</Typography>
+          <TextField
+            name="side"
+            value={formData.side || ''}
+            onChange={handleChange}
+            variant="outlined"
+            fullWidth
+            placeholder="A, B, North, etc."
+          />
+        </Box>
+      </Grid>
+
+      {/* Property Details */}
+      <Grid item xs={12} sm={4}>
+        <Box>
+          <Typography variant="body1" sx={{ mb: 1 }}>Number of Rooms *</Typography>
+          <TextField
+            name="rooms"
+            type="number"
+            value={formData.rooms || ''}
+            onChange={(e) => handleChange(e, true)}
+            variant="outlined"
+            fullWidth
+            required
+            inputProps={{ min: 0, step: 1 }}
+          />
+        </Box>
+      </Grid>
+
+      <Grid item xs={12} sm={4}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>Size (m²)</Typography>
           <TextField
             name="size"
             type="number"
-            value={formData.size || 0}
+            value={formData.size || ''}
             onChange={(e) => handleChange(e, true)}
             variant="outlined"
             fullWidth
-            InputLabelProps={{ shrink: true }}
-            placeholder="80"
-            inputProps={{ min: 0, max: 1000 }}
+            inputProps={{ min: 0, step: 0.1 }}
           />
         </Box>
       </Grid>
 
-      <Grid item xs={12} sm={3}>
+      <Grid item xs={12} sm={4}>
         <Box>
-          <Typography variant="body1" sx={{ mb: 1 }}>Max Occupancy *</Typography>
+          <Typography variant="body1" sx={{ mb: 1 }}>Maximum Occupancy *</Typography>
           <TextField
             name="maxOccupancy"
             type="number"
             value={formData.maxOccupancy || 1}
             onChange={(e) => handleChange(e, true)}
-            required
             variant="outlined"
             fullWidth
-            InputLabelProps={{ shrink: true }}
-            placeholder="1"
-            inputProps={{ min: 1, max: 50 }}
+            required
+            inputProps={{ min: 1, step: 1 }}
           />
         </Box>
       </Grid>
 
-      <Grid item xs={12} sm={3}>
-        <Box>
-          <Typography variant="body1" sx={{ mb: 1 }}>Status</Typography>
-          <FormControl fullWidth variant="outlined">
-            <Select
-              name="status"
-              value={formData.status || APARTMENT_STATUS.VACANT}
-              onChange={handleChange}
-              displayEmpty
-            >
-              <MenuItem value={APARTMENT_STATUS.VACANT}>Vacant</MenuItem>
-              <MenuItem value={APARTMENT_STATUS.OCCUPIED}>Occupied</MenuItem>
-              <MenuItem value={APARTMENT_STATUS.CONTRACT_SENT}>Contract Sent</MenuItem>
-            </Select>
-          </FormControl>
-        </Box>
-      </Grid>
-
-      {/* Financial Information - Basic fields for all users */}
-      <Grid item xs={12}>
-        <Paper sx={{ p: 2, mb: 2, backgroundColor: '#f5f5f5' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-            <BankIcon sx={{ mr: 1, color: 'primary.main' }} />
-            <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-              Financial Information
-            </Typography>
-          </Box>
-        </Paper>
-      </Grid>
-
+      {/* Financial Information */}
       <Grid item xs={12} sm={6}>
         <Box>
-          <Typography variant="body1" sx={{ mb: 1 }}>Monthly Rent (€) *</Typography>
+          <Typography variant="body1" sx={{ mb: 1 }}>Monthly Rent *</Typography>
           <TextField
             name="rent"
             type="number"
-            value={formData.rent || 0}
+            value={formData.rent || ''}
             onChange={(e) => handleChange(e, true)}
-            required
             variant="outlined"
             fullWidth
-            InputLabelProps={{ shrink: true }}
-            placeholder="1200"
-            inputProps={{ min: 0, step: 0.01 }}
+            required
+            inputProps={{ min: 0, step: 1 }}
+            InputProps={{
+              startAdornment: <BankIcon sx={{ mr: 1, color: 'action.active' }} />
+            }}
           />
         </Box>
       </Grid>
 
       <Grid item xs={12} sm={6}>
         <Box>
-          <Typography variant="body1" sx={{ mb: 1 }}>Security Deposit (€)</Typography>
+          <Typography variant="body1" sx={{ mb: 1 }}>Security Deposit</Typography>
           <TextField
             name="deposit"
             type="number"
-            value={formData.deposit || 0}
+            value={formData.deposit || ''}
             onChange={(e) => handleChange(e, true)}
             variant="outlined"
             fullWidth
-            InputLabelProps={{ shrink: true }}
-            placeholder="2400"
-            inputProps={{ min: 0, step: 0.01 }}
+            inputProps={{ min: 0, step: 1 }}
           />
         </Box>
       </Grid>
 
-      {/* Admin-only financial fields */}
-      {isAdmin && (
-        <>
-          <Grid item xs={12} sm={4}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Property Model</Typography>
-              <FormControl fullWidth variant="outlined">
-                <Select
-                  name="model"
-                  value={formData.model || PROPERTY_MODELS.MANAGEMENT}
-                  onChange={handleChange}
-                  displayEmpty
-                >
-                  <MenuItem value={PROPERTY_MODELS.MANAGEMENT}>Management</MenuItem>
-                  <MenuItem value={PROPERTY_MODELS.RENTAL}>Rental</MenuItem>
-                </Select>
-              </FormControl>
-            </Box>
-          </Grid>
+      {/* Status and Preferences */}
+      <Grid item xs={12} sm={6}>
+        <FormControl fullWidth>
+          <InputLabel>Status</InputLabel>
+          <Select
+            name="status"
+            value={formData.status || APARTMENT_STATUS.VACANT}
+            onChange={handleChange}
+            label="Status"
+          >
+            <MenuItem value={APARTMENT_STATUS.VACANT}>Vacant</MenuItem>
+            <MenuItem value={APARTMENT_STATUS.OCCUPIED}>Occupied</MenuItem>
+            <MenuItem value={APARTMENT_STATUS.CONTRACT_SENT}>Contract Sent</MenuItem>
+          </Select>
+        </FormControl>
+      </Grid>
 
-          <Grid item xs={12} sm={4}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Management Fee (€)</Typography>
-              <TextField
-                name="managementFee"
-                type="number"
-                value={formData.managementFee || 0}
-                onChange={(e) => handleChange(e, true)}
-                variant="outlined"
-                fullWidth
-                InputLabelProps={{ shrink: true }}
-                placeholder="150"
-                inputProps={{ min: 0, step: 0.01 }}
-                disabled={formData.model === PROPERTY_MODELS.RENTAL}
-              />
-            </Box>
-          </Grid>
+      <Grid item xs={12} sm={6}>
+        <FormControl fullWidth>
+          <InputLabel>Gender Preference</InputLabel>
+          <Select
+            name="genderPreference"
+            value={formData.genderPreference || 'mixed'}
+            onChange={handleChange}
+            label="Gender Preference"
+          >
+            <MenuItem value="mixed">Mixed</MenuItem>
+            <MenuItem value="male">Male Only</MenuItem>
+            <MenuItem value="female">Female Only</MenuItem>
+          </Select>
+        </FormControl>
+      </Grid>
 
-          <Grid item xs={12} sm={4}>
-            <Box>
-              <Typography variant="body1" sx={{ mb: 1 }}>Rent Cost (€)</Typography>
-              <TextField
-                name="rentCost"
-                type="number"
-                value={formData.rentCost || 0}
-                onChange={(e) => handleChange(e, true)}
-                variant="outlined"
-                fullWidth
-                InputLabelProps={{ shrink: true }}
-                placeholder="1000"
-                inputProps={{ min: 0, step: 0.01 }}
-                disabled={formData.model === PROPERTY_MODELS.MANAGEMENT}
-              />
-            </Box>
-          </Grid>
-        </>
-      )}
-
-      {/* Dates */}
+      {/* Date Fields */}
       <Grid item xs={12} sm={6}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>Move-in Date</Typography>
@@ -444,7 +382,7 @@ const ApartmentDetailsForm = ({
         {tenantSelection}
       </Grid>
 
-      {/* Landlord Selection - Available to all users */}
+      {/* Landlord Selection */}
       <Grid item xs={12} sm={6}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>Landlord</Typography>
@@ -473,48 +411,15 @@ const ApartmentDetailsForm = ({
                   }}
                 />
               )}
-              renderOption={(props, option) => (
-                <Box component="li" {...props} key={option.id}>
-                  <Box>
-                    <Typography variant="body1">{option.company_name}</Typography>
-                    {option.name && (
-                      <Typography variant="caption" color="text.secondary">
-                        Contact: {option.name}
-                      </Typography>
-                    )}
-                  </Box>
-                </Box>
-              )}
-              noOptionsText="No landlords found"
             />
             <Button
-              variant="outlined"
               onClick={fetchLandlords}
               disabled={loadingLandlords}
-              sx={{ minWidth: 'auto', px: 2 }}
+              sx={{ minWidth: 'auto', p: 1 }}
             >
               <RefreshIcon />
             </Button>
           </Box>
-        </Box>
-      </Grid>
-
-      {/* Gender Preference */}
-      <Grid item xs={12} sm={6}>
-        <Box>
-          <Typography variant="body1" sx={{ mb: 1 }}>Gender Preference</Typography>
-          <FormControl fullWidth variant="outlined">
-            <Select
-              name="genderPreference"
-              value={formData.genderPreference || 'mixed'}
-              onChange={handleChange}
-              displayEmpty
-            >
-              <MenuItem value="mixed">Mixed</MenuItem>
-              <MenuItem value="male">Male Only</MenuItem>
-              <MenuItem value="female">Female Only</MenuItem>
-            </Select>
-          </FormControl>
         </Box>
       </Grid>
 
@@ -530,9 +435,9 @@ const ApartmentDetailsForm = ({
             fullWidth
             multiline
             rows={3}
-            placeholder="Additional notes about the property..."
+            placeholder="Additional notes about the apartment..."
             InputProps={{
-              startAdornment: <DescriptionIcon sx={{ mr: 1, color: 'action.active', alignSelf: 'flex-start', mt: 1 }} />,
+              startAdornment: <DescriptionIcon sx={{ mr: 1, color: 'action.active', alignSelf: 'flex-start', mt: 1 }} />
             }}
           />
         </Box>
@@ -540,33 +445,32 @@ const ApartmentDetailsForm = ({
 
       {/* Action Buttons */}
       <Grid item xs={12}>
-        <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 3 }}>
-          {isEdit && isAdmin && (
-            <Button
-              variant="outlined"
-              color="error"
-              startIcon={<DeleteIcon />}
-              onClick={handleDelete}
-              disabled={isSubmitting}
-            >
-              Delete Apartment
-            </Button>
-          )}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2 }}>
+          <Box>
+            {isEdit && isAdmin && (
+              <Button
+                variant="outlined"
+                color="error"
+                startIcon={<DeleteIcon />}
+                onClick={handleDelete}
+                sx={{ mr: 2 }}
+              >
+                Delete Apartment
+              </Button>
+            )}
+          </Box>
+
           <Button
             type="submit"
             variant="contained"
-            color="primary"
             startIcon={<SaveIcon />}
             disabled={isSubmitting}
-            size="large"
+            sx={{ minWidth: 150 }}
           >
             {isSubmitting ? (
-              <>
-                <CircularProgress size={20} sx={{ mr: 1 }} />
-                {isEdit ? 'Updating...' : 'Adding...'}
-              </>
+              <CircularProgress size={20} color="inherit" />
             ) : (
-              isEdit ? 'Update Apartment' : 'Add Apartment'
+              isEdit ? 'Update Apartment' : 'Create Apartment'
             )}
           </Button>
         </Box>

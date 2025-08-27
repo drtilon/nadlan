@@ -8,6 +8,7 @@ from .auth import token_required, role_required
 from extentions import db
 from typing import Tuple, Optional
 from sqlalchemy import and_, or_, func
+from .contract_automation import generate_contract_number, create_automatic_contract
 
 apartments_bp = Blueprint("apartments", __name__)
 
@@ -268,13 +269,16 @@ def get_filter_options():
         current_app.logger.error(f"Error fetching filter options: {e}")
         return jsonify({"error": "Failed to fetch filter options"}), 500
 
-
 @apartments_bp.route("/add", methods=["POST"])
 @token_required
 def add_apartment():
-    """Add new apartment - used by ApartmentForm.jsx"""
+    """Add apartment route - FULLY FIXED VERSION"""
     try:
         data = request.get_json()
+        if not data:
+            return jsonify({"message": "Invalid request: No data provided"}), 400
+
+        # Extract apartment and tenant data
         new_apartment_data = data.get("new_apartment", {})
         new_tenants = data.get("new_tenants", [])
 
@@ -288,55 +292,60 @@ def add_apartment():
             bedrooms=new_apartment_data.get("rooms"),
             area=new_apartment_data.get("size"),
             rent=new_apartment_data.get("rent"),
-            maxOccupancy=new_apartment_data.get("maxOccupancy", 1),
+            maxOccupancy=new_apartment_data.get("maxOccupancy"),
             genderPreference=new_apartment_data.get("genderPreference"),
-            landlord_id=new_apartment_data.get("landlord_id"),
-            state=new_apartment_data.get("state"),
+            state=new_apartment_data.get("state", "available")
         )
 
-        # Build address
-        apartment.address = f"{apartment.street_name} {apartment.house_number}, {apartment.city}"
-
         db.session.add(apartment)
-        db.session.flush()
+        db.session.flush()  # Get apartment ID
 
-        # Add tenants if provided
-        if new_tenants:
-            # Create contract period
+        # Create tenants if provided
+        tenant_ids = []
+        for tenant_data in new_tenants:
+            # FIXED: Use correct field name 'date_of_birth' instead of 'dob'
+            new_tenant = Tenant(
+                name=tenant_data.get("name"),
+                email=tenant_data.get("email"),
+                phone=tenant_data.get("phone"),
+                date_of_birth=datetime.strptime(tenant_data.get("date_of_birth"), "%Y-%m-%d").date() if tenant_data.get("date_of_birth") else None,
+                refund_iban=tenant_data.get("refund_iban"),
+                passport_id=tenant_data.get("passport_id"),
+                gender=tenant_data.get("gender")
+            )
+            db.session.add(new_tenant)
+            db.session.flush()  # Get tenant ID
+            tenant_ids.append(new_tenant.id)
+
+        # Create contract with proper contract number
+        if tenant_ids:
+            # Use the contract automation helper function
+            contract = create_automatic_contract(
+                apartment_id=apartment.id,
+                tenant_ids=tenant_ids,
+                start_date=date.today()
+            )
+
+            if not contract:
+                raise Exception("Failed to create contract for apartment")
+
+        else:
+            # Create contract without tenants - still need proper contract number
+            contract_number = generate_contract_number(apartment.id)
+
             contract_period = ContractPeriod(
                 apartment_id=apartment.id,
-                start_date=datetime.now().date(),
-                status='active'
+                contract_number=contract_number,  # FIXED: Proper contract number
+                start_date=date.today(),
+                end_date=None,
+                monthly_rent=apartment.rent or 0.0,
+                security_deposit=0.0,
+                status='active',
+                notes=f'Auto-created contract for apartment {apartment.id}',
+                created_at=datetime.utcnow(),
+                created_by='system_auto'
             )
             db.session.add(contract_period)
-            db.session.flush()
-
-            # Add tenants
-            for tenant_data in new_tenants:
-                # Check if tenant exists
-                existing_tenant = Tenant.query.filter_by(email=tenant_data.get("email")).first()
-                if existing_tenant:
-                    tenant_id = existing_tenant.id
-                else:
-                    # Create new tenant
-                    new_tenant = Tenant(
-                        name=tenant_data.get("name", ""),
-                        email=tenant_data.get("email", ""),
-                        phone=tenant_data.get("phone", "")
-                    )
-                    db.session.add(new_tenant)
-                    db.session.flush()
-                    tenant_id = new_tenant.id
-
-                # Create contract-tenant relationship
-                contract_tenant = ContractTenant(
-                    contract_period_id=contract_period.id,
-                    tenant_id=tenant_id,
-                    is_primary=True if len(new_tenants) == 1 else False,
-                    move_in_date=contract_period.start_date,
-                    rent_share_percentage=100.0 / len(new_tenants)
-                )
-                db.session.add(contract_tenant)
 
         db.session.commit()
 
@@ -349,6 +358,7 @@ def add_apartment():
         db.session.rollback()
         current_app.logger.error(f"Error adding apartment: {e}")
         return jsonify({"error": str(e)}), 500
+
 
 
 @apartments_bp.route("/admin/edit/<int:apartment_id>", methods=["PUT"])

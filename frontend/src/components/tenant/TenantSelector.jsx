@@ -1,209 +1,256 @@
-// TenantSelector.jsx - Complete fixed version with Gender support
+// TenantSelector.jsx - FIXED VERSION removing primary tenant concept and React key warning
 import React from 'react';
 import {
-  Box,
   Typography,
-  Button,
   Autocomplete,
   TextField,
+  Button,
+  Box,
   Chip,
-  Avatar,
-  Tooltip,
+  IconButton,
+  CircularProgress,
+  Paper,
+  Divider
 } from '@mui/material';
-import { Person as PersonIcon } from '@mui/icons-material';
+import {
+  PersonAdd as PersonAddIcon,
+  Delete as DeleteIcon,
+  Person as PersonIcon,
+  Star as StarIcon,
+  StarBorder as StarBorderIcon
+} from '@mui/icons-material';
 
-function TenantSelector({
-  tenantData = [],
-  availableTenants = [],
-  addedTenantIds = new Set(),
-  loading = false,
+const TenantSelector = ({
+  tenantData,
+  availableTenants,
+  addedTenantIds,
+  loading,
   onTenantSelection,
-  onSetTenantAsPrimary,
+  // REMOVED: onSetTenantAsPrimary - no more primary tenant concept
   onRemoveTenant,
-  onOpenTenantForm,
-  disabled = false
-}) {
-  // Utility function to get tenant display name
-  const getTenantDisplayName = (tenant) => {
-    if (!tenant) return 'Unknown Tenant';
+  onOpenTenantForm
+}) => {
+  // Filter out already selected tenants
+  const filteredTenants = availableTenants.filter(tenant =>
+    tenant.id && !addedTenantIds.has(tenant.id)
+  );
 
-    // Try different name formats
-    if (tenant.firstName && tenant.lastName) {
-      return `${tenant.firstName} ${tenant.lastName}`;
-    }
-    if (tenant.name) {
-      return tenant.name;
-    }
-    return 'Unnamed Tenant';
+  // FIXED: Handle autocomplete option rendering without spreading key
+  const renderOption = (props, option) => {
+    // Extract key from props to avoid spreading it
+    const { key, ...otherProps } = props;
+
+    return (
+      <Box
+        key={key} // Pass key directly to JSX
+        {...otherProps} // Spread remaining props without key
+        component="li"
+        sx={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          py: 1
+        }}
+      >
+        <PersonIcon sx={{ color: 'action.active', fontSize: '1.2rem' }} />
+        <Box>
+          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+            {option.name}
+          </Typography>
+          <Typography variant="caption" color="text.secondary">
+            {option.email}
+          </Typography>
+        </Box>
+      </Box>
+    );
   };
 
-  // Utility function to generate tooltip content
-  const getTenantTooltip = (tenant) => {
-    if (!tenant) return '';
-    const parts = [];
-    if (tenant.email) parts.push(`Email: ${tenant.email}`);
-    if (tenant.phone) parts.push(`Phone: ${tenant.phone}`);
-    if (tenant.gender) {
-      const genderDisplay = tenant.gender.charAt(0).toUpperCase() + tenant.gender.slice(1).replace('_', ' ');
-      parts.push(`Gender: ${genderDisplay}`);
-    }
-    if (tenant.passport_id) parts.push(`Passport: ${tenant.passport_id}`);
-    if (tenant.apartment_address) {
-      parts.push(`Current apartment: ${tenant.apartment_address}`);
-    }
-    if (tenant.isPrimary) parts.push('Primary Tenant');
-    return parts.length > 0 ? parts.join('\n') : 'No additional information';
-  };
-
-  // Ensure arrays are safe before filtering
-  const safeTenantData = Array.isArray(tenantData) ? tenantData : [];
-  const safeAvailableTenants = Array.isArray(availableTenants) ? availableTenants : [];
-
-  // Filter available tenants to exclude already added ones
-  const filteredAvailableTenants = safeAvailableTenants.filter(tenant => {
-    if (!tenant || !tenant.id) return false;
-
-    // Don't show tenants that are already added
-    if (addedTenantIds.has(tenant.id)) return false;
-
-    // Don't show tenants that are already in the current tenant list
-    if (safeTenantData.some(t => t.id === tenant.id)) return false;
-
-    return true;
-  });
-
-  // Handle tenant selection from autocomplete
-  const handleTenantSelect = (event, selectedTenant) => {
-    if (selectedTenant && onTenantSelection) {
-      console.log('Tenant selected from autocomplete:', selectedTenant);
-      onTenantSelection(selectedTenant);
-    }
-  };
+  const renderInput = (params) => (
+    <TextField
+      {...params}
+      variant="outlined"
+      placeholder="Search and select a tenant..."
+      InputProps={{
+        ...params.InputProps,
+        startAdornment: (
+          <PersonIcon sx={{ mr: 1, color: 'action.active' }} />
+        ),
+        endAdornment: (
+          <>
+            {loading ? <CircularProgress size={20} /> : null}
+            {params.InputProps.endAdornment}
+          </>
+        ),
+      }}
+    />
+  );
 
   return (
-    <Box sx={{ mb: 3 }}>
-      <Typography variant="h6" sx={{ mb: 2, color: 'text.primary' }}>
-        Assigned Tenants ({safeTenantData.length})
-      </Typography>
-
-      {/* Display assigned tenants as chips */}
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mb: 3 }}>
-        {safeTenantData.map((tenant, index) => (
-          <Tooltip key={tenant.id || index} title={getTenantTooltip(tenant)} placement="top">
-            <Chip
-              avatar={
-                <Avatar
-                  sx={{
-                    bgcolor: tenant.isPrimary ? 'primary.main' : 'secondary.main',
-                    color: 'white',
-                    width: 24,
-                    height: 24,
-                    fontSize: '0.75rem'
-                  }}
-                >
-                  {getTenantDisplayName(tenant).charAt(0).toUpperCase()}
-                </Avatar>
-              }
-              label={
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <Typography variant="body2" sx={{ fontWeight: tenant.isPrimary ? 'bold' : 'normal' }}>
-                    {getTenantDisplayName(tenant)}
-                  </Typography>
-                  {tenant.gender && (
-                    <Typography variant="caption" sx={{
-                      color: 'text.secondary',
-                      fontSize: '0.7rem',
-                      ml: 0.5
-                    }}>
-                      ({tenant.gender.charAt(0).toUpperCase()})
-                    </Typography>
-                  )}
-                </Box>
-              }
-              variant={tenant.isPrimary ? "filled" : "outlined"}
-              color={tenant.isPrimary ? "primary" : "default"}
-              onDelete={onRemoveTenant ? () => onRemoveTenant(tenant.id) : undefined}
-              onClick={onSetTenantAsPrimary ? () => onSetTenantAsPrimary(tenant.id) : undefined}
-              sx={{
-                cursor: onSetTenantAsPrimary ? 'pointer' : 'default',
-                '&:hover': {
-                  bgcolor: tenant.isPrimary ? 'primary.dark' : 'action.hover'
-                }
-              }}
-              disabled={disabled}
-            />
-          </Tooltip>
-        ))}
-      </Box>
-
-      {/* Add new tenant section */}
-      <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-end' }}>
-        <Autocomplete
-          fullWidth
-          options={filteredAvailableTenants}
-          getOptionLabel={getTenantDisplayName}
-          onChange={handleTenantSelect}
-          loading={loading}
-          disabled={disabled}
-          renderInput={(params) => (
-            <TextField
-              {...params}
-              label="Add Existing Tenant"
-              variant="outlined"
-              size="small"
-              placeholder="Search tenants by name..."
-            />
-          )}
-          renderOption={(props, tenant) => (
-            <Box component="li" {...props}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
-                <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main' }}>
-                  {getTenantDisplayName(tenant).charAt(0).toUpperCase()}
-                </Avatar>
-                <Box sx={{ flex: 1 }}>
-                  <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
-                    {getTenantDisplayName(tenant)}
-                  </Typography>
-                  <Box sx={{ display: 'flex', gap: 2, mt: 0.5 }}>
-                    {tenant.email && (
-                      <Typography variant="caption" color="text.secondary">
-                        {tenant.email}
-                      </Typography>
-                    )}
-                    {tenant.gender && (
-                      <Typography variant="caption" color="text.secondary">
-                        {tenant.gender.charAt(0).toUpperCase() + tenant.gender.slice(1).replace('_', ' ')}
-                      </Typography>
-                    )}
-                  </Box>
-                </Box>
-              </Box>
-            </Box>
-          )}
-          noOptionsText="No available tenants found"
-          sx={{ flex: 1 }}
-        />
-
+    <Box>
+      {/* Tenant Selection Header */}
+      <Box sx={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        mb: 2
+      }}>
+        <Typography variant="h6" sx={{ fontWeight: 600, color: 'primary.main' }}>
+          Add Tenants
+        </Typography>
         <Button
           variant="outlined"
-          color="primary"
+          startIcon={<PersonAddIcon />}
           onClick={onOpenTenantForm}
-          disabled={disabled}
-          sx={{ height: 40, whiteSpace: 'nowrap' }}
+          size="small"
+          sx={{ textTransform: 'none' }}
         >
-          Add New Tenant
+          Create New Tenant
         </Button>
       </Box>
 
-      {safeTenantData.length > 0 && (
-        <Box sx={{ mt: 2 }}>
-          <Typography variant="body2" color="text.secondary">
-            Click on a tenant to set as primary. Primary tenants are highlighted and appear first in contracts.
+      {/* Tenant Selection Autocomplete - FIXED VERSION */}
+      <Autocomplete
+        options={filteredTenants}
+        getOptionLabel={(option) => option.name || ''}
+        value={null}
+        onChange={(event, newValue) => {
+          if (newValue) {
+            onTenantSelection(newValue);
+          }
+        }}
+        loading={loading}
+        renderOption={renderOption} // Use our fixed render function
+        renderInput={renderInput}
+        noOptionsText={loading ? "Loading..." : "No available tenants found"}
+        sx={{ mb: 3 }}
+        clearOnSelect={true}
+        disableClearable={false}
+      />
+
+      {/* Current Tenants List */}
+      {tenantData.length > 0 && (
+        <Box>
+          <Divider sx={{ mb: 2 }} />
+          <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>
+            Selected Tenants ({tenantData.length})
+          </Typography>
+
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {tenantData.map((tenant, index) => (
+              <Paper
+                key={tenant.id || `temp-${index}`}
+                variant="outlined"
+                sx={{
+                  p: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  '&:hover': {
+                    backgroundColor: 'action.hover'
+                  }
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1 }}>
+                  <PersonIcon sx={{ color: 'action.active' }} />
+
+                  <Box sx={{ flex: 1 }}>
+                    <Typography variant="body1" sx={{ fontWeight: 500 }}>
+                      {tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim()}
+                    </Typography>
+
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 0.5 }}>
+                      {tenant.email && (
+                        <Chip
+                          label={tenant.email}
+                          size="small"
+                          variant="outlined"
+                          sx={{ fontSize: '0.75rem' }}
+                        />
+                      )}
+                      {tenant.phone && (
+                        <Chip
+                          label={tenant.phone}
+                          size="small"
+                          variant="outlined"
+                          sx={{ fontSize: '0.75rem' }}
+                        />
+                      )}
+                      {tenant.isExistingTenant && (
+                        <Chip
+                          label="Existing Tenant"
+                          size="small"
+                          color="info"
+                          sx={{ fontSize: '0.75rem' }}
+                        />
+                      )}
+                    </Box>
+                  </Box>
+                </Box>
+
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  {/* REMOVED: Primary tenant toggle button - no more primary tenants
+
+                  <IconButton
+                    onClick={() => onSetTenantAsPrimary(index)}
+                    size="small"
+                    sx={{
+                      color: tenant.isPrimary ? 'warning.main' : 'action.active',
+                      '&:hover': {
+                        backgroundColor: tenant.isPrimary ? 'warning.light' : 'action.hover'
+                      }
+                    }}
+                    title={tenant.isPrimary ? 'Primary Tenant' : 'Set as Primary'}
+                  >
+                    {tenant.isPrimary ? <StarIcon /> : <StarBorderIcon />}
+                  </IconButton>
+
+                  */}
+
+                  <IconButton
+                    onClick={() => onRemoveTenant(index)}
+                    size="small"
+                    sx={{
+                      color: 'error.main',
+                      '&:hover': {
+                        backgroundColor: 'error.light',
+                        color: 'error.dark'
+                      }
+                    }}
+                    title="Remove Tenant"
+                  >
+                    <DeleteIcon />
+                  </IconButton>
+                </Box>
+              </Paper>
+            ))}
+          </Box>
+        </Box>
+      )}
+
+      {/* No Tenants Message */}
+      {tenantData.length === 0 && (
+        <Box
+          sx={{
+            textAlign: 'center',
+            py: 4,
+            color: 'text.secondary',
+            border: '2px dashed',
+            borderColor: 'divider',
+            borderRadius: 2,
+            mt: 2
+          }}
+        >
+          <PersonIcon sx={{ fontSize: 48, mb: 1, opacity: 0.5 }} />
+          <Typography variant="body1">
+            No tenants added yet
+          </Typography>
+          <Typography variant="caption">
+            Use the search above to add existing tenants or create new ones
           </Typography>
         </Box>
       )}
     </Box>
   );
-}
+};
 
 export default TenantSelector;

@@ -23,7 +23,8 @@ def create_automatic_contract(
     apartment_id: int,
     tenant_ids: List[int] = None,
     start_date: date = None,
-    end_date: date = None
+    end_date: date = None,
+    security_deposit: float = None,
 ) -> Optional[ContractPeriod]:
     """
     Automatically create a contract when an apartment is created or needs a contract
@@ -33,6 +34,7 @@ def create_automatic_contract(
         tenant_ids: List of tenant IDs to assign to contract
         start_date: Contract start date (defaults to today)
         end_date: Contract end date (defaults to start_date + 1 year)
+        security_deposit: Security deposit amount (defaults to monthly rent if not provided)
 
     Returns:
         ContractPeriod object or None if creation failed
@@ -41,7 +43,9 @@ def create_automatic_contract(
         # Get apartment details
         apartment = Apartment.query.get(apartment_id)
         if not apartment:
-            current_app.logger.error(f"Apartment {apartment_id} not found for contract creation")
+            current_app.logger.error(
+                f"Apartment {apartment_id} not found for contract creation"
+            )
             return None
 
         # Set defaults
@@ -51,8 +55,20 @@ def create_automatic_contract(
         if end_date is None:
             end_date = start_date + timedelta(days=365)  # 1 year contract
 
+        # Set security deposit - default to monthly rent if not provided
+        if security_deposit is None:
+            security_deposit = float(apartment.rent) if apartment.rent else 0.0
+
         # Generate unique contract number
         contract_number = generate_contract_number(apartment_id)
+
+        # Get apartment address safely
+        apartment_address = getattr(apartment, "address", None)
+        if not apartment_address:
+            # Build address from components if full address doesn't exist
+            apartment_address = (
+                f"{apartment.street_name} {apartment.house_number}, {apartment.city}"
+            )
 
         # Create contract period
         contract = ContractPeriod(
@@ -60,12 +76,12 @@ def create_automatic_contract(
             contract_number=contract_number,
             start_date=start_date,
             end_date=end_date,
-            monthly_rent=apartment.rent or 0.0,
-            security_deposit=apartment.deposit or 0.0,
-            status='active',
-            notes=f'Auto-generated contract for {apartment.address}',
+            monthly_rent=float(apartment.rent) if apartment.rent else 0.0,
+            security_deposit=security_deposit,  # Use the parameter or calculated default
+            status="active",
+            notes=f"Auto-generated contract for {apartment_address}",
             created_at=datetime.utcnow(),
-            created_by='system_auto'
+            created_by="system_auto",
         )
 
         db.session.add(contract)
@@ -85,23 +101,19 @@ def create_automatic_contract(
         return contract
 
     except Exception as e:
-        current_app.logger.error(f"Error creating auto-contract for apartment {apartment_id}: {e}")
+        current_app.logger.error(
+            f"Error creating auto-contract for apartment {apartment_id}: {e}"
+        )
         db.session.rollback()
         return None
 
 
 def assign_tenants_to_contract(
-    contract_id: int,
-    tenant_ids: List[int],
-    move_in_date: date = None
+    contract_id: int, tenant_ids: List[int], move_in_date: date = None
 ):
     """
-    Assign tenants to a contract period
-
-    Args:
-        contract_id: Contract period ID
-        tenant_ids: List of tenant IDs to assign
-        move_in_date: Move-in date for tenants
+    Assign tenants to a contract period - ALL TENANTS ARE EQUAL
+    REMOVED: Primary tenant concept - all tenants have equal status
     """
     if not tenant_ids:
         return
@@ -109,14 +121,14 @@ def assign_tenants_to_contract(
     # Calculate rent share percentage (equal split)
     rent_share = 100.0 / len(tenant_ids)
 
-    for i, tenant_id in enumerate(tenant_ids):
+    for tenant_id in tenant_ids:
         contract_tenant = ContractTenant(
             contract_period_id=contract_id,
             tenant_id=tenant_id,
-            is_primary=(i == 0),  # First tenant is primary
+            is_primary=False,  # FIXED: No more primary tenant - all are equal
             move_in_date=move_in_date or date.today(),
             rent_share_percentage=rent_share,
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
         )
         db.session.add(contract_tenant)
 
@@ -134,152 +146,197 @@ def update_contract_tenants(apartment_id: int, new_tenant_ids: List[int]) -> boo
     """
     try:
         # Get current active contract for the apartment
-        current_contract = ContractPeriod.query.filter_by(
-            apartment_id=apartment_id,
-            status='active'
-        ).filter(
-            ContractPeriod.start_date <= date.today()
-        ).filter(
-            db.or_(
-                ContractPeriod.end_date.is_(None),
-                ContractPeriod.end_date >= date.today()
+        current_contract = (
+            ContractPeriod.query.filter_by(apartment_id=apartment_id, status="active")
+            .filter(ContractPeriod.start_date <= date.today())
+            .filter(
+                db.or_(
+                    ContractPeriod.end_date.is_(None),
+                    ContractPeriod.end_date >= date.today(),
+                )
             )
-        ).first()
+            .first()
+        )
 
         if not current_contract:
             # No current contract exists, create one
-            current_app.logger.info(f"No active contract found for apartment {apartment_id}, creating new one")
+            current_app.logger.info(
+                f"No active contract found for apartment {apartment_id}, creating new one"
+            )
             create_automatic_contract(apartment_id, new_tenant_ids)
             return True
 
         # Remove existing tenant assignments
-        ContractTenant.query.filter_by(
-            contract_period_id=current_contract.id
-        ).delete()
+        ContractTenant.query.filter_by(contract_period_id=current_contract.id).delete()
 
         # Add new tenant assignments
         if new_tenant_ids:
-            assign_tenants_to_contract(
-                current_contract.id,
-                new_tenant_ids,
-                date.today()
-            )
-
-        # Update contract notes
-        changes_note = f"Tenants updated on {date.today()}: {len(new_tenant_ids)} tenants"
-
-        if current_contract.notes:
-            current_contract.notes += f"\n{changes_note}"
-        else:
-            current_contract.notes = changes_note
-
-        current_contract.updated_at = datetime.utcnow()
+            assign_tenants_to_contract(current_contract.id, new_tenant_ids)
 
         db.session.commit()
 
         current_app.logger.info(
-            f"Updated contract {current_contract.contract_number} for apartment {apartment_id} "
-            f"with {len(new_tenant_ids)} tenants"
+            f"Updated contract {current_contract.contract_number} tenants for apartment {apartment_id}"
         )
 
         return True
 
     except Exception as e:
         current_app.logger.error(
-            f"Error updating contract for apartment {apartment_id}: {e}"
+            f"Error updating contract tenants for apartment {apartment_id}: {e}"
         )
         db.session.rollback()
         return False
 
 
-def extend_contract_date(apartment_id: int, new_end_date: date, notes: str = None) -> bool:
+def get_active_contract_for_apartment(apartment_id: int) -> Optional[ContractPeriod]:
     """
-    Extend the expiration date of the current contract
+    Get the currently active contract for an apartment
 
     Args:
-        apartment_id: Apartment ID
-        new_end_date: New contract end date
-        notes: Optional notes about the extension
+        apartment_id: ID of the apartment
+
+    Returns:
+        ContractPeriod object or None if no active contract found
+    """
+    try:
+        today = date.today()
+
+        active_contract = ContractPeriod.query.filter(
+            ContractPeriod.apartment_id == apartment_id,
+            ContractPeriod.status == "active",
+            ContractPeriod.start_date <= today,
+            db.or_(ContractPeriod.end_date.is_(None), ContractPeriod.end_date >= today),
+        ).first()
+
+        return active_contract
+
+    except Exception as e:
+        current_app.logger.error(
+            f"Error getting active contract for apartment {apartment_id}: {e}"
+        )
+        return None
+
+
+def extend_contract_period(contract_id: int, new_end_date: date) -> bool:
+    """
+    Extend an existing contract period
+
+    Args:
+        contract_id: ID of the contract to extend
+        new_end_date: New end date for the contract
 
     Returns:
         True if extension was successful, False otherwise
     """
     try:
-        # Get current active contract
-        current_contract = ContractPeriod.query.filter_by(
-            apartment_id=apartment_id,
-            status='active'
-        ).filter(
-            ContractPeriod.start_date <= date.today()
-        ).order_by(ContractPeriod.created_at.desc()).first()
-
-        if not current_contract:
-            current_app.logger.error(f"No active contract found for apartment {apartment_id}")
+        contract = ContractPeriod.query.get(contract_id)
+        if not contract:
+            current_app.logger.error(f"Contract {contract_id} not found")
             return False
 
-        # Store old end date for logging
-        old_end_date = current_contract.end_date
+        # Validate new end date
+        if new_end_date <= contract.start_date:
+            current_app.logger.error(
+                f"New end date {new_end_date} must be after start date {contract.start_date}"
+            )
+            return False
 
-        # Update end date
-        current_contract.end_date = new_end_date
-        current_contract.updated_at = datetime.utcnow()
-
-        # Add notes about the extension
-        extension_note = f"Contract extended on {date.today()}: "
-        extension_note += f"Previous end date: {old_end_date}, "
-        extension_note += f"New end date: {new_end_date}"
-
-        if notes:
-            extension_note += f"\nNotes: {notes}"
-
-        if current_contract.notes:
-            current_contract.notes += f"\n{extension_note}"
-        else:
-            current_contract.notes = extension_note
+        # Update the contract
+        old_end_date = contract.end_date
+        contract.end_date = new_end_date
+        contract.updated_at = datetime.utcnow()
 
         db.session.commit()
 
         current_app.logger.info(
-            f"Extended contract {current_contract.contract_number} for apartment {apartment_id} "
-            f"from {old_end_date} to {new_end_date}"
+            f"Extended contract {contract.contract_number} from {old_end_date} to {new_end_date}"
         )
 
         return True
 
     except Exception as e:
-        current_app.logger.error(
-            f"Error extending contract for apartment {apartment_id}: {e}"
-        )
+        current_app.logger.error(f"Error extending contract {contract_id}: {e}")
         db.session.rollback()
         return False
 
 
-def get_or_create_active_contract(apartment_id: int, tenant_ids: List[int] = None) -> Optional[ContractPeriod]:
+def terminate_contract_period(contract_id: int, termination_date: date = None) -> bool:
     """
-    Get existing active contract or create a new one if none exists
+    Terminate a contract period
 
     Args:
-        apartment_id: Apartment ID
-        tenant_ids: Tenant IDs to assign if creating new contract
+        contract_id: ID of the contract to terminate
+        termination_date: Date of termination (defaults to today)
 
     Returns:
-        ContractPeriod object or None
+        True if termination was successful, False otherwise
     """
-    # Try to get existing active contract
-    existing_contract = ContractPeriod.query.filter_by(
-        apartment_id=apartment_id,
-        status='active'
-    ).filter(
-        ContractPeriod.start_date <= date.today()
-    ).filter(
-        db.or_(
-            ContractPeriod.end_date.is_(None),
-            ContractPeriod.end_date >= date.today()
+    try:
+        contract = ContractPeriod.query.get(contract_id)
+        if not contract:
+            current_app.logger.error(f"Contract {contract_id} not found")
+            return False
+
+        if termination_date is None:
+            termination_date = date.today()
+
+        # Update contract status and end date
+        contract.status = "terminated"
+        contract.end_date = termination_date
+        contract.updated_at = datetime.utcnow()
+
+        # Update all contract tenants to have move_out_date
+        for ct in contract.contract_tenants:
+            if ct.move_out_date is None:
+                ct.move_out_date = termination_date
+
+        db.session.commit()
+
+        current_app.logger.info(
+            f"Terminated contract {contract.contract_number} on {termination_date}"
         )
-    ).first()
 
-    if existing_contract:
-        return existing_contract
+        return True
 
-    # Create new contract if none exists
-    return create_automatic_contract(apartment_id, tenant_ids)
+    except Exception as e:
+        current_app.logger.error(f"Error terminating contract {contract_id}: {e}")
+        db.session.rollback()
+        return False
+
+
+def calculate_contract_rent_split(contract_id: int) -> dict:
+    """
+    Calculate rent split for all tenants in a contract
+
+    Args:
+        contract_id: ID of the contract
+
+    Returns:
+        Dictionary with tenant rent calculations
+    """
+    try:
+        contract = ContractPeriod.query.get(contract_id)
+        if not contract:
+            return {}
+
+        rent_split = {}
+        total_rent = float(contract.monthly_rent)
+
+        for ct in contract.contract_tenants:
+            if ct.is_active():
+                tenant_rent = total_rent * (float(ct.rent_share_percentage) / 100.0)
+                rent_split[ct.tenant_id] = {
+                    "tenant_name": ct.tenant.name,
+                    "rent_share_percentage": float(ct.rent_share_percentage),
+                    "monthly_rent": round(tenant_rent, 2),
+                    "is_primary": ct.is_primary,
+                }
+
+        return rent_split
+
+    except Exception as e:
+        current_app.logger.error(
+            f"Error calculating rent split for contract {contract_id}: {e}"
+        )
+        return {}

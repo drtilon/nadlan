@@ -344,9 +344,14 @@ def get_available_tenants():
 
 @tenants_bp.route("/tenants/<int:tenant_id>", methods=["GET"])
 @token_required
-def get_tenant_details(tenant_id) -> Tuple[Response, int]:
+# FIXED: Replace your get_tenant_details function in routes/tenants.py with this:
+
+@tenants_bp.route("/tenants/<int:tenant_id>", methods=["GET"])
+@token_required
+def get_tenant_details(tenant_id):
     """
     Get detailed information about a specific tenant including contract assignments
+    FIXED: Use contract_assignments instead of apartment_id
     """
     try:
         tenant = Tenant.query.get(tenant_id)
@@ -355,6 +360,59 @@ def get_tenant_details(tenant_id) -> Tuple[Response, int]:
 
         # Get tenant data with full details
         tenant_data = tenant.to_dict(include_current_assignments=True)
+
+        # FIXED: Get current apartment information through contract assignments
+        current_apartment = None
+        current_contract_info = None
+
+        # Get current contract assignments
+        current_assignments = tenant.get_current_contract_assignments()
+
+        if current_assignments:
+            # Get the primary assignment or first one
+            primary_assignment = None
+            for assignment in current_assignments:
+                if assignment.is_primary:
+                    primary_assignment = assignment
+                    break
+
+            # If no primary, use first assignment
+            if not primary_assignment and current_assignments:
+                primary_assignment = current_assignments[0]
+
+            if primary_assignment and primary_assignment.contract_period:
+                contract = primary_assignment.contract_period
+                current_contract_info = {
+                    "contract_id": contract.id,
+                    "contract_number": contract.contract_number,
+                    "start_date": contract.start_date.isoformat() if contract.start_date else None,
+                    "end_date": contract.end_date.isoformat() if contract.end_date else None,
+                    "monthly_rent": float(contract.monthly_rent) if contract.monthly_rent else 0,
+                    "security_deposit": float(contract.security_deposit) if contract.security_deposit else 0,
+                    "rent_share_percentage": float(primary_assignment.rent_share_percentage) if primary_assignment.rent_share_percentage else 100,
+                    "is_primary": primary_assignment.is_primary,
+                    "status": contract.status,
+                    "notes": contract.notes
+                }
+
+                # Get apartment info
+                if contract.apartment:
+                    current_apartment = contract.apartment.to_dict()
+
+        # Add computed fields to tenant data
+        tenant_data["apartment"] = current_apartment
+        tenant_data["contract_info"] = current_contract_info
+        tenant_data["is_active"] = len(current_assignments) > 0
+
+        # For compatibility, add apartment_id if current apartment exists
+        tenant_data["apartment_id"] = current_apartment["id"] if current_apartment else None
+
+        # Get move history summary
+        total_contracts = len(tenant.contract_assignments)
+        tenant_data["move_history_summary"] = {
+            "total_contracts": total_contracts,
+            "has_history": total_contracts > 0
+        }
 
         # Log activity
         ActivityLogger.log_activity(
@@ -368,6 +426,8 @@ def get_tenant_details(tenant_id) -> Tuple[Response, int]:
 
     except Exception as e:
         current_app.logger.error(f"Error getting tenant details: {e}")
+        import traceback
+        current_app.logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"message": "Error getting tenant details", "error": str(e)}), 500
 
 

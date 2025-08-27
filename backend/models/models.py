@@ -311,12 +311,19 @@ class Tenant(db.Model):
 
     # Keep apartment_id for backward compatibility
     apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=True)
+    passport_id = db.Column(db.String(50), unique=True, nullable=True)
+
+    # NEW: Gender field
+    gender = db.Column(db.String(20), nullable=True)
 
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+    # FIXED: Remove relationship definition here since it's defined in Apartment model
+    # The backref from Apartment model will create apartment.tenants and tenant.apartment
 
     def to_dict(self, include_apartment=True, include_contracts=True):
         """Convert to dictionary with optional related data"""
@@ -335,6 +342,8 @@ class Tenant(db.Model):
             "bornOn": self.bornOn,
             "refundIban": self.refundIban,
             "apartment_id": self.apartment_id,
+            "passport_id": self.passport_id,
+            "gender": self.gender,
         }
 
         # Convert date objects to string format
@@ -344,7 +353,7 @@ class Tenant(db.Model):
             result["updated_at"] = self.updated_at.isoformat()
 
         # Add apartment data if requested and available
-        if include_apartment and self.apartment:
+        if include_apartment and hasattr(self, 'apartment') and self.apartment:
             result["apartment"] = {
                 "id": self.apartment.id,
                 "address": self.apartment.address,
@@ -355,8 +364,6 @@ class Tenant(db.Model):
 
     def __repr__(self):
         return f"<Tenant {self.id}: {self.name}>"
-
-
 class ContractPeriod(db.Model):
     """Contract periods for apartments - tracks different rental periods"""
 

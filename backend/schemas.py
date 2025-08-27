@@ -6,10 +6,147 @@ import re
 
 
 class TenantData(BaseModel):
-    name: str
-    email: Optional[str] = None
-    phone: Optional[str] = None
+    """Updated tenant data validation with gender and passport ID"""
+    name: str = Field(..., min_length=1, max_length=255)
+    email: Optional[str] = Field(None, max_length=255)
+    phone: Optional[str] = Field(None, max_length=50)
+    bornOn: Optional[str] = Field(None, max_length=50)
+    refundIban: Optional[str] = Field(None, max_length=50)
+    passport_id: Optional[str] = Field(None, max_length=50)
+    gender: Optional[str] = Field(None, max_length=20)
+    apartment_id: Optional[int] = None
 
+    @validator('name')
+    def validate_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Name is required and cannot be empty')
+        return v.strip()
+
+    @validator('email')
+    def validate_email(cls, v):
+        if v is not None and v.strip():
+            # Basic email validation
+            if not re.match(r'^[^@]+@[^@]+\.[^@]+$', v.strip()):
+                raise ValueError('Invalid email format')
+            return v.strip()
+        return None
+
+    @validator('phone')
+    def validate_phone(cls, v):
+        if v is not None and v.strip():
+            # Allow various phone formats
+            if not re.match(r'^[\+\-\s\(\)\d]+$', v.strip()):
+                raise ValueError('Phone number contains invalid characters')
+            return v.strip()
+        return None
+
+    @validator('refundIban')
+    def validate_iban(cls, v):
+        if v is not None and v.strip():
+            # Basic IBAN format validation (can be enhanced)
+            cleaned = re.sub(r'\s+', '', v.strip().upper())
+            if not re.match(r'^[A-Z]{2}[0-9]{2}[A-Z0-9]+$', cleaned):
+                raise ValueError('Invalid IBAN format')
+            return cleaned
+        return None
+
+    @validator('passport_id')
+    def validate_passport_id(cls, v):
+        if v is not None and v.strip():
+            # Basic passport ID validation - alphanumeric
+            cleaned = v.strip().upper()
+            if not re.match(r'^[A-Z0-9]+$', cleaned):
+                raise ValueError('Passport ID should contain only letters and numbers')
+            return cleaned
+        return None
+
+    @validator('gender')
+    def validate_gender(cls, v):
+        if v is not None and v.strip():
+            valid_genders = ['male', 'female', 'other', 'prefer_not_to_say']
+            if v.lower() not in valid_genders:
+                raise ValueError(f'Gender must be one of: {", ".join(valid_genders)}')
+            return v.lower()
+        return None
+
+    @validator('bornOn')
+    def validate_birth_date(cls, v):
+        if v is not None and v.strip():
+            # Validate date format (YYYY-MM-DD)
+            if not re.match(r'^\d{4}-\d{2}-\d{2}$', v.strip()):
+                raise ValueError('Birth date must be in YYYY-MM-DD format')
+            return v.strip()
+        return None
+
+
+class TenantUpdateData(BaseModel):
+    """For tenant updates - all fields optional"""
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    email: Optional[str] = Field(None, max_length=255)
+    phone: Optional[str] = Field(None, max_length=50)
+    bornOn: Optional[str] = Field(None, max_length=50)
+    refundIban: Optional[str] = Field(None, max_length=50)
+    passport_id: Optional[str] = Field(None, max_length=50)
+    gender: Optional[str] = Field(None, max_length=20)
+    apartment_id: Optional[int] = None
+
+    # Apply same validators as TenantData but for optional fields
+    @validator('name')
+    def validate_name(cls, v):
+        if v is not None and (not v or not v.strip()):
+            raise ValueError('Name cannot be empty if provided')
+        return v.strip() if v else None
+
+    @validator('email')
+    def validate_email(cls, v):
+        if v is not None and v.strip():
+            if not re.match(r'^[^@]+@[^@]+\.[^@]+$', v.strip()):
+                raise ValueError('Invalid email format')
+            return v.strip()
+        return None
+
+    @validator('phone')
+    def validate_phone(cls, v):
+        if v is not None and v.strip():
+            if not re.match(r'^[\+\-\s\(\)\d]+$', v.strip()):
+                raise ValueError('Phone number contains invalid characters')
+            return v.strip()
+        return None
+
+    @validator('refundIban')
+    def validate_iban(cls, v):
+        if v is not None and v.strip():
+            cleaned = re.sub(r'\s+', '', v.strip().upper())
+            if not re.match(r'^[A-Z]{2}[0-9]{2}[A-Z0-9]+$', cleaned):
+                raise ValueError('Invalid IBAN format')
+            return cleaned
+        return None
+
+    @validator('passport_id')
+    def validate_passport_id(cls, v):
+        if v is not None and v.strip():
+            cleaned = v.strip().upper()
+            if not re.match(r'^[A-Z0-9]+$', cleaned):
+                raise ValueError('Passport ID should contain only letters and numbers')
+            return cleaned
+        return None
+
+    @validator('gender')
+    def validate_gender(cls, v):
+        if v is not None and v.strip():
+            valid_genders = ['male', 'female', 'other', 'prefer_not_to_say']
+            if v.lower() not in valid_genders:
+                raise ValueError(f'Gender must be one of: {", ".join(valid_genders)}')
+            return v.lower()
+        return None
+
+    @validator('bornOn')
+    def validate_birth_date(cls, v):
+        if v is not None and v.strip():
+            if not re.match(r'^\d{4}-\d{2}-\d{2}$', v.strip()):
+                raise ValueError('Birth date must be in YYYY-MM-DD format')
+            return v.strip()
+        return None
 
 class ApartmentAddressData(BaseModel):
     """Validation for address components"""

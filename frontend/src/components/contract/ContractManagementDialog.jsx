@@ -53,7 +53,8 @@ import {
   StarBorder as StarBorderIcon,
   Visibility as VisibilityIcon,
   Download as DownloadIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  ExitToApp as MoveOutIcon
 } from '@mui/icons-material';
 import api from '../../utils/api';
 
@@ -96,11 +97,6 @@ function ContractManagementDialog({
     tenant_ids: []
   });
 
-  // Debug re-renders
-  useEffect(() => {
-    console.log('ContractManagementDialog re-rendered');
-  });
-
   useEffect(() => {
     if (open && apartment) {
       fetchContracts();
@@ -125,10 +121,12 @@ function ContractManagementDialog({
   const fetchTenants = useCallback(async () => {
     try {
       const response = await api.get('/tenants/list');
-      console.log('Tenants fetched:', response.data);
-      setTenants(response.data || []);
+      // Ensure we always get an array
+      const tenantsData = response.data?.tenants || response.data || [];
+      setTenants(Array.isArray(tenantsData) ? tenantsData : []);
     } catch (error) {
       console.error('Error fetching tenants:', error);
+      setTenants([]); // Ensure it's always an array
       showNotification('Error loading tenants', 'error');
     }
   }, [showNotification]);
@@ -176,8 +174,34 @@ function ContractManagementDialog({
   }, []);
 
   const handleTenantIdsChange = useCallback((event, newValue) => {
-    setContractForm(prev => ({ ...prev, tenant_ids: newValue.map(tenant => tenant.id) }));
+    const validNewValue = Array.isArray(newValue) ? newValue : [];
+    setContractForm(prev => ({
+      ...prev,
+      tenant_ids: validNewValue.map(tenant => tenant?.id).filter(id => id != null)
+    }));
   }, []);
+
+  const handleTenantMoveOut = useCallback(async (contractTenantId, tenantName) => {
+    if (!window.confirm(`Are you sure you want to move out ${tenantName}? This will set their move-out date to today.`)) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await api.put(`/contract-tenants/${contractTenantId}/move-out`, {
+        move_out_date: new Date().toISOString().split('T')[0]
+      });
+      showNotification(`${tenantName} has been moved out successfully`, 'success');
+      await fetchContracts();
+      onContractChange?.();
+    } catch (error) {
+      console.error('Error moving out tenant:', error);
+      const errorMessage = error.response?.data?.message || 'Error moving out tenant';
+      showNotification(errorMessage, 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [showNotification, onContractChange, fetchContracts]);
 
   const loadFromApartment = useCallback(() => {
     if (!apartment) {
@@ -185,7 +209,14 @@ function ContractManagementDialog({
       return;
     }
 
-    const apartmentTenantIds = apartment.tenants ? apartment.tenants.map(tenant => tenant.id) : [];
+    // Safely get tenant IDs
+    let apartmentTenantIds = [];
+    if (apartment.tenants) {
+      if (Array.isArray(apartment.tenants)) {
+        apartmentTenantIds = apartment.tenants.map(tenant => tenant.id).filter(id => id != null);
+      }
+    }
+
     const currentDate = new Date();
     const contractNumber = `APT${apartment.id}-${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
 
@@ -253,7 +284,7 @@ function ContractManagementDialog({
       security_deposit: contract.security_deposit?.toString() || '',
       status: contract.status || 'active',
       notes: contract.notes || '',
-      tenant_ids: contract.tenants?.map(t => t.tenant_id) || []
+      tenant_ids: contract.tenants?.map(t => t.tenant_id).filter(id => id != null) || []
     });
     setTabValue(1);
   }, []);
@@ -357,23 +388,41 @@ function ContractManagementDialog({
                   boxShadow: 2,
                   borderColor: 'primary.main',
                   transform: 'translateY(-2px)'
-                } : {}
+                } : {},
+                ...(contractTenant.move_out_date && {
+                  opacity: 0.7,
+                  backgroundColor: 'grey.100',
+                  border: '1px dashed',
+                  borderColor: 'grey.400'
+                })
               }}
               onClick={() => handleTenantClick(contractTenant)}
             >
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                  <Avatar sx={{ bgcolor: contractTenant.is_primary ? 'primary.main' : 'grey.400' }}>
+                  <Avatar sx={{
+                    bgcolor: contractTenant.move_out_date ? 'grey.400' :
+                      contractTenant.is_primary ? 'primary.main' : 'grey.400'
+                  }}>
                     {contractTenant.is_primary ? <StarIcon /> : <PersonIcon />}
                   </Avatar>
                   <Box>
                     <Typography variant="subtitle2" fontWeight="medium">
                       {contractTenant.tenant?.name || 'Unknown Tenant'}
-                      {contractTenant.is_primary && (
+                      {contractTenant.is_primary && !contractTenant.move_out_date && (
                         <Chip
                           label="Primary"
                           size="small"
                           color="primary"
+                          sx={{ ml: 1 }}
+                        />
+                      )}
+                      {contractTenant.move_out_date && (
+                        <Chip
+                          label="Moved Out"
+                          size="small"
+                          color="error"
+                          variant="outlined"
                           sx={{ ml: 1 }}
                         />
                       )}
@@ -389,20 +438,34 @@ function ContractManagementDialog({
                   </Box>
                 </Box>
 
-                <Box sx={{ textAlign: 'right' }}>
-                  <Typography variant="body2" fontWeight="medium">
-                    {contractTenant.rent_share_percentage}% share
-                  </Typography>
-                  {contractTenant.move_in_date && (
-                    <Typography variant="caption" color="text.secondary">
-                      Moved in: {formatDate(contractTenant.move_in_date)}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Box sx={{ textAlign: 'right', mr: 1 }}>
+                    <Typography variant="body2" fontWeight="medium">
+                      {contractTenant.rent_share_percentage}% share
                     </Typography>
-                  )}
-                  {contractTenant.move_out_date && (
-                    <Typography variant="caption" color="error">
-                      Moved out: {formatDate(contractTenant.move_out_date)}
-                    </Typography>
-                  )}
+                    {contractTenant.move_in_date && (
+                      <Typography variant="caption" color="text.secondary">
+                        Moved in: {formatDate(contractTenant.move_in_date)}
+                      </Typography>
+                    )}
+                    {contractTenant.move_out_date ? (
+                      <Typography variant="caption" color="error">
+                        Moved out: {formatDate(contractTenant.move_out_date)}
+                      </Typography>
+                    ) : (
+                      <IconButton
+                        size="small"
+                        color="warning"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTenantMoveOut(contractTenant.id, contractTenant.tenant?.name);
+                        }}
+                        title="Move out tenant"
+                      >
+                        <MoveOutIcon fontSize="small" />
+                      </IconButton>
+                    )}
+                  </Box>
                 </Box>
               </Box>
 
@@ -416,13 +479,20 @@ function ContractManagementDialog({
         </Stack>
       </Box>
     );
-  }, [formatDate, onGoToTenant]);
+  }, [formatDate, onGoToTenant, handleTenantMoveOut]);
 
-  const tenantOptions = useMemo(() => tenants, [tenants]);
-  const selectedTenants = useMemo(() => tenants.filter(tenant => contractForm.tenant_ids.includes(tenant.id)), [tenants, contractForm.tenant_ids]);
+  const tenantOptions = useMemo(() => {
+    // Ensure we always return an array
+    return Array.isArray(tenants) ? tenants : [];
+  }, [tenants]);
+
+  const selectedTenants = useMemo(() => {
+    const validTenants = Array.isArray(tenants) ? tenants : [];
+    const validTenantIds = Array.isArray(contractForm.tenant_ids) ? contractForm.tenant_ids : [];
+    return validTenants.filter(tenant => validTenantIds.includes(tenant.id));
+  }, [tenants, contractForm.tenant_ids]);
 
   const renderAutocompleteInput = useCallback((params) => {
-    console.log('Autocomplete renderInput called');
     return (
       <TextField
         {...params}
@@ -435,7 +505,8 @@ function ContractManagementDialog({
   }, []);
 
   const renderAutocompleteOption = useCallback((props, tenant, { selected }) => {
-    console.log('Autocomplete renderOption called for tenant:', tenant.id);
+    if (!tenant || !tenant.id) return null;
+
     return (
       <li {...props} key={tenant.id}>
         <Checkbox
@@ -626,10 +697,13 @@ function ContractManagementDialog({
                                 </Typography>
                                 <Typography variant="body2" fontWeight="medium">
                                   {contract.tenants?.length || 0} assigned
+                                  {contract.tenants?.filter(t => t.move_out_date).length > 0 &&
+                                    ` (${contract.tenants.filter(t => t.move_out_date).length} moved out)`
+                                  }
                                 </Typography>
                                 {contract.tenants?.length > 0 && (
                                   <Typography variant="caption" color="text.secondary">
-                                    Primary: {contract.tenants.find(t => t.is_primary)?.tenant?.name || 'None'}
+                                    Primary: {contract.tenants.find(t => t.is_primary && !t.move_out_date)?.tenant?.name || 'None'}
                                   </Typography>
                                 )}
                               </Box>
@@ -667,9 +741,9 @@ function ContractManagementDialog({
                                   key={ct.id}
                                   label={ct.tenant?.name || 'Unknown'}
                                   size="small"
-                                  variant={ct.is_primary ? "filled" : "outlined"}
-                                  color={ct.is_primary ? "primary" : "default"}
-                                  icon={ct.is_primary ? <StarIcon /> : <PersonIcon />}
+                                  variant={ct.is_primary && !ct.move_out_date ? "filled" : "outlined"}
+                                  color={ct.move_out_date ? "error" : ct.is_primary ? "primary" : "default"}
+                                  icon={ct.move_out_date ? <MoveOutIcon /> : ct.is_primary ? <StarIcon /> : <PersonIcon />}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleTenantClick(ct);
@@ -677,7 +751,7 @@ function ContractManagementDialog({
                                   sx={{
                                     cursor: onGoToTenant ? 'pointer' : 'default',
                                     '&:hover': onGoToTenant ? {
-                                      backgroundColor: ct.is_primary ? 'primary.700' : 'grey.300'
+                                      backgroundColor: ct.is_primary && !ct.move_out_date ? 'primary.700' : 'grey.300'
                                     } : {}
                                   }}
                                 />
@@ -831,8 +905,6 @@ function ContractManagementDialog({
                   label="Contract Number *"
                   value={contractForm.contract_number}
                   onChange={handleContractNumberChange}
-                  onFocus={() => console.log('Contract Number focused')}
-                  onBlur={() => console.log('Contract Number blurred')}
                   placeholder="e.g., APT001-2025-01"
                   helperText="Enter a unique identifier for this contract"
                   inputProps={{ 'data-testid': 'contract-number-input' }}
@@ -915,11 +987,12 @@ function ContractManagementDialog({
                 <Autocomplete
                   multiple
                   options={tenantOptions}
-                  getOptionLabel={(tenant) => tenant.name}
+                  getOptionLabel={(tenant) => tenant?.name || 'Unknown'}
                   value={selectedTenants}
                   onChange={handleTenantIdsChange}
                   renderOption={renderAutocompleteOption}
                   renderInput={renderAutocompleteInput}
+                  isOptionEqualToValue={(option, value) => option?.id === value?.id}
                 />
               </Grid>
 
@@ -931,8 +1004,6 @@ function ContractManagementDialog({
                   rows={3}
                   value={contractForm.notes}
                   onChange={handleNotesChange}
-                  onFocus={() => console.log('Notes focused')}
-                  onBlur={() => console.log('Notes blurred')}
                   placeholder="Additional notes about this contract period..."
                   inputProps={{ 'data-testid': 'notes-input' }}
                 />

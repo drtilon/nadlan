@@ -1,4 +1,4 @@
-// components/EnhancedTenantForm.jsx
+// components/EnhancedTenantForm.jsx - UPDATED with Passport ID field
 import React, { useState, useEffect } from 'react';
 import {
   Grid,
@@ -11,7 +11,7 @@ import {
   Typography,
   Box
 } from '@mui/material';
-import { PersonAdd as PersonAddIcon, Save as SaveIcon } from '@mui/icons-material';
+import { PersonAdd as PersonAddIcon, Save as SaveIcon, ContactPage as PassportIcon, Wc as GenderIcon } from '@mui/icons-material';
 
 function EnhancedTenantForm({
   formData,
@@ -41,8 +41,9 @@ function EnhancedTenantForm({
         lastName: ''
       });
     }
-  }, [editingTenant]);  // Update full name when first or last name changes
+  }, [editingTenant]);
 
+  // Update full name when first or last name changes
   useEffect(() => {
     const fullName = `${nameFields.firstName} ${nameFields.lastName}`.trim();
     setFormData(prev => ({
@@ -108,6 +109,21 @@ function EnhancedTenantForm({
             />
           </Grid>
 
+          <Grid item xs={12}>
+            <TextField
+              fullWidth
+              label="Full Name"
+              name="name"
+              value={formData.name || ''}
+              disabled
+              variant="filled"
+              helperText="Auto-generated from first and last name"
+              InputLabelProps={{
+                sx: { fontSize: '1rem', fontWeight: 'medium' }
+              }}
+            />
+          </Grid>
+
           <Grid item xs={12} sm={6}>
             <TextField
               fullWidth
@@ -122,6 +138,55 @@ function EnhancedTenantForm({
                 sx: { fontSize: '1rem', fontWeight: 'medium' }
               }}
             />
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <TextField
+              select
+              fullWidth
+              label="Gender"
+              name="gender"
+              value={formData.gender || ''}
+              onChange={handleInputChange}
+              variant="filled"
+              InputLabelProps={{
+                sx: { fontSize: '1rem', fontWeight: 'medium' }
+              }}
+              SelectProps={{
+                native: true,
+              }}
+            >
+              <option value=""></option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other</option>
+              <option value="prefer_not_to_say">Prefer not to say</option>
+            </TextField>
+          </Grid>
+
+          <Grid item xs={12} sm={6}>
+            <TextField
+              fullWidth
+              label="Passport ID"
+              name="passport_id"
+              value={formData.passport_id || ''}
+              onChange={handleInputChange}
+              variant="filled"
+              placeholder="Enter passport ID (optional)"
+              InputLabelProps={{
+                sx: { fontSize: '1rem', fontWeight: 'medium' }
+              }}
+              helperText="Passport or ID document number"
+            />
+          </Grid>
+
+          <Grid item xs={12}>
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="subtitle1" gutterBottom fontWeight="medium">
+                Contact Information
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+            </Box>
           </Grid>
 
           <Grid item xs={12} sm={6}>
@@ -153,7 +218,7 @@ function EnhancedTenantForm({
             />
           </Grid>
 
-          <Grid item xs={12} sm={6}>
+          <Grid item xs={12}>
             <TextField
               fullWidth
               label="Refund IBAN"
@@ -162,6 +227,7 @@ function EnhancedTenantForm({
               onChange={handleInputChange}
               variant="filled"
               placeholder="DE89 3704 0044 0532 0130 00"
+              helperText="Bank account for security deposit refunds"
               InputLabelProps={{
                 sx: { fontSize: '1rem', fontWeight: 'medium' }
               }}

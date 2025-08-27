@@ -1,4 +1,4 @@
-// TenantFormDialog.jsx - Correct tenant creation dialog
+// TenantFormDialog.jsx - UPDATED with Passport ID and Gender fields
 import React, { useState } from 'react';
 import {
   Dialog,
@@ -28,7 +28,9 @@ function TenantFormDialog({
     email: '',
     phone: '',
     bornOn: '',
-    refundIban: ''
+    refundIban: '',
+    passport_id: '',
+    gender: ''
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -101,7 +103,9 @@ function TenantFormDialog({
       email: '',
       phone: '',
       bornOn: '',
-      refundIban: ''
+      refundIban: '',
+      passport_id: '',
+      gender: ''
     });
     onClose();
   };
@@ -204,6 +208,39 @@ function TenantFormDialog({
                 onChange={handleChange}
                 variant="outlined"
                 InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+
+            <Grid item xs={12} sm={6}>
+              <TextField
+                select
+                fullWidth
+                label="Gender"
+                name="gender"
+                value={tenantData.gender}
+                onChange={handleChange}
+                variant="outlined"
+                SelectProps={{
+                  native: true,
+                }}
+              >
+                <option value=""></option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="other">Other</option>
+                <option value="prefer_not_to_say">Prefer not to say</option>
+              </TextField>
+            </Grid>
+
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                label="Passport ID"
+                name="passport_id"
+                value={tenantData.passport_id}
+                onChange={handleChange}
+                variant="outlined"
+                placeholder="Enter passport ID (optional)"
               />
             </Grid>
 

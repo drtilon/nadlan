@@ -1,4 +1,4 @@
-# routes/contract_periods.py - FIXED VERSION
+# routes/contract_periods.py - COMPLETE VERSION with Move-Out functionality
 from flask import Blueprint, request, jsonify, current_app, g
 from .auth import token_required, role_required
 from extentions import db
@@ -10,32 +10,28 @@ import json
 
 contract_periods_bp = Blueprint("contract_periods_bp", __name__)
 
-# ================ API ENDPOINTS ================
+# ================ EXISTING API ENDPOINTS ================
 
 @contract_periods_bp.route("/apartments/<int:apartment_id>/contracts", methods=["GET"])
 @token_required
 def get_apartment_contracts(apartment_id):
-    """Get all contract periods for a specific apartment - FIXED VERSION"""
+    """Get all contract periods for a specific apartment"""
     try:
         apartment = Apartment.query.get(apartment_id)
         if not apartment:
             return jsonify({"message": "Apartment not found"}), 404
 
-        # Query contracts with eager loading to prevent recursion
         contracts = db.session.query(ContractPeriod)\
             .filter_by(apartment_id=apartment_id)\
             .order_by(ContractPeriod.start_date.desc())\
             .all()
 
-        # Manually build contract data to avoid recursion
         contracts_data = []
         for contract in contracts:
-            # Get contract tenants with tenant info
             contract_tenants = db.session.query(ContractTenant)\
                 .filter_by(contract_period_id=contract.id)\
                 .all()
 
-            # Build tenants list for this contract
             tenants_data = []
             for ct in contract_tenants:
                 tenant = db.session.query(Tenant).get(ct.tenant_id)
@@ -58,7 +54,6 @@ def get_apartment_contracts(apartment_id):
                         "created_at": ct.created_at.isoformat() if ct.created_at else None
                     })
 
-            # Build contract data
             contract_data = {
                 "id": contract.id,
                 "apartment_id": contract.apartment_id,
@@ -76,7 +71,7 @@ def get_apartment_contracts(apartment_id):
                 "apartment_address": apartment.address if apartment else None,
                 "is_current": is_current_contract(contract),
                 "duration_days": calculate_duration_days(contract),
-                "payments_count": 0  # You can add payment count logic here if needed
+                "payments_count": 0
             }
 
             contracts_data.append(contract_data)
@@ -97,23 +92,19 @@ def create_contract_period():
         if not data:
             return jsonify({"message": "No data provided"}), 400
 
-        # Validate required fields
         required_fields = ["apartment_id", "start_date", "monthly_rent"]
         for field in required_fields:
             if field not in data:
                 return jsonify({"message": f"Missing required field: {field}"}), 400
 
-        # Check if apartment exists
         apartment = Apartment.query.get(data["apartment_id"])
         if not apartment:
             return jsonify({"message": "Apartment not found"}), 404
 
-        # Contract number is required
         contract_number = data.get("contract_number")
         if not contract_number:
             return jsonify({"message": "Contract number is required"}), 400
 
-        # Check for overlapping contracts
         overlapping = check_overlapping_contracts(
             data["apartment_id"],
             data["start_date"],
@@ -125,7 +116,6 @@ def create_contract_period():
                 "overlapping_contract": overlapping
             }), 400
 
-        # Create new contract period
         contract = ContractPeriod(
             apartment_id=data["apartment_id"],
             contract_number=contract_number,
@@ -139,16 +129,14 @@ def create_contract_period():
         )
 
         db.session.add(contract)
-        db.session.flush()  # Get the contract ID
+        db.session.flush()
 
-        # Add tenants to contract if provided
         tenant_ids = data.get("tenant_ids", [])
         if tenant_ids:
             add_tenants_to_contract(contract.id, tenant_ids)
 
         db.session.commit()
 
-        # Log the action
         ActivityLogger.log_apartment_action(
             action="create_contract_period",
             apartment_id=data["apartment_id"],
@@ -185,7 +173,6 @@ def update_contract_period(contract_id):
         if not data:
             return jsonify({"message": "No data provided"}), 400
 
-        # Update basic fields
         if "contract_number" in data:
             contract.contract_number = data["contract_number"]
         if "start_date" in data:
@@ -203,19 +190,14 @@ def update_contract_period(contract_id):
 
         contract.updated_at = datetime.utcnow()
 
-        # Update tenants if provided
         if "tenant_ids" in data:
-            # Remove existing tenant assignments
             ContractTenant.query.filter_by(contract_period_id=contract_id).delete()
-
-            # Add new tenant assignments
             tenant_ids = data["tenant_ids"]
             if tenant_ids:
                 add_tenants_to_contract(contract_id, tenant_ids)
 
         db.session.commit()
 
-        # Log the action
         ActivityLogger.log_apartment_action(
             action="update_contract_period",
             apartment_id=contract.apartment_id,
@@ -245,11 +227,9 @@ def delete_contract_period(contract_id):
         apartment_id = contract.apartment_id
         contract_number = contract.contract_number
 
-        # Delete contract (cascade will handle contract_tenants)
         db.session.delete(contract)
         db.session.commit()
 
-        # Log the action
         ActivityLogger.log_apartment_action(
             action="delete_contract_period",
             apartment_id=apartment_id,
@@ -266,6 +246,440 @@ def delete_contract_period(contract_id):
         db.session.rollback()
         return jsonify({"message": "Error deleting contract period", "error": str(e)}), 500
 
+# ================ NEW MOVE-OUT ENDPOINTS ================
+
+@contract_periods_bp.route("/contract-tenants/<int:contract_tenant_id>/move-out", methods=["PUT"])
+@token_required
+def move_out_tenant(contract_tenant_id):
+    """Move out a tenant by setting their move_out_date"""
+    try:
+        contract_tenant = ContractTenant.query.get(contract_tenant_id)
+        if not contract_tenant:
+            return jsonify({"message": "Contract tenant record not found"}), 404
+
+        tenant = contract_tenant.tenant
+        contract = db.session.query(ContractPeriod).get(contract_tenant.contract_period_id)
+
+        if not tenant:
+            return jsonify({"message": "Associated tenant not found"}), 404
+        if not contract:
+            return jsonify({"message": "Associated contract not found"}), 404
+
+        data = request.get_json()
+        move_out_date_str = data.get('move_out_date')
+
+        if not move_out_date_str:
+            return jsonify({"message": "move_out_date is required"}), 400
+
+        try:
+            move_out_date = datetime.strptime(move_out_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+        if contract_tenant.move_in_date and move_out_date < contract_tenant.move_in_date:
+            return jsonify({"message": "Move-out date cannot be before move-in date"}), 400
+
+        if move_out_date > date.today():
+            return jsonify({"message": "Move-out date cannot be in the future"}), 400
+
+        # Update the move-out date
+        contract_tenant.move_out_date = move_out_date
+
+        # Add notes about the move-out
+        notes = data.get('notes', '')
+        if notes:
+            existing_notes = contract_tenant.notes or ''
+            contract_tenant.notes = f"{existing_notes}\n\nMoved out on {move_out_date}: {notes}".strip()
+        else:
+            existing_notes = contract_tenant.notes or ''
+            contract_tenant.notes = f"{existing_notes}\n\nMoved out on {move_out_date}".strip()
+
+        # IMPORTANT: Update tenant's apartment_id to None if they're no longer in any active contract
+        active_contracts = db.session.query(ContractTenant)\
+            .join(ContractPeriod)\
+            .filter(
+                ContractTenant.tenant_id == tenant.id,
+                ContractTenant.move_out_date.is_(None),
+                ContractPeriod.status == 'active'
+            ).count()
+
+        if active_contracts == 0:  # No active contracts after this move-out
+            tenant.apartment_id = None
+
+        db.session.commit()
+
+        ActivityLogger.log_activity(
+            action="move_out",
+            entity_type="tenant",
+            entity_id=tenant.id,
+            details={
+                "move_out_date": move_out_date.isoformat(),
+                "contract_tenant_id": contract_tenant_id,
+                "contract_id": contract.id,
+                "apartment_id": contract.apartment_id,
+                "notes": notes
+            }
+        )
+
+        current_app.logger.info(f"Tenant {tenant.name} moved out on {move_out_date} from contract {contract.contract_number}")
+
+        return jsonify({
+            "message": f"Tenant {tenant.name} moved out successfully",
+            "tenant": {
+                "id": tenant.id,
+                "name": tenant.name,
+                "move_out_date": move_out_date.isoformat()
+            },
+            "contract": {
+                "id": contract.id,
+                "contract_number": contract.contract_number
+            }
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error moving out tenant: {e}")
+        return jsonify({"message": "Error moving out tenant", "error": str(e)}), 500
+
+@contract_periods_bp.route("/tenants/<int:tenant_id>/move-history", methods=["GET"])
+@token_required
+def get_tenant_move_history(tenant_id):
+    """Get complete move history for a tenant across all apartments and contracts"""
+    """FIXED: MySQL compatible version"""
+    try:
+        tenant = Tenant.query.get(tenant_id)
+        if not tenant:
+            return jsonify({"message": "Tenant not found"}), 404
+
+        # FIXED: MySQL compatible query - avoid NULLS FIRST syntax
+        # Get all contract tenant records for this tenant, ordered properly for MySQL
+        contract_tenants = db.session.query(ContractTenant)\
+            .filter(ContractTenant.tenant_id == tenant_id)\
+            .order_by(
+                # MySQL compatible NULL handling
+                db.case(
+                    (ContractTenant.move_out_date.is_(None), 0),  # Active contracts first (NULL move_out_date)
+                    else_=1
+                ),
+                ContractTenant.move_out_date.desc(),  # Most recent move-out dates first
+                ContractTenant.move_in_date.desc()    # Then by move-in date
+            )\
+            .all()
+
+        move_history = []
+        for ct in contract_tenants:
+            # Get contract and apartment separately to avoid relationship issues
+            contract = db.session.query(ContractPeriod).get(ct.contract_period_id)
+            apartment = db.session.query(Apartment).get(contract.apartment_id) if contract else None
+
+            history_entry = {
+                "contract_tenant_id": ct.id,
+                "contract_id": ct.contract_period_id,
+                "contract_number": contract.contract_number if contract else 'Unknown',
+                "apartment_id": contract.apartment_id if contract else None,
+                "apartment_address": apartment.address if apartment else 'Unknown',
+                "move_in_date": ct.move_in_date.isoformat() if ct.move_in_date else None,
+                "move_out_date": ct.move_out_date.isoformat() if ct.move_out_date else None,
+                "is_primary": ct.is_primary,
+                "rent_share_percentage": float(ct.rent_share_percentage) if ct.rent_share_percentage else 100.0,
+                "monthly_rent": float(contract.monthly_rent) if contract and contract.monthly_rent else 0,
+                "notes": ct.notes,
+                "is_current": not ct.move_out_date and contract and contract.status == 'active',
+                "duration_days": None
+            }
+
+            # Calculate duration if we have both dates
+            if ct.move_in_date:
+                end_date = ct.move_out_date or date.today()
+                history_entry["duration_days"] = (end_date - ct.move_in_date).days
+
+            move_history.append(history_entry)
+
+        # Calculate summary statistics
+        total_apartments = len(set(entry["apartment_id"] for entry in move_history if entry["apartment_id"]))
+        current_apartment = next((entry for entry in move_history if entry["is_current"]), None)
+        total_rent_paid_estimate = sum(
+            (entry["monthly_rent"] * (entry["duration_days"] / 30.44)) if entry["duration_days"] and entry["monthly_rent"]
+            else 0 for entry in move_history
+        )
+
+        return jsonify({
+            "tenant": {
+                "id": tenant.id,
+                "name": tenant.name,
+                "email": tenant.email,
+                "phone": tenant.phone
+            },
+            "move_history": move_history,
+            "summary": {
+                "total_apartments_lived": total_apartments,
+                "total_contracts": len(move_history),
+                "current_apartment": current_apartment,
+                "estimated_total_rent_paid": total_rent_paid_estimate,
+                "is_currently_active": current_apartment is not None
+            }
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error retrieving tenant move history: {e}")
+        return jsonify({"message": "Error retrieving tenant move history", "error": str(e)}), 500
+
+@contract_periods_bp.route("/tenants/<int:tenant_id>/transfer", methods=["POST"])
+@token_required
+@role_required("admin")
+def transfer_tenant_to_apartment(tenant_id):
+    """Transfer a tenant from their current apartment to a new apartment"""
+    try:
+        tenant = Tenant.query.get(tenant_id)
+        if not tenant:
+            return jsonify({"message": "Tenant not found"}), 404
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"message": "No data provided"}), 400
+
+        new_apartment_id = data.get('new_apartment_id')
+        move_out_date_str = data.get('move_out_date')
+        move_in_date_str = data.get('move_in_date')
+        notes = data.get('notes', '')
+
+        if not new_apartment_id:
+            return jsonify({"message": "new_apartment_id is required"}), 400
+
+        new_apartment = Apartment.query.get(new_apartment_id)
+        if not new_apartment:
+            return jsonify({"message": "New apartment not found"}), 404
+
+        try:
+            move_out_date = datetime.strptime(move_out_date_str, '%Y-%m-%d').date() if move_out_date_str else date.today()
+            move_in_date = datetime.strptime(move_in_date_str, '%Y-%m-%d').date() if move_in_date_str else date.today()
+        except ValueError:
+            return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+        if move_in_date < move_out_date:
+            return jsonify({"message": "Move-in date cannot be before move-out date"}), 400
+
+        # Step 1: Move out from current apartment
+        current_contract_tenants = ContractTenant.query.join(ContractPeriod).filter(
+            ContractTenant.tenant_id == tenant_id,
+            ContractTenant.move_out_date.is_(None),
+            ContractPeriod.status == 'active'
+        ).all()
+
+        moved_out_contracts = []
+        for ct in current_contract_tenants:
+            ct.move_out_date = move_out_date
+            if notes:
+                existing_notes = ct.notes or ''
+                ct.notes = f"{existing_notes}\n\nMoved out on {move_out_date}: {notes}".strip()
+            moved_out_contracts.append(ct.contract_period_id)
+
+        # Step 2: Update tenant's apartment_id
+        old_apartment_id = tenant.apartment_id
+        tenant.apartment_id = new_apartment_id
+
+        # Step 3: Optionally move into new apartment
+        new_contract_tenant = None
+        if data.get('assign_to_new_contract', True):
+            active_contract = ContractPeriod.query.filter_by(
+                apartment_id=new_apartment_id,
+                status='active'
+            ).filter(
+                ContractPeriod.start_date <= move_in_date
+            ).filter(
+                or_(
+                    ContractPeriod.end_date.is_(None),
+                    ContractPeriod.end_date >= move_in_date
+                )
+            ).first()
+
+            if active_contract:
+                existing_assignment = ContractTenant.query.filter_by(
+                    contract_period_id=active_contract.id,
+                    tenant_id=tenant_id
+                ).first()
+
+                if not existing_assignment:
+                    active_tenants_count = ContractTenant.query.filter_by(
+                        contract_period_id=active_contract.id
+                    ).filter(ContractTenant.move_out_date.is_(None)).count()
+
+                    rent_share = 100.0 / (active_tenants_count + 1)
+
+                    existing_tenants = ContractTenant.query.filter_by(
+                        contract_period_id=active_contract.id
+                    ).filter(ContractTenant.move_out_date.is_(None)).all()
+
+                    for et in existing_tenants:
+                        et.rent_share_percentage = rent_share
+
+                    new_contract_tenant = ContractTenant(
+                        contract_period_id=active_contract.id,
+                        tenant_id=tenant_id,
+                        is_primary=False,
+                        move_in_date=move_in_date,
+                        rent_share_percentage=rent_share,
+                        notes=f"Transferred from apartment {old_apartment_id} on {move_out_date}",
+                        created_at=datetime.utcnow()
+                    )
+                    db.session.add(new_contract_tenant)
+
+        db.session.commit()
+
+        ActivityLogger.log_activity(
+            action="transfer",
+            entity_type="tenant",
+            entity_id=tenant_id,
+            details={
+                "old_apartment_id": old_apartment_id,
+                "new_apartment_id": new_apartment_id,
+                "move_out_date": move_out_date.isoformat(),
+                "move_in_date": move_in_date.isoformat(),
+                "notes": notes
+            }
+        )
+
+        result_message = f"Tenant {tenant.name} transferred successfully"
+        if new_contract_tenant:
+            result_message += f" and assigned to contract {active_contract.contract_number}"
+
+        return jsonify({
+            "message": result_message,
+            "tenant": tenant.to_dict(),
+            "old_apartment_id": old_apartment_id,
+            "new_apartment_id": new_apartment_id,
+            "new_contract_assignment": new_contract_tenant.to_dict() if new_contract_tenant else None
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error transferring tenant: {e}")
+        return jsonify({"message": "Error transferring tenant", "error": str(e)}), 500
+
+@contract_periods_bp.route("/apartments/<int:apartment_id>/active-tenants", methods=["GET"])
+@token_required
+def get_active_tenants_for_apartment(apartment_id):
+    """Get only the currently active tenants for an apartment (not moved out)"""
+    try:
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
+
+        # Get active contract tenants (not moved out) for this apartment
+        active_contract_tenants = db.session.query(ContractTenant)\
+            .join(ContractPeriod)\
+            .join(Tenant)\
+            .filter(
+                ContractPeriod.apartment_id == apartment_id,
+                ContractTenant.move_out_date.is_(None),
+                ContractPeriod.status == 'active'
+            )\
+            .order_by(ContractTenant.is_primary.desc(), ContractTenant.move_in_date.asc())\
+            .all()
+
+        active_tenants = []
+        for ct in active_contract_tenants:
+            tenant = ct.tenant
+            contract = db.session.query(ContractPeriod).get(ct.contract_period_id)
+
+            tenant_data = {
+                "tenant_id": tenant.id,
+                "name": tenant.name,
+                "email": tenant.email,
+                "phone": tenant.phone,
+                "contract_tenant_id": ct.id,
+                "contract_id": contract.id,
+                "contract_number": contract.contract_number,
+                "is_primary": ct.is_primary,
+                "move_in_date": ct.move_in_date.isoformat() if ct.move_in_date else None,
+                "move_out_date": ct.move_out_date.isoformat() if ct.move_out_date else None,
+                "rent_share_percentage": float(ct.rent_share_percentage) if ct.rent_share_percentage else 100.0,
+                "monthly_rent_portion": (float(contract.monthly_rent) * float(ct.rent_share_percentage) / 100.0) if contract.monthly_rent and ct.rent_share_percentage else 0,
+                "notes": ct.notes
+            }
+            active_tenants.append(tenant_data)
+
+        return jsonify({
+            "apartment": {
+                "id": apartment.id,
+                "address": apartment.address
+            },
+            "active_tenants": active_tenants,
+            "total_active": len(active_tenants),
+            "total_rent_shares": sum(t["rent_share_percentage"] for t in active_tenants)
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error retrieving active tenants: {e}")
+        return jsonify({"message": "Error retrieving active tenants", "error": str(e)}), 500
+
+# ================ UPDATED TENANT ENDPOINTS ================
+
+@contract_periods_bp.route("/tenants/<int:tenant_id>/current-contract", methods=["GET"])
+@token_required
+def get_tenant_current_contract(tenant_id):
+    """Get the current active contract for a tenant"""
+    try:
+        tenant = Tenant.query.get(tenant_id)
+        if not tenant:
+            return jsonify({"message": "Tenant not found"}), 404
+
+        # Find current active contract through ContractTenant
+        current_contract_tenant = db.session.query(ContractTenant)\
+            .join(ContractPeriod)\
+            .filter(
+                ContractTenant.tenant_id == tenant_id,
+                ContractTenant.move_out_date.is_(None),
+                ContractPeriod.status == 'active',
+                ContractPeriod.start_date <= date.today()
+            )\
+            .filter(
+                or_(
+                    ContractPeriod.end_date.is_(None),
+                    ContractPeriod.end_date >= date.today()
+                )
+            )\
+            .first()
+
+        if not current_contract_tenant:
+            return jsonify({
+                "tenant": tenant.to_dict(include_apartment=False, include_contracts=False),
+                "current_contract": None,
+                "is_active": False
+            }), 200
+
+        contract = db.session.query(ContractPeriod).get(current_contract_tenant.contract_period_id)
+        apartment = db.session.query(Apartment).get(contract.apartment_id)
+
+        contract_info = {
+            "contract_period_id": contract.id,
+            "contract_number": contract.contract_number,
+            "start_date": contract.start_date.isoformat() if contract.start_date else None,
+            "end_date": contract.end_date.isoformat() if contract.end_date else None,
+            "monthly_rent": float(contract.monthly_rent) if contract.monthly_rent else 0,
+            "is_primary": current_contract_tenant.is_primary,
+            "rent_share_percentage": float(current_contract_tenant.rent_share_percentage) if current_contract_tenant.rent_share_percentage else 100.0,
+            "move_in_date": current_contract_tenant.move_in_date.isoformat() if current_contract_tenant.move_in_date else None,
+            "days_until_expiry": (contract.end_date - date.today()).days if contract.end_date else None,
+            "status": contract.status,
+            "apartment": {
+                "id": apartment.id,
+                "address": apartment.address,
+                "rooms": apartment.rooms,
+                "size": apartment.size
+            } if apartment else None
+        }
+
+        return jsonify({
+            "tenant": tenant.to_dict(include_apartment=False, include_contracts=False),
+            "current_contract": contract_info,
+            "is_active": True
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error getting tenant current contract: {e}")
+        return jsonify({"message": "Error getting tenant current contract", "error": str(e)}), 500
+
 # ================ HELPER FUNCTIONS ================
 
 def is_current_contract(contract):
@@ -279,7 +693,6 @@ def calculate_duration_days(contract):
     """Get the duration of the contract in days"""
     if not contract.start_date:
         return 0
-
     end_date = contract.end_date or date.today()
     return (end_date - contract.start_date).days
 
@@ -303,19 +716,15 @@ def check_overlapping_contracts(apartment_id, start_date, end_date):
         start_date_obj = datetime.strptime(start_date, "%Y-%m-%d").date()
         end_date_obj = datetime.strptime(end_date, "%Y-%m-%d").date() if end_date else None
 
-        # Query for overlapping contracts
         query = ContractPeriod.query.filter_by(apartment_id=apartment_id)
 
         if end_date_obj:
-            # Contract has an end date - check for any overlap
             query = query.filter(
                 or_(
-                    # Existing contract starts before new contract ends and has no end date
                     and_(
                         ContractPeriod.start_date <= end_date_obj,
                         ContractPeriod.end_date.is_(None)
                     ),
-                    # Existing contract overlaps with new contract period
                     and_(
                         ContractPeriod.start_date <= end_date_obj,
                         ContractPeriod.end_date >= start_date_obj
@@ -323,7 +732,6 @@ def check_overlapping_contracts(apartment_id, start_date, end_date):
                 )
             )
         else:
-            # New contract has no end date - check if any existing contract starts after new start date
             query = query.filter(ContractPeriod.start_date >= start_date_obj)
 
         overlapping = query.first()

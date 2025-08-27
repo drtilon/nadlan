@@ -1,4 +1,4 @@
-// components/TenantsPanel.jsx - FIXED VERSION with ApartmentCard popup
+// components/TenantsPanel.jsx - UPDATED with Passport ID display
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -41,7 +41,11 @@ import {
   Visibility as ViewIcon,
   CreditCard as IbanIcon,
   Cake as BirthdayIcon,
-  Close as CloseIcon
+  Close as CloseIcon,
+  Schedule as ContractIcon,
+  Warning as ExpiryIcon,
+  ContactPage as PassportIcon,
+  Wc as GenderIcon
 } from '@mui/icons-material';
 import api from '../../utils/api';
 import EnhancedTenantForm from './EnhancedTenantForm';
@@ -63,6 +67,8 @@ function TenantsPanel({ showNotification }) {
     phone: '',
     bornOn: '',
     refundIban: '',
+    passport_id: '',
+    gender: '',
     apartment_id: ''
   });
   const [filteredTenants, setFilteredTenants] = useState([]);
@@ -77,92 +83,89 @@ function TenantsPanel({ showNotification }) {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [paginatedTenants, setPaginatedTenants] = useState([]);
 
-  // Fetch tenants and apartments data
-  useEffect(() => {
-    fetchData();
-  }, []);
-
-  // Filter tenants based on search query
-  useEffect(() => {
-    if (!searchQuery) {
-      setFilteredTenants(tenants);
-    } else {
-      const query = searchQuery.toLowerCase();
-      const filtered = tenants.filter(tenant =>
-        tenant.name.toLowerCase().includes(query) ||
-        (tenant.email && tenant.email.toLowerCase().includes(query)) ||
-        (tenant.phone && tenant.phone.toLowerCase().includes(query)) ||
-        (tenant.apartment_address && tenant.apartment_address.toLowerCase().includes(query)) ||
-        (tenant.bornOn && tenant.bornOn.includes(query)) ||
-        (tenant.refundIban && tenant.refundIban.toLowerCase().includes(query))
-      );
-      setFilteredTenants(filtered);
-    }
-    // Reset to first page when search changes
-    setCurrentPage(1);
-  }, [searchQuery, tenants]);
-
-  // Update paginated tenants when filtered tenants or pagination settings change
-  useEffect(() => {
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    setPaginatedTenants(filteredTenants.slice(startIndex, endIndex));
-  }, [filteredTenants, currentPage, itemsPerPage]);
+  const resetFormData = () => {
+    setFormData({
+      name: '',
+      email: '',
+      phone: '',
+      bornOn: '',
+      refundIban: '',
+      passport_id: '',
+      gender: '',
+      apartment_id: ''
+    });
+  };
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      // Fetch tenants
-      const tenantsResponse = await api.get('/tenants/list');
-      setTenants(tenantsResponse.data);
-      setFilteredTenants(tenantsResponse.data);
+      const [tenantsResponse, apartmentsResponse] = await Promise.all([
+        api.get('/tenants/list'),
+        api.get('/list') // Fixed: Use correct apartments endpoint
+      ]);
 
-      // UPDATED: Properly handle apartment API response structure
-      const apartmentsResponse = await api.get('/list');
-      let apartmentsData = [];
-
-      if (apartmentsResponse.data) {
-        // Handle both paginated and direct array responses
-        if (apartmentsResponse.data.apartments) {
-          apartmentsData = apartmentsResponse.data.apartments;
-        } else if (Array.isArray(apartmentsResponse.data)) {
-          apartmentsData = apartmentsResponse.data;
-        }
+      if (tenantsResponse.data && tenantsResponse.data.success) {
+        setTenants(tenantsResponse.data.tenants || []);
       }
 
-      setApartments(apartmentsData);
-      console.log('Loaded apartments:', apartmentsData.length);
+      // Handle apartment response structure
+      if (apartmentsResponse.data) {
+        if (apartmentsResponse.data.apartments) {
+          setApartments(apartmentsResponse.data.apartments || []);
+        } else if (Array.isArray(apartmentsResponse.data)) {
+          setApartments(apartmentsResponse.data);
+        }
+      }
     } catch (error) {
       console.error('Error fetching data:', error);
-      showNotification('Error loading data', 'error');
+      showNotification('Error fetching data', 'error');
     } finally {
       setLoading(false);
     }
   };
 
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Filter and search logic
+  useEffect(() => {
+    const filtered = tenants.filter(tenant =>
+      tenant.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      tenant.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      tenant.phone?.includes(searchQuery) ||
+      tenant.passport_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      tenant.gender?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    setFilteredTenants(filtered);
+  }, [tenants, searchQuery]);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(filteredTenants.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedTenants = filteredTenants.slice(startIndex, endIndex);
+
+  const getApartmentDetails = (apartmentId) => {
+    return apartments.find(apt => apt.id === apartmentId);
+  };
+
   const handleOpenDialog = (tenant = null) => {
+    setEditingTenant(tenant);
     if (tenant) {
-      setEditingTenant(tenant);
-      setFormData({
+              setFormData({
         name: tenant.name || '',
         email: tenant.email || '',
         phone: tenant.phone || '',
         bornOn: tenant.bornOn || '',
         refundIban: tenant.refundIban || '',
+        passport_id: tenant.passport_id || '',
+        gender: tenant.gender || '',
         apartment_id: tenant.apartment_id || ''
       });
     } else {
-      setEditingTenant(null);
-      setFormData({
-        name: '',
-        email: '',
-        phone: '',
-        bornOn: '',
-        refundIban: '',
-        apartment_id: ''
-      });
+      resetFormData();
     }
     setOpenDialog(true);
   };
@@ -170,7 +173,7 @@ function TenantsPanel({ showNotification }) {
   const handleCloseDialog = () => {
     setOpenDialog(false);
     setEditingTenant(null);
-    setFormSubmitting(false);
+    resetFormData();
   };
 
   const handleSubmit = async () => {
@@ -181,21 +184,27 @@ function TenantsPanel({ showNotification }) {
 
     setFormSubmitting(true);
     try {
-      if (editingTenant) {
-        // Update existing tenant
-        await api.put(`/tenants/${editingTenant.id}`, formData);
-        showNotification('Tenant updated successfully', 'success');
-      } else {
-        // Add new tenant
-        await api.post('/tenants/add', formData);
-        showNotification('Tenant added successfully', 'success');
-      }
+      const endpoint = editingTenant ? `/tenants/update/${editingTenant.id}` : '/tenants/add';
+      const method = editingTenant ? 'put' : 'post';
 
-      fetchData();
+      const response = await api[method](endpoint, formData);
+
+      showNotification(
+        `Tenant ${editingTenant ? 'updated' : 'added'} successfully`,
+        'success'
+      );
+
       handleCloseDialog();
+      fetchData();
     } catch (error) {
       console.error('Error saving tenant:', error);
-      showNotification('Error saving tenant data', 'error');
+      showNotification(
+        `Error ${editingTenant ? 'updating' : 'adding'} tenant: ${
+          error.response?.data?.message || error.message
+        }`,
+        'error'
+      );
+    } finally {
       setFormSubmitting(false);
     }
   };
@@ -210,54 +219,38 @@ function TenantsPanel({ showNotification }) {
 
     setFormSubmitting(true);
     try {
-      await api.delete(`/tenants/${tenantToDelete.id}`);
+      await api.delete(`/tenants/delete/${tenantToDelete.id}`);
       showNotification('Tenant deleted successfully', 'success');
-      fetchData();
       setConfirmDeleteOpen(false);
+      setTenantToDelete(null);
+      fetchData();
     } catch (error) {
       console.error('Error deleting tenant:', error);
       showNotification('Error deleting tenant', 'error');
     } finally {
       setFormSubmitting(false);
-      setTenantToDelete(null);
     }
   };
 
-  // Handle view tenant details with React Router
   const handleViewTenant = (tenant) => {
     navigate(`/tenants/${tenant.id}`);
   };
 
-  // UPDATED: Get apartment details by ID with fresh data
-  const getApartmentDetails = (apartmentId) => {
-    if (!apartments || !Array.isArray(apartments) || !apartmentId) {
-      return null;
-    }
-
-    return apartments.find(apt => apt.id === apartmentId);
-  };
-
-  // NEW: Handle apartment click to show ApartmentDetailsDialog
-  const handleApartmentClick = (apartmentId, e) => {
-    e.stopPropagation(); // Prevent row click
-    const apartment = getApartmentDetails(apartmentId);
+  const handleApartmentClick = (apartment) => {
     if (apartment) {
       setSelectedApartmentForDetails(apartment);
       setApartmentDetailsDialogOpen(true);
     }
   };
 
-  // NEW: Close apartment details dialog
   const handleCloseApartmentDetailsDialog = () => {
     setApartmentDetailsDialogOpen(false);
     setSelectedApartmentForDetails(null);
   };
 
-  // NEW: Handle apartment details dialog actions
-  const handleEditApartment = (apartment) => {
+  const handleEditApartment = (apartmentId) => {
     handleCloseApartmentDetailsDialog();
-    showNotification(`Editing apartment: ${apartment.address}`, 'info');
-    // You can add navigation or emit event to parent here
+    navigate(`/apartments/${apartmentId}`);
   };
 
   const handleGoToApartmentPayments = (apartmentId) => {
@@ -267,25 +260,41 @@ function TenantsPanel({ showNotification }) {
 
   const handleGenerateContract = (apartmentId) => {
     handleCloseApartmentDetailsDialog();
-    showNotification('Contract generation initiated', 'info');
-    // Add contract generation logic here
+    navigate(`/contracts/generate/${apartmentId}`);
   };
 
-  const handleExtendContract = (apartment) => {
+  const handleExtendContract = (apartmentId) => {
     handleCloseApartmentDetailsDialog();
-    showNotification(`Contract extension for: ${apartment.address}`, 'info');
-    // Add contract extension logic here
+    navigate(`/contracts/extend/${apartmentId}`);
   };
 
-  const handleOpenContractManagement = () => {
+  const handleOpenContractManagement = (apartmentId) => {
     handleCloseApartmentDetailsDialog();
-    showNotification('Opening contract management', 'info');
-    // Add contract management logic here
+    navigate(`/contracts/manage/${apartmentId}`);
   };
 
   const handleGoToTenantFromDetails = (tenantId) => {
     handleCloseApartmentDetailsDialog();
     navigate(`/tenants/${tenantId}`);
+  };
+
+  // Format contract expiry status
+  const getContractExpiryStatus = (contractInfo) => {
+    if (!contractInfo) return null;
+
+    const daysUntilExpiry = contractInfo.days_until_expiry;
+
+    if (daysUntilExpiry === null || daysUntilExpiry === undefined) {
+      return { status: 'ongoing', color: 'success', text: 'Ongoing' };
+    }
+
+    if (daysUntilExpiry < 0) {
+      return { status: 'expired', color: 'error', text: 'Expired' };
+    } else if (daysUntilExpiry <= 30) {
+      return { status: 'expiring', color: 'warning', text: `${daysUntilExpiry}d left` };
+    } else {
+      return { status: 'active', color: 'success', text: `${daysUntilExpiry}d left` };
+    }
   };
 
   // Format date for display
@@ -331,7 +340,7 @@ function TenantsPanel({ showNotification }) {
 
         <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 2 }}>
           <TextField
-            placeholder="Search tenants..."
+            placeholder="Search tenants by name, email, phone, passport, or gender..."
             variant="outlined"
             size="small"
             value={searchQuery}
@@ -372,9 +381,8 @@ function TenantsPanel({ showNotification }) {
                     <TableHead sx={{ bgcolor: 'primary.light' }}>
                       <TableRow>
                         <TableCell>Tenant Name</TableCell>
-                        <TableCell>Contact Information</TableCell>
-                        <TableCell>Personal Details</TableCell>
-                        <TableCell>Assigned Property</TableCell>
+                        <TableCell>Contact & Personal Info</TableCell>
+                        <TableCell>Assigned Property & Contract</TableCell>
                         <TableCell align="right">Actions</TableCell>
                       </TableRow>
                     </TableHead>
@@ -413,57 +421,78 @@ function TenantsPanel({ showNotification }) {
                                     <Typography variant="body2">{tenant.phone}</Typography>
                                   </Box>
                                 )}
-                              </Stack>
-                            </TableCell>
-                            <TableCell>
-                              <Stack spacing={1}>
                                 {tenant.bornOn && (
                                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                     <BirthdayIcon fontSize="small" color="action" />
+                                    <Typography variant="body2">Born: {formatDate(tenant.bornOn)}</Typography>
+                                  </Box>
+                                )}
+                                {tenant.passport_id && (
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <PassportIcon fontSize="small" color="action" />
+                                    <Typography variant="body2">Passport: {tenant.passport_id}</Typography>
+                                  </Box>
+                                )}
+                                {tenant.gender && (
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <GenderIcon fontSize="small" color="action" />
                                     <Typography variant="body2">
-                                      {formatDate(tenant.bornOn)}
+                                      Gender: {tenant.gender.charAt(0).toUpperCase() + tenant.gender.slice(1).replace('_', ' ')}
                                     </Typography>
                                   </Box>
                                 )}
                                 {tenant.refundIban && (
                                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                     <IbanIcon fontSize="small" color="action" />
-                                    <Typography variant="body2">
-                                      {tenant.refundIban}
-                                    </Typography>
+                                    <Typography variant="body2">IBAN: {tenant.refundIban}</Typography>
                                   </Box>
                                 )}
                               </Stack>
                             </TableCell>
                             <TableCell>
                               {apartmentDetails ? (
-                                <Tooltip title="Click to view apartment details">
+                                <Stack spacing={1}>
                                   <Chip
                                     icon={<HomeIcon />}
                                     label={apartmentDetails.address}
                                     color="primary"
                                     variant="outlined"
                                     size="small"
-                                    clickable
-                                    onClick={(e) => handleApartmentClick(tenant.apartment_id, e)}
-                                    sx={{
-                                      cursor: 'pointer',
-                                      transition: 'all 0.2s ease',
-                                      '&:hover': {
-                                        backgroundColor: 'primary.50',
-                                        boxShadow: 2,
-                                        transform: 'translateY(-1px)'
-                                      }
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleApartmentClick(apartmentDetails);
                                     }}
+                                    sx={{ cursor: 'pointer' }}
                                   />
-                                </Tooltip>
+
+                                  {/* Contract Expiry Information */}
+                                  {tenant.contract_info && (() => {
+                                    const expiryStatus = getContractExpiryStatus(tenant.contract_info);
+                                    return expiryStatus ? (
+                                      <Chip
+                                        icon={<ContractIcon />}
+                                        label={expiryStatus.text}
+                                        color={expiryStatus.color}
+                                        size="small"
+                                        variant="outlined"
+                                      />
+                                    ) : null;
+                                  })()}
+
+                                  {!tenant.contract_info && (
+                                    <Chip
+                                      icon={<ExpiryIcon />}
+                                      label="No Contract"
+                                      color="default"
+                                      size="small"
+                                      variant="outlined"
+                                    />
+                                  )}
+                                </Stack>
                               ) : (
-                                <Chip
-                                  label="Not Assigned"
-                                  color="default"
-                                  variant="outlined"
-                                  size="small"
-                                />
+                                <Typography variant="body2" color="text.secondary">
+                                  No apartment assigned
+                                </Typography>
                               )}
                             </TableCell>
                             <TableCell align="right" onClick={(e) => e.stopPropagation()}>

@@ -1,4 +1,4 @@
-// TenantSelector.jsx - Complete fixed version
+// TenantSelector.jsx - Complete fixed version with Gender support
 import React from 'react';
 import {
   Box,
@@ -43,6 +43,11 @@ function TenantSelector({
     const parts = [];
     if (tenant.email) parts.push(`Email: ${tenant.email}`);
     if (tenant.phone) parts.push(`Phone: ${tenant.phone}`);
+    if (tenant.gender) {
+      const genderDisplay = tenant.gender.charAt(0).toUpperCase() + tenant.gender.slice(1).replace('_', ' ');
+      parts.push(`Gender: ${genderDisplay}`);
+    }
+    if (tenant.passport_id) parts.push(`Passport: ${tenant.passport_id}`);
     if (tenant.apartment_address) {
       parts.push(`Current apartment: ${tenant.apartment_address}`);
     }
@@ -89,97 +94,114 @@ function TenantSelector({
               avatar={
                 <Avatar
                   sx={{
-                    bgcolor: tenant.isPrimary ? 'primary.main' : 'grey.400',
-                    width: 28,
-                    height: 28,
+                    bgcolor: tenant.isPrimary ? 'primary.main' : 'secondary.main',
+                    color: 'white',
+                    width: 24,
+                    height: 24,
                     fontSize: '0.75rem'
                   }}
                 >
-                  <PersonIcon fontSize="small" />
+                  {getTenantDisplayName(tenant).charAt(0).toUpperCase()}
                 </Avatar>
               }
-              label={getTenantDisplayName(tenant)}
-              onDelete={() => onRemoveTenant && onRemoveTenant(index)}
-              onClick={() => onSetTenantAsPrimary && onSetTenantAsPrimary(index)}
-              color={tenant.isPrimary ? 'primary' : 'default'}
-              variant={tenant.isPrimary ? 'filled' : 'outlined'}
+              label={
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <Typography variant="body2" sx={{ fontWeight: tenant.isPrimary ? 'bold' : 'normal' }}>
+                    {getTenantDisplayName(tenant)}
+                  </Typography>
+                  {tenant.gender && (
+                    <Typography variant="caption" sx={{
+                      color: 'text.secondary',
+                      fontSize: '0.7rem',
+                      ml: 0.5
+                    }}>
+                      ({tenant.gender.charAt(0).toUpperCase()})
+                    </Typography>
+                  )}
+                </Box>
+              }
+              variant={tenant.isPrimary ? "filled" : "outlined"}
+              color={tenant.isPrimary ? "primary" : "default"}
+              onDelete={onRemoveTenant ? () => onRemoveTenant(tenant.id) : undefined}
+              onClick={onSetTenantAsPrimary ? () => onSetTenantAsPrimary(tenant.id) : undefined}
               sx={{
-                cursor: 'pointer',
-                '& .MuiChip-deleteIcon': {
-                  color: 'inherit'
+                cursor: onSetTenantAsPrimary ? 'pointer' : 'default',
+                '&:hover': {
+                  bgcolor: tenant.isPrimary ? 'primary.dark' : 'action.hover'
                 }
               }}
+              disabled={disabled}
             />
           </Tooltip>
         ))}
-        {safeTenantData.length === 0 && (
-          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
-            No tenants assigned to this apartment
-          </Typography>
-        )}
       </Box>
 
-      {/* Tenant selection and new tenant button */}
-      <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
+      {/* Add new tenant section */}
+      <Box sx={{ display: 'flex', gap: 2, alignItems: 'flex-end' }}>
         <Autocomplete
           fullWidth
           options={filteredAvailableTenants}
-          getOptionLabel={(option) => getTenantDisplayName(option)}
+          getOptionLabel={getTenantDisplayName}
           onChange={handleTenantSelect}
-          disabled={disabled || loading}
+          loading={loading}
+          disabled={disabled}
           renderInput={(params) => (
             <TextField
               {...params}
-              label="Add existing tenant"
+              label="Add Existing Tenant"
               variant="outlined"
-              placeholder="Search and select a tenant"
-              disabled={disabled || loading}
+              size="small"
+              placeholder="Search tenants by name..."
             />
           )}
-          renderOption={(props, option) => (
-            <Box component="li" {...props} key={option.id}>
-              <Box>
-                <Typography variant="body1">{getTenantDisplayName(option)}</Typography>
-                {option.email && (
-                  <Typography variant="caption" color="text.secondary">
-                    {option.email}
+          renderOption={(props, tenant) => (
+            <Box component="li" {...props}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
+                <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main' }}>
+                  {getTenantDisplayName(tenant).charAt(0).toUpperCase()}
+                </Avatar>
+                <Box sx={{ flex: 1 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 'medium' }}>
+                    {getTenantDisplayName(tenant)}
                   </Typography>
-                )}
-                {option.apartment_address && (
-                  <Typography variant="caption" color="text.secondary" display="block">
-                    Currently in: {option.apartment_address}
-                  </Typography>
-                )}
+                  <Box sx={{ display: 'flex', gap: 2, mt: 0.5 }}>
+                    {tenant.email && (
+                      <Typography variant="caption" color="text.secondary">
+                        {tenant.email}
+                      </Typography>
+                    )}
+                    {tenant.gender && (
+                      <Typography variant="caption" color="text.secondary">
+                        {tenant.gender.charAt(0).toUpperCase() + tenant.gender.slice(1).replace('_', ' ')}
+                      </Typography>
+                    )}
+                  </Box>
+                </Box>
               </Box>
             </Box>
           )}
-          loading={loading}
-          loadingText="Loading tenants..."
-          noOptionsText={
-            filteredAvailableTenants.length === 0 && safeAvailableTenants.length > 0
-              ? 'All available tenants already added'
-              : 'No available tenants found'
-          }
-          value={null} // Always reset after selection
-          isOptionEqualToValue={(option, value) => option.id === value.id}
+          noOptionsText="No available tenants found"
+          sx={{ flex: 1 }}
         />
 
         <Button
-          variant="contained"
+          variant="outlined"
           color="primary"
-          startIcon={<PersonIcon />}
-          onClick={() => onOpenTenantForm && onOpenTenantForm()}
-          sx={{ whiteSpace: 'nowrap' }}
-          disabled={disabled || loading}
+          onClick={onOpenTenantForm}
+          disabled={disabled}
+          sx={{ height: 40, whiteSpace: 'nowrap' }}
         >
-          New Tenant
+          Add New Tenant
         </Button>
       </Box>
 
-      <Typography variant="caption" color="text.secondary">
-        Select from existing tenants or create a new one. Click on a tenant chip to mark as primary.
-        {disabled && " Maximum occupancy reached."}
-      </Typography>
+      {safeTenantData.length > 0 && (
+        <Box sx={{ mt: 2 }}>
+          <Typography variant="body2" color="text.secondary">
+            Click on a tenant to set as primary. Primary tenants are highlighted and appear first in contracts.
+          </Typography>
+        </Box>
+      )}
     </Box>
   );
 }

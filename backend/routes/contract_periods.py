@@ -723,3 +723,64 @@ def check_overlapping_contracts(apartment_id, start_date, end_date):
     except Exception as e:
         current_app.logger.error(f"Error checking overlapping contracts: {e}")
         return None
+@contract_periods_bp.route("/apartments/<int:apartment_id>/active-tenants-detailed", methods=["GET"])
+@token_required
+def get_active_tenants_detailed_for_apartment(apartment_id):
+    """Get detailed information about currently active tenants for an apartment including gender and contract details"""
+    try:
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
+
+        # Get active contract tenants (not moved out) for this apartment
+        active_contract_tenants = db.session.query(ContractTenant)\
+            .join(ContractPeriod)\
+            .join(Tenant)\
+            .filter(
+                ContractPeriod.apartment_id == apartment_id,
+                ContractTenant.move_out_date.is_(None),
+                ContractPeriod.status == 'active'
+            )\
+            .order_by(ContractTenant.is_primary.desc(), ContractTenant.move_in_date.asc())\
+            .all()
+
+        active_tenants = []
+        for ct in active_contract_tenants:
+            tenant = ct.tenant
+            contract = db.session.query(ContractPeriod).get(ct.contract_period_id)
+
+            # Get the contract expiration date
+            contract_expiry_date = contract.end_date.isoformat() if contract.end_date else None
+
+            tenant_data = {
+                "tenant_id": tenant.id,
+                "name": tenant.name,
+                "email": tenant.email,
+                "phone": tenant.phone,
+                "gender": tenant.gender,  # Include gender information
+                "contract_tenant_id": ct.id,
+                "contract_id": contract.id,
+                "contract_number": contract.contract_number,
+                "contract_expiry_date": contract_expiry_date,  # Add contract expiration
+                "is_primary": ct.is_primary,
+                "move_in_date": ct.move_in_date.isoformat() if ct.move_in_date else None,
+                "move_out_date": ct.move_out_date.isoformat() if ct.move_out_date else None,
+                "rent_share_percentage": float(ct.rent_share_percentage) if ct.rent_share_percentage else 100.0,
+                "monthly_rent_portion": (float(contract.monthly_rent) * float(ct.rent_share_percentage) / 100.0) if contract.monthly_rent and ct.rent_share_percentage else 0,
+                "notes": ct.notes
+            }
+            active_tenants.append(tenant_data)
+
+        return jsonify({
+            "apartment": {
+                "id": apartment.id,
+                "address": apartment.address
+            },
+            "active_tenants": active_tenants,
+            "total_active": len(active_tenants),
+            "total_rent_shares": sum(t["rent_share_percentage"] for t in active_tenants)
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error retrieving detailed active tenants: {e}")
+        return jsonify({"message": "Error retrieving detailed active tenants", "error": str(e)}), 500

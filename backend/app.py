@@ -8,10 +8,8 @@ from extentions import db, jwt, bcrypt
 from sqlalchemy.exc import OperationalError
 import time
 from models.models import Apartment, Tenant, User, Landlord
-from initalized.init_user import ensure_admin_user_exists
 from initalized.init_apartment import (
-    ensure_default_apartment_exists,
-    ensure_new_apartment_exists,
+    initialize_database
 )
 import os
 from dotenv import load_dotenv
@@ -154,11 +152,7 @@ def create_app():
             with app.app_context():
                 wait_for_mysql(app)
                 from initalized.init_apartment import ensure_db_schema
-
-                ensure_db_schema()
-                ensure_admin_user_exists()
-                ensure_default_apartment_exists()
-                ensure_new_apartment_exists()
+                initialize_database()
         except Exception as e:
             app.logger.error(f"Error initializing DB: {e}")
 

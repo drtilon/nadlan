@@ -1,4 +1,4 @@
-# models/models.py - Refactored Database Models
+# models/models.py - Complete Fixed Database Models
 from datetime import date, datetime
 from extentions import db, bcrypt
 from sqlalchemy import func
@@ -79,28 +79,39 @@ class Apartment(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
 
-    # Address fields
-    street_name = db.Column(db.String(100), nullable=False, default="Unknown Street")
-    house_number = db.Column(db.String(20), nullable=False, default="1")
-    zip_code = db.Column(db.String(20), nullable=False, default="00000")
-    city = db.Column(db.String(50), nullable=False, default="Tel Aviv")
-    state = db.Column(db.String(50), nullable=True)
-    country = db.Column(db.String(50), nullable=False, default="Israel")
+    # Location fields
+    full_address = db.Column(db.String(500), nullable=True)
+    address = db.Column(db.String(255), nullable=True)
+    street_name = db.Column(db.String(100), nullable=True)
+    house_number = db.Column(db.String(20), nullable=True)
     building = db.Column(db.String(50), nullable=True)
     floor = db.Column(db.String(10), nullable=True)
     side = db.Column(db.String(10), nullable=True)
-    full_address = db.Column(db.String(500), nullable=True)
+    zip_code = db.Column(db.String(20), nullable=True)
+    city = db.Column(db.String(50), nullable=True)
+    state = db.Column(db.String(50), nullable=True)
+    country = db.Column(db.String(50), default="Israel")
 
-    # Legacy address field for backward compatibility
-    address = db.Column(db.String(200), nullable=True)
-
-    # Apartment details
+    # Property model and financial information
+    model = db.Column(db.String(20), default="rental")  # 'management' or 'rental'
     rent = db.Column(db.Numeric(10, 2), nullable=False, default=1000.00)
+    deposit = db.Column(db.Numeric(10, 2), nullable=False, default=0.00)
+
+    # NEW FIELDS - Management Fee and Rent Cost
+    managementFee = db.Column(db.Numeric(10, 2), nullable=True, default=0.00)  # For management model - percentage or fixed amount
+    rentCost = db.Column(db.Numeric(10, 2), nullable=True, default=0.00)      # For rental model - what we pay to landlord
+
+    # Property details
+    rooms = db.Column(db.Integer, default=1)
     bedrooms = db.Column(db.Integer, default=1)
     bathrooms = db.Column(db.Integer, default=1)
     area = db.Column(db.Numeric(10, 2), nullable=True)
     maxOccupancy = db.Column(db.Integer, default=4)
     genderPreference = db.Column(db.String(20), default="mixed")
+
+    # Status and notes
+    status = db.Column(db.String(20), default="vacant")
+    notes = db.Column(db.Text, nullable=True)
 
     # Foreign keys
     landlord_id = db.Column(db.Integer, db.ForeignKey("landlords.id"), nullable=True)
@@ -118,6 +129,8 @@ class Apartment(db.Model):
         """Generate short address from components"""
         if self.full_address:
             return self.full_address
+        if self.address:
+            return self.address
         parts = [self.street_name, self.house_number]
         if self.floor:
             parts.append(f"Floor {self.floor}")
@@ -142,7 +155,7 @@ class Apartment(db.Model):
         return list(set(current_tenants))  # Remove duplicates
 
     def to_dict(self, include_contract_periods=False, include_tenants=False, include_landlord=False):
-        """Convert to dictionary with optional related data"""
+        """Convert to dictionary with optional related data - UPDATED to include new financial fields"""
         result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
         # Convert date/datetime objects
@@ -150,12 +163,30 @@ class Apartment(db.Model):
             result["created_at"] = result["created_at"].isoformat()
         if result.get("updated_at"):
             result["updated_at"] = result["updated_at"].isoformat()
+        if result.get("moveInDate"):
+            result["moveInDate"] = result["moveInDate"].isoformat()
+        if result.get("contractEndDate"):
+            result["contractEndDate"] = result["contractEndDate"].isoformat()
 
-        # Convert Decimal to float
+        # Convert Decimal to float - INCLUDING NEW FINANCIAL FIELDS
         if result.get("rent"):
             result["rent"] = float(result["rent"])
+        if result.get("deposit"):
+            result["deposit"] = float(result["deposit"])
+        if result.get("managementFee"):
+            result["managementFee"] = float(result["managementFee"])
+        if result.get("rentCost"):
+            result["rentCost"] = float(result["rentCost"])
         if result.get("area"):
             result["area"] = float(result["area"])
+
+        # Ensure new financial fields are always present with default values
+        if "managementFee" not in result or result["managementFee"] is None:
+            result["managementFee"] = 0.0
+        if "rentCost" not in result or result["rentCost"] is None:
+            result["rentCost"] = 0.0
+        if "model" not in result or result["model"] is None:
+            result["model"] = "rental"
 
         # Add computed fields
         result["short_address"] = self.get_short_address()
@@ -171,8 +202,11 @@ class Apartment(db.Model):
         if include_tenants:
             current_tenants = self.get_current_tenants()
             result["tenants"] = [tenant.to_dict(include_contracts=False) for tenant in current_tenants]
+            result["current_tenant_count"] = len(current_tenants)
+            result["is_full"] = len(current_tenants) >= self.maxOccupancy
 
         return result
+
 
     def __repr__(self):
         return f"<Apartment {self.id}: {self.get_short_address()}>"
@@ -204,7 +238,6 @@ class Tenant(db.Model):
 
     def get_current_contract_assignments(self):
         """Get current active contract assignments for this tenant"""
-        today = date.today()
         return [ca for ca in self.contract_assignments if ca.is_active()]
 
     def get_current_apartments(self):
@@ -215,17 +248,38 @@ class Tenant(db.Model):
                 apartments.append(assignment.contract_period.apartment)
         return list(set(apartments))  # Remove duplicates
 
-    def get_primary_apartment(self):
-        """Get primary apartment if tenant has one"""
-        for assignment in self.get_current_contract_assignments():
-            if assignment.is_primary and assignment.contract_period and assignment.contract_period.apartment:
-                return assignment.contract_period.apartment
-        # If no primary, return first current apartment
-        current_apts = self.get_current_apartments()
-        return current_apts[0] if current_apts else None
+    @property
+    def current_contracts(self):
+        """
+        FIXED: Property to return current contracts in the format expected by frontend
+        This matches the structure from your tenant data
+        """
+        current_assignments = self.get_current_contract_assignments()
+        contracts = []
 
-    def to_dict(self, include_contracts=False, include_current_assignments=False):
-        """Convert to dictionary with optional related data"""
+        for assignment in current_assignments:
+            if assignment.contract_period and assignment.contract_period.apartment:
+                contract = assignment.contract_period
+                apartment = contract.apartment
+
+                contract_info = {
+                    "apartment_address": apartment.address if apartment else f"Apartment ID {contract.apartment_id}",
+                    "apartment_id": contract.apartment_id,
+                    "contract_period_id": contract.id,
+                    "is_primary": assignment.is_primary,
+                    "monthly_rent": float(contract.monthly_rent) if contract.monthly_rent else 0.0,
+                    "move_in_date": assignment.move_in_date.isoformat() if assignment.move_in_date else None,
+                    "move_out_date": assignment.move_out_date.isoformat() if assignment.move_out_date else None,
+                    "rent_share_percentage": float(assignment.rent_share_percentage) if assignment.rent_share_percentage else 0.0,
+                    "security_deposit": float(contract.security_deposit) if contract.security_deposit else 0.0,
+                    "status": contract.status
+                }
+                contracts.append(contract_info)
+
+        return contracts
+
+    def to_dict(self, include_contracts=True, include_historical=False):
+        """Convert to dictionary with enhanced contract information"""
         result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
         # Convert date/datetime objects
@@ -236,23 +290,30 @@ class Tenant(db.Model):
         if result.get("updated_at"):
             result["updated_at"] = result["updated_at"].isoformat()
 
-        if include_current_assignments:
-            current_assignments = self.get_current_contract_assignments()
-            result["current_contracts"] = [
-                {
-                    "contract_period_id": assignment.contract_period_id,
-                    "apartment_id": assignment.contract_period.apartment_id,
-                    "apartment_address": assignment.contract_period.apartment.get_short_address(),
-                    "is_primary": assignment.is_primary,
-                    "rent_share_percentage": float(assignment.rent_share_percentage) if assignment.rent_share_percentage else 100.0,
-                    "move_in_date": assignment.move_in_date.isoformat() if assignment.move_in_date else None,
-                    "move_out_date": assignment.move_out_date.isoformat() if assignment.move_out_date else None,
-                    "monthly_rent": float(assignment.contract_period.monthly_rent) if assignment.contract_period.monthly_rent else 0,
-                    "security_deposit": float(assignment.contract_period.security_deposit) if assignment.contract_period.security_deposit else 0,
-                    "status": assignment.contract_period.status
-                }
-                for assignment in current_assignments
-            ]
+        # FIXED: Include current contracts using the property
+        if include_contracts:
+            result["current_contracts"] = self.current_contracts
+
+        # Include historical contracts if requested
+        if include_historical:
+            historical_assignments = [ca for ca in self.contract_assignments if not ca.is_active()]
+            historical_contracts = []
+
+            for assignment in historical_assignments:
+                if assignment.contract_period and assignment.contract_period.apartment:
+                    contract = assignment.contract_period
+                    apartment = contract.apartment
+
+                    historical_info = {
+                        "apartment_address": apartment.address if apartment else f"Apartment ID {contract.apartment_id}",
+                        "move_in_date": assignment.move_in_date.isoformat() if assignment.move_in_date else None,
+                        "move_out_date": assignment.move_out_date.isoformat() if assignment.move_out_date else None,
+                        "monthly_rent": float(contract.monthly_rent) if contract.monthly_rent else 0.0,
+                        "rent_share_percentage": float(assignment.rent_share_percentage) if assignment.rent_share_percentage else 0.0,
+                    }
+                    historical_contracts.append(historical_info)
+
+            result["historical_contracts"] = historical_contracts
 
         return result
 
@@ -361,72 +422,134 @@ class ContractTenant(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def is_active(self, check_date=None):
-        """Check if tenant is active in this contract on given date"""
+        """
+        FIXED: Check if this contract assignment is currently active
+        An assignment is active if:
+        1. There's no move_out_date (or it's in the future)
+        2. The associated contract period is active
+        3. The move_in_date is in the past or today
+        """
         if check_date is None:
             check_date = date.today()
-        return (self.move_in_date <= check_date and
-                (self.move_out_date is None or self.move_out_date >= check_date))
 
-    def get_monthly_rent_share(self):
-        """Calculate tenant's share of monthly rent"""
-        if self.contract_period and self.contract_period.monthly_rent:
-            return float(self.contract_period.monthly_rent) * (float(self.rent_share_percentage) / 100)
-        return 0
+        # Check if moved out
+        if self.move_out_date and self.move_out_date <= check_date:
+            return False
+
+        # Check if moved in yet
+        if self.move_in_date and self.move_in_date > check_date:
+            return False
+
+        # Check if contract period is active
+        if self.contract_period and not self.contract_period.is_active(check_date):
+            return False
+
+        return True
+
+    def to_dict(self):
+        """Convert to dictionary"""
+        result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+        # Convert date/datetime objects
+        if result.get("move_in_date"):
+            result["move_in_date"] = result["move_in_date"].isoformat()
+        if result.get("move_out_date"):
+            result["move_out_date"] = result["move_out_date"].isoformat()
+        if result.get("created_at"):
+            result["created_at"] = result["created_at"].isoformat()
+        if result.get("updated_at"):
+            result["updated_at"] = result["updated_at"].isoformat()
+
+        # Convert Decimal to float
+        if result.get("rent_share_percentage"):
+            result["rent_share_percentage"] = float(result["rent_share_percentage"])
+
+        # Add tenant and contract info
+        if self.tenant:
+            result["tenant"] = {
+                "id": self.tenant.id,
+                "name": self.tenant.name,
+                "email": self.tenant.email,
+                "phone": self.tenant.phone
+            }
+
+        if self.contract_period:
+            result["contract_period"] = {
+                "id": self.contract_period.id,
+                "contract_number": self.contract_period.contract_number,
+                "start_date": self.contract_period.start_date.isoformat() if self.contract_period.start_date else None,
+                "end_date": self.contract_period.end_date.isoformat() if self.contract_period.end_date else None,
+                "monthly_rent": float(self.contract_period.monthly_rent) if self.contract_period.monthly_rent else 0.0,
+                "status": self.contract_period.status
+            }
+
+        # Add computed fields
+        result["is_current"] = self.is_active()
+
+        return result
 
     def __repr__(self):
-        return f"<ContractTenant {self.id}: Contract {self.contract_period_id} - Tenant {self.tenant_id}>"
+        tenant_name = self.tenant.name if self.tenant else f"Tenant {self.tenant_id}"
+        contract_num = self.contract_period.contract_number if self.contract_period else f"Contract {self.contract_period_id}"
+        return f"<ContractTenant {self.id}: {tenant_name} -> {contract_num}>"
 
 
 class Payment(db.Model):
+    """Payment records for rent and other charges"""
     __tablename__ = "payments"
     __table_args__ = {"extend_existing": True}
 
     id = db.Column(db.Integer, primary_key=True)
 
-    # Link to contract period (preferred)
+    # Foreign keys
+    apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=False)
     contract_period_id = db.Column(db.Integer, db.ForeignKey("contract_periods.id"), nullable=True)
 
-    # Keep apartment_id for backward compatibility
-    apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=True)
-
-    # Payment period
-    month = db.Column(db.Integer, nullable=False)
-    year = db.Column(db.Integer, nullable=False)
-
     # Payment details
+    month = db.Column(db.Integer, nullable=False)  # 1-12
+    year = db.Column(db.Integer, nullable=False)
     amount = db.Column(db.Numeric(10, 2), nullable=False)
-    payment_date = db.Column(db.DateTime, nullable=True)
-    payment_method = db.Column(db.String(50), default="bank_transfer")
+    payment_date = db.Column(db.Date, nullable=True)  # Null if unpaid
+    payment_method = db.Column(db.String(50), nullable=True)
+    payment_type = db.Column(db.Enum("rent", "deposit", "utilities", "other"), default="rent")
 
-    # Payment type
-    payment_type = db.Column(db.Enum("rent", "deposit", "other"), default="rent")
-    deposit_payment = db.Column(db.Boolean, default=False)  # Track if this is a deposit payment
+    # Additional charges
+    internet = db.Column(db.Numeric(8, 2), default=0.00)
+    electricity = db.Column(db.Numeric(8, 2), default=0.00)
+    other = db.Column(db.Numeric(8, 2), default=0.00)
 
-    # Notes
+    # Tenant-specific payment details (JSON)
+    tenant_payments = db.Column(db.Text, nullable=True)  # JSON string
+    tenants = db.Column(db.Text, nullable=True)  # Legacy field
+    extraPayments = db.Column(db.Text, default="{}")  # Legacy field
+
+    # Status and notes
+    status = db.Column(db.String(20), default="outstanding")  # outstanding, paid, partial
     notes = db.Column(db.Text, nullable=True)
-
-    # Tenant-specific payment data (JSON)
-    tenant_payments = db.Column(db.Text, nullable=True)  # JSON string mapping tenant_id to payment details
 
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     def is_paid(self):
-        """Check if payment has been made"""
-        return self.payment_date is not None
+        """Check if payment is fully paid"""
+        return self.payment_date is not None and self.status == "paid"
 
-    def get_tenant_payments_dict(self):
-        """Parse tenant payments JSON"""
+    def get_tenant_payments(self):
+        """Get tenant payment details as dictionary"""
         if self.tenant_payments:
             try:
                 return json.loads(self.tenant_payments)
-            except:
+            except json.JSONDecodeError:
                 return {}
         return {}
 
+    def set_tenant_payments(self, payments_dict):
+        """Set tenant payment details from dictionary"""
+        self.tenant_payments = json.dumps(payments_dict)
+
     def to_dict(self, include_contract_period=True):
-        """Convert to dictionary with optional related data"""
+        """Convert to dictionary"""
         result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
         # Convert date/datetime objects
@@ -438,39 +561,46 @@ class Payment(db.Model):
             result["updated_at"] = result["updated_at"].isoformat()
 
         # Convert Decimal to float
-        if result.get("amount"):
-            result["amount"] = float(result["amount"])
+        numeric_fields = ["amount", "internet", "electricity", "other"]
+        for field in numeric_fields:
+            if result.get(field):
+                result[field] = float(result[field])
+
+        # Parse JSON fields
+        result["tenant_payments_data"] = self.get_tenant_payments()
 
         # Add computed fields
         result["is_paid"] = self.is_paid()
+        result["month_year"] = f"{result['year']}-{str(result['month']).zfill(2)}"
 
-        # Parse tenant payments
-        if self.tenant_payments:
-            result["tenant_payments_parsed"] = self.get_tenant_payments_dict()
-
+        # Include contract period info
         if include_contract_period and self.contract_period:
-            result["contract_period"] = self.contract_period.to_dict(include_tenants=True, include_apartment=True)
+            result["contract_period"] = {
+                "id": self.contract_period.id,
+                "contract_number": self.contract_period.contract_number,
+                "apartment_address": self.contract_period.apartment.address if self.contract_period.apartment else None
+            }
 
         return result
 
     def __repr__(self):
         status = "PAID" if self.is_paid() else "OUTSTANDING"
-        return f"<Payment {self.id}: {self.month}/{self.year} - {status}>"
+        return f"<Payment {self.id}: {self.month}/{self.year} - €{self.amount} ({status})>"
 
 
 class Contract(db.Model):
-    """Contract files storage"""
+    """File-based contracts (PDFs, Word docs, etc.)"""
     __tablename__ = "contracts"
     __table_args__ = {"extend_existing": True}
 
     id = db.Column(db.Integer, primary_key=True)
     apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=False)
-    contract_period_id = db.Column(db.Integer, db.ForeignKey("contract_periods.id"), nullable=True)
-    file_path = db.Column(db.String(255), nullable=False)
     file_name = db.Column(db.String(255), nullable=False)
-    file_size = db.Column(db.BigInteger, nullable=True)
-    file_type = db.Column(db.String(50), nullable=True)
-    uploaded_by = db.Column(db.String(100), nullable=True)
+    file_path = db.Column(db.String(500), nullable=False)
+    file_size = db.Column(db.Integer, nullable=True)
+    mime_type = db.Column(db.String(100), nullable=True)
+    contract_type = db.Column(db.String(50), default="rental_agreement")
+    description = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

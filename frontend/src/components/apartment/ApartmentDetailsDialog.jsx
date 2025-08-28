@@ -1,5 +1,5 @@
-// ApartmentDetailsDialog.jsx - COMPLETE FIXED VERSION
-import React from 'react';
+// Enhanced ApartmentDetailsDialog.jsx - FIXED VERSION with Management Fee and Rent Cost
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogTitle,
@@ -16,7 +16,16 @@ import {
   IconButton,
   Tooltip,
   Divider,
-  Stack
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  CircularProgress,
+  Alert
 } from '@mui/material';
 import {
   Close as CloseIcon,
@@ -35,7 +44,10 @@ import {
   Apartment as ApartmentIcon,
   Euro as EuroIcon,
   LocationOn as LocationIcon,
-  ContactMail as ContactMailIcon
+  ContactMail as ContactMailIcon,
+  Male as MaleIcon,
+  Female as FemaleIcon,
+  Groups as GroupsIcon
 } from '@mui/icons-material';
 
 function ApartmentDetailsDialog({
@@ -50,40 +62,65 @@ function ApartmentDetailsDialog({
   showNotification,
   isAdmin = false
 }) {
+  const [currentTenants, setCurrentTenants] = useState([]);
+  const [loadingTenants, setLoadingTenants] = useState(false);
+  const [tenantsError, setTenantsError] = useState(null);
+
+  // Fetch current tenants when dialog opens - MUST be before early return
+  useEffect(() => {
+    if (open && apartment?.id) {
+      fetchCurrentTenants();
+    }
+  }, [open, apartment?.id]);
+
   if (!apartment) return null;
 
-  // Get current tenants (handle both old and new data structures)
-  const getCurrentTenants = () => {
-    // Try to get tenants from current contract first
-    if (apartment.current_contract?.tenants) {
-      return apartment.current_contract.tenants.map(ct => ct.tenant).filter(Boolean);
-    }
+  const fetchCurrentTenants = async () => {
+    setLoadingTenants(true);
+    setTenantsError(null);
+    try {
+      // Use the new detailed endpoint that includes all tenant info and contract expiry
+      const response = await fetch(`/api/apartments/${apartment.id}/active-tenants-detailed`, {
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        }
+      });
 
-    // Fallback to legacy tenants array
-    if (apartment.tenants && Array.isArray(apartment.tenants)) {
-      return apartment.tenants;
-    }
+      if (!response.ok) {
+        throw new Error('Failed to fetch tenants');
+      }
 
-    return [];
+      const data = await response.json();
+
+      // Transform the detailed data - no need for additional API calls
+      const tenantsWithFullDetails = data.active_tenants.map((tenantData) => ({
+        id: tenantData.tenant_id,
+        name: tenantData.name,
+        email: tenantData.email,
+        phone: tenantData.phone,
+        gender: tenantData.gender || 'not_specified',
+        contractExpiryDate: tenantData.contract_expiry_date,
+        contractTenantId: tenantData.contract_tenant_id,
+        isPrimary: tenantData.is_primary
+      }));
+
+      setCurrentTenants(tenantsWithFullDetails);
+    } catch (error) {
+      console.error('Error fetching current tenants:', error);
+      setTenantsError('Failed to load tenants');
+    } finally {
+      setLoadingTenants(false);
+    }
   };
 
-  const tenants = getCurrentTenants();
-  const currentTenantCount = apartment.current_tenant_count || tenants.length;
+  // Get current tenants count
+  const currentTenantCount = currentTenants.length;
   const maxOccupancy = apartment.maxOccupancy || 1;
 
   // Get tenant display name
   const getTenantDisplayName = (tenant) => {
     if (!tenant) return 'Unknown Tenant';
-    if (tenant.firstName && tenant.lastName) {
-      return `${tenant.firstName} ${tenant.lastName}`;
-    }
     return tenant.name || 'Unnamed Tenant';
-  };
-
-  // Get tenant initials for avatar
-  const getTenantInitials = (tenant) => {
-    const name = getTenantDisplayName(tenant);
-    return name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
   };
 
   // Handle copying text to clipboard
@@ -93,71 +130,20 @@ function ApartmentDetailsDialog({
       if (showNotification) {
         showNotification(`${label} copied to clipboard`, 'success');
       }
-    } catch (err) {
-      console.error('Failed to copy text: ', err);
-      if (showNotification) {
-        showNotification('Failed to copy to clipboard', 'error');
-      }
+    } catch (error) {
+      console.error('Failed to copy:', error);
     }
   };
 
-  // Handle tenant navigation (separate from copy functionality)
-  const handleTenantNavigation = (tenant) => {
-    if (onGoToTenant) {
-      onClose(); // Close the dialog first
-      onGoToTenant(tenant.id);
+  // Handle tenant click
+  const handleTenantClick = (tenantId) => {
+    if (onGoToTenant && tenantId) {
+      onClose();
+      onGoToTenant(tenantId);
     }
   };
 
-  // Handle text selection prevention for navigation
-  const handleMouseDown = (e) => {
-    // Allow text selection by preventing click if user is selecting text
-    const selection = window.getSelection();
-    if (selection.toString().length > 0) {
-      e.stopPropagation();
-      return;
-    }
-  };
-
-  // Handle click with text selection check
-  const handleCardClick = (e, tenant) => {
-    // Check if user is selecting text
-    const selection = window.getSelection();
-    if (selection.toString().length > 0) {
-      e.stopPropagation();
-      return;
-    }
-
-    // Check if click target is a copy button or other interactive element
-    if (e.target.closest('.copy-button') || e.target.closest('button')) {
-      e.stopPropagation();
-      return;
-    }
-
-    // Only navigate if not selecting text and not clicking interactive elements
-    handleTenantNavigation(tenant);
-  };
-
-  const getLandlordInfo = (apartment) => {
-    if (apartment.landlord) {
-      return {
-        name: apartment.landlord.company_name || apartment.landlord.name || 'Not specified',
-        contact_name: apartment.landlord.name || '',
-        email: apartment.landlord.email || '',
-        phone: apartment.landlord.phone || ''
-      };
-    }
-
-    return {
-      name: apartment.landlordName || 'Not specified',
-      contact_name: '',
-      email: apartment.landlordEmail || '',
-      phone: apartment.landlordPhone || ''
-    };
-  };
-
-  const landlordInfo = getLandlordInfo(apartment);
-
+  // Format date helper
   const formatDate = (date) => {
     if (!date) return 'Not set';
     try {
@@ -167,24 +153,16 @@ function ApartmentDetailsDialog({
     }
   };
 
-  const getStatusChip = (status) => {
-    const statusConfig = {
-      'vacant': { label: 'Vacant', color: 'default' },
-      'occupied': { label: 'Occupied', color: 'success' },
-      'contract_sent': { label: 'Contract Sent', color: 'warning' },
-      'maintenance': { label: 'Maintenance', color: 'error' }
-    };
-
-    const config = statusConfig[status] || { label: status, color: 'default' };
-
-    return (
-      <Chip
-        label={config.label}
-        color={config.color}
-        size="small"
-        sx={{ fontWeight: 'bold' }}
-      />
-    );
+  // Get gender icon and color
+  const getGenderDisplay = (gender) => {
+    switch (gender?.toLowerCase()) {
+      case 'male':
+        return { icon: <MaleIcon fontSize="small" />, color: 'primary.main', text: 'Male' };
+      case 'female':
+        return { icon: <FemaleIcon fontSize="small" />, color: 'secondary.main', text: 'Female' };
+      default:
+        return { icon: <GroupsIcon fontSize="small" />, color: 'text.secondary', text: 'Not specified' };
+    }
   };
 
   return (
@@ -196,455 +174,511 @@ function ApartmentDetailsDialog({
       PaperProps={{
         sx: {
           borderRadius: 2,
-          maxHeight: '90vh'
+          minHeight: '70vh',
         }
       }}
     >
       <DialogTitle
         sx={{
-          m: 0,
-          p: 2,
           display: 'flex',
-          alignItems: 'center',
           justifyContent: 'space-between',
+          alignItems: 'center',
+          pb: 1,
           borderBottom: '1px solid',
           borderColor: 'divider'
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <ApartmentIcon color="primary" />
-          <Typography variant="h6" component="div">
-            {apartment.address || 'Property Details'}
-          </Typography>
-          {getStatusChip(apartment.status)}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Avatar
+            sx={{
+              bgcolor: 'primary.main',
+              width: 40,
+              height: 40
+            }}
+          >
+            <ApartmentIcon />
+          </Avatar>
+          <Box>
+            <Typography variant="h6" component="div">
+              {apartment.address || 'Apartment Details'}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Property ID: {apartment.id}
+            </Typography>
+          </Box>
         </Box>
         <IconButton
-          aria-label="close"
           onClick={onClose}
-          sx={{ color: 'grey.500' }}
+          sx={{
+            color: 'grey.500',
+            '&:hover': { bgcolor: 'grey.100' }
+          }}
         >
           <CloseIcon />
         </IconButton>
       </DialogTitle>
 
       <DialogContent sx={{ p: 3 }}>
-        <Box sx={{ mt: 1 }}>
-          <Grid container spacing={3}>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
 
-            {/* Property Information */}
-            <Grid item xs={12}>
-              <Typography
-                variant="subtitle1"
-                sx={{
-                  fontWeight: 600,
-                  mb: 2,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1
-                }}
-              >
-                <HomeIcon color="primary" fontSize="small" />
-                Property Information
-              </Typography>
+          {/* Location Information */}
+          <Grid item xs={12}>
+            <Typography
+              variant="subtitle1"
+              sx={{
+                fontWeight: 600,
+                mb: 2,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1
+              }}
+            >
+              <LocationIcon color="primary" fontSize="small" />
+              Location Details
+            </Typography>
 
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                      <LocationIcon fontSize="small" sx={{ mr: 0.5, verticalAlign: 'middle' }} />
-                      Full Address
-                    </Typography>
-                    <Typography
-                      variant="body2"
-                      fontWeight={500}
-                      sx={{ userSelect: 'text', cursor: 'text' }}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {apartment.address || 'Not set'}
-                    </Typography>
-                    <Tooltip title="Copy address">
-                      <IconButton
-                        size="small"
-                        className="copy-button"
-                        onClick={() => handleCopyToClipboard(apartment.address, 'Address')}
-                        sx={{ mt: 1 }}
-                      >
-                        <CopyIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  </Box>
-                </Grid>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6} md={4}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    Full Address
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {apartment.address || 'Not specified'}
+                  </Typography>
+                </Box>
+              </Grid>
 
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                      <BedIcon fontSize="small" sx={{ mr: 0.5, verticalAlign: 'middle' }} />
-                      Rooms
-                    </Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {apartment.rooms || 0}
-                    </Typography>
-                  </Box>
-                </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    City
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {apartment.city || 'Not specified'}
+                  </Typography>
+                </Box>
+              </Grid>
 
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                      <SquareFootIcon fontSize="small" sx={{ mr: 0.5, verticalAlign: 'middle' }} />
-                      Size
-                    </Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {apartment.size || 0} m²
-                    </Typography>
-                  </Box>
-                </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    ZIP Code
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {apartment.zip_code || 'Not specified'}
+                  </Typography>
+                </Box>
+              </Grid>
 
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                      <PeopleIcon fontSize="small" sx={{ mr: 0.5, verticalAlign: 'middle' }} />
-                      Max Occupancy
-                    </Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {maxOccupancy}
-                    </Typography>
-                  </Box>
-                </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    State/Province
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {apartment.state || 'Not specified'}
+                  </Typography>
+                </Box>
+              </Grid>
+
+              <Grid item xs={12} sm={6} md={4}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    Country
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {apartment.country || 'Not specified'}
+                  </Typography>
+                </Box>
+              </Grid>
+
+              <Grid item xs={12} sm={6} md={4}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    Building/Floor
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {[apartment.building, apartment.floor].filter(Boolean).join(' / ') || 'Not specified'}
+                  </Typography>
+                </Box>
               </Grid>
             </Grid>
+          </Grid>
 
-            {/* Financial Information - Always show rent, admin sees more */}
-            <Grid item xs={12}>
-              <Typography
-                variant="subtitle1"
-                sx={{
-                  fontWeight: 600,
-                  mb: 2,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1
-                }}
-              >
-                <EuroIcon color="primary" fontSize="small" />
-                Financial Information
-              </Typography>
+          {/* Property Details */}
+          <Grid item xs={12}>
+            <Typography
+              variant="subtitle1"
+              sx={{
+                fontWeight: 600,
+                mb: 2,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1
+              }}
+            >
+              <HomeIcon color="primary" fontSize="small" />
+              Property Details
+            </Typography>
 
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                      Monthly Rent
-                    </Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      €{apartment.rent || 0}
-                    </Typography>
-                  </Box>
-                </Grid>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6} md={3}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    Rooms
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {apartment.rooms || 'Not specified'}
+                  </Typography>
+                </Box>
+              </Grid>
 
-                <Grid item xs={12} sm={6} md={3}>
-                  <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                      Security Deposit
-                    </Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      €{apartment.deposit || 0}
-                    </Typography>
-                  </Box>
-                </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    Bedrooms
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {apartment.bedrooms || 'Not specified'}
+                  </Typography>
+                </Box>
+              </Grid>
 
-                {/* Admin-only financial fields */}
-                {isAdmin && (
-                  <>
-                    <Grid item xs={12} sm={6} md={3}>
-                      <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                        <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                          Property Model
-                        </Typography>
-                        <Typography variant="body2" fontWeight={500}>
-                          {apartment.model === 'management' ? 'Management' : 'Rental'}
-                        </Typography>
-                      </Box>
-                    </Grid>
 
-                    {apartment.model === 'management' && (
-                      <Grid item xs={12} sm={6} md={3}>
-                        <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                          <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                            Management Fee
-                          </Typography>
-                          <Typography variant="body2" fontWeight={500}>
-                            €{apartment.managementFee || 0}
-                          </Typography>
-                        </Box>
-                      </Grid>
-                    )}
+              <Grid item xs={12} sm={6} md={3}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    Size (m²)
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {apartment.area || apartment.size || 'Not specified'}
+                  </Typography>
+                </Box>
+              </Grid>
 
-                    {apartment.model === 'rental' && (
-                      <Grid item xs={12} sm={6} md={3}>
-                        <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                          <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                            Rent Cost
-                          </Typography>
-                          <Typography variant="body2" fontWeight={500}>
-                            €{apartment.rentCost || 0}
-                          </Typography>
-                        </Box>
-                      </Grid>
-                    )}
-                  </>
-                )}
+              <Grid item xs={12} sm={6} md={3}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    Maximum Occupancy
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {maxOccupancy}
+                  </Typography>
+                </Box>
+              </Grid>
+
+              <Grid item xs={12} sm={6} md={3}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    Gender Preference
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {apartment.genderPreference === 'male' ? 'Male' : apartment.genderPreference === 'female' ? 'Female' : 'Mixed'}
+                  </Typography>
+                </Box>
+              </Grid>
+
+              <Grid item xs={12} sm={6} md={3}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    Status
+                  </Typography>
+                  <Chip
+                    label={apartment.status || 'Unknown'}
+                    size="small"
+                    color={apartment.status === 'occupied' ? 'success' : apartment.status === 'vacant' ? 'warning' : 'default'}
+                    sx={{ height: 24 }}
+                  />
+                </Box>
               </Grid>
             </Grid>
+          </Grid>
 
-            {/* Dates Information */}
-            <Grid item xs={12}>
-              <Typography
-                variant="subtitle1"
-                sx={{
-                  fontWeight: 600,
-                  mb: 2,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1
-                }}
-              >
-                <AccessTimeIcon color="primary" fontSize="small" />
-                Important Dates
-              </Typography>
+          {/* Financial Information - Always show rent, admin sees more */}
+          <Grid item xs={12}>
+            <Typography
+              variant="subtitle1"
+              sx={{
+                fontWeight: 600,
+                mb: 2,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1
+              }}
+            >
+              <EuroIcon color="primary" fontSize="small" />
+              Financial Information
+            </Typography>
 
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6}>
-                  <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                      Move-in Date
-                    </Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {formatDate(apartment.moveInDate)}
-                    </Typography>
-                  </Box>
-                </Grid>
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6} md={3}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    Monthly Rent
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    €{apartment.rent || 0}
+                  </Typography>
+                </Box>
+              </Grid>
 
-                <Grid item xs={12} sm={6}>
-                  <Box sx={{
-                    p: 2,
-                    border: '1px solid',
-                    borderColor: apartment.expiryStatus?.status === 'expired'
-                      ? 'error.main'
-                      : apartment.expiryStatus?.status === 'expiring_soon'
-                        ? 'warning.main'
-                        : 'divider',
-                    borderRadius: 1,
-                    bgcolor: apartment.expiryStatus?.status === 'expired'
-                      ? 'error.50'
-                      : apartment.expiryStatus?.status === 'expiring_soon'
-                        ? 'warning.50'
-                        : 'background.paper'
-                  }}>
-                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                      Contract End Date
-                    </Typography>
-                    <Typography variant="body2" fontWeight={500}>
-                      {formatDate(apartment.contractEndDate)}
-                    </Typography>
-                    {apartment.expiryStatus?.daysUntilExpiry !== null && (
-                      <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
-                        {apartment.expiryStatus.daysUntilExpiry < 0
-                          ? `Expired ${Math.abs(apartment.expiryStatus.daysUntilExpiry)} days ago`
-                          : `${apartment.expiryStatus.daysUntilExpiry} days remaining`
-                        }
+              <Grid item xs={12} sm={6} md={3}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    Security Deposit
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    €{apartment.deposit || 0}
+                  </Typography>
+                </Box>
+              </Grid>
+
+              {/* Admin-only financial fields */}
+              {isAdmin && (
+                <>
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                      <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                        Rental Model
                       </Typography>
-                    )}
-                  </Box>
-                </Grid>
+                      <Typography variant="body2" fontWeight={500}>
+                        {apartment.model === 'management' ? 'Management' : 'Rental'}
+                      </Typography>
+                    </Box>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                      <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                        Management Fee {apartment.model === 'management' ? '(%)' : '(€)'}
+                      </Typography>
+                      <Typography variant="body2" fontWeight={500}>
+                        {apartment.model === 'management' ? `${apartment.managementFee || 0}%` : `€${apartment.managementFee || 0}`}
+                      </Typography>
+                    </Box>
+                  </Grid>
+
+                  <Grid item xs={12} sm={6} md={3}>
+                    <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                      <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                        Rent Cost (What we pay)
+                      </Typography>
+                      <Typography variant="body2" fontWeight={500}>
+                        €{apartment.rentCost || 0}
+                      </Typography>
+                    </Box>
+                  </Grid>
+                </>
+              )}
+            </Grid>
+          </Grid>
+
+          {/* Important Dates */}
+          <Grid item xs={12}>
+            <Typography
+              variant="subtitle1"
+              sx={{
+                fontWeight: 600,
+                mb: 2,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1
+              }}
+            >
+              <AccessTimeIcon color="primary" fontSize="small" />
+              Important Dates
+            </Typography>
+
+            <Grid container spacing={2}>
+              <Grid item xs={12} sm={6}>
+                <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    Move-in Date
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {formatDate(apartment.moveInDate)}
+                  </Typography>
+                </Box>
+              </Grid>
+
+              <Grid item xs={12} sm={6}>
+                <Box sx={{
+                  p: 2,
+                  border: '1px solid',
+                  borderColor: apartment.expiryStatus?.status === 'expired'
+                    ? 'error.main'
+                    : apartment.expiryStatus?.status === 'expiring_soon'
+                      ? 'warning.main'
+                      : 'divider',
+                  borderRadius: 1,
+                  bgcolor: apartment.expiryStatus?.status === 'expired'
+                    ? 'error.50'
+                    : apartment.expiryStatus?.status === 'expiring_soon'
+                      ? 'warning.50'
+                      : 'background.paper'
+                }}>
+                  <Typography variant="caption" color="text.secondary" gutterBottom display="block">
+                    Contract End Date
+                  </Typography>
+                  <Typography variant="body2" fontWeight={500}>
+                    {formatDate(apartment.contractEndDate)}
+                  </Typography>
+                  {apartment.expiryStatus?.daysUntilExpiry !== null && (
+                    <Typography variant="caption" display="block" sx={{ mt: 0.5 }}>
+                      {apartment.expiryStatus.daysUntilExpiry < 0
+                        ? `Expired ${Math.abs(apartment.expiryStatus.daysUntilExpiry)} days ago`
+                        : `${apartment.expiryStatus.daysUntilExpiry} days remaining`
+                      }
+                    </Typography>
+                  )}
+                </Box>
               </Grid>
             </Grid>
+          </Grid>
 
-            {/* Current Tenants Section */}
-            <Grid item xs={12}>
-              <Typography
-                variant="subtitle1"
+          {/* Current Tenants Section - New Table Format */}
+          <Grid item xs={12}>
+            <Typography
+              variant="subtitle1"
+              sx={{
+                fontWeight: 600,
+                mb: 2,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1
+              }}
+            >
+              <PersonIcon color="primary" fontSize="small" />
+              Current Tenants ({currentTenantCount}/{maxOccupancy})
+            </Typography>
+
+            {loadingTenants ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+                <CircularProgress />
+              </Box>
+            ) : tenantsError ? (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {tenantsError}
+              </Alert>
+            ) : currentTenants.length === 0 ? (
+              <Box
                 sx={{
-                  fontWeight: 600,
-                  mb: 2,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 1
-                }}
-              >
-                <PersonIcon color="primary" fontSize="small" />
-                Current Tenants ({currentTenantCount}/{maxOccupancy})
-              </Typography>
-
-              {tenants.length === 0 ? (
-                <Box sx={{
                   p: 3,
                   textAlign: 'center',
                   border: '1px dashed',
                   borderColor: 'divider',
                   borderRadius: 1,
                   bgcolor: 'grey.50'
-                }}>
-                  <Typography variant="body2" color="text.secondary">
-                    No tenants currently assigned to this property
-                  </Typography>
-                </Box>
-              ) : (
-                <Grid container spacing={2}>
-                  {tenants.map((tenant, index) => (
-                    <Grid item xs={12} sm={6} key={tenant.id || index}>
-                      <Card
-                        variant="outlined"
-                        sx={{
-                          transition: 'all 0.2s ease',
-                          '&:hover': {
-                            boxShadow: 2,
-                            borderColor: 'primary.light'
-                          },
-                          userSelect: 'text',
-                          cursor: onGoToTenant ? 'pointer' : 'default'
-                        }}
-                        onClick={(e) => handleCardClick(e, tenant)}
-                        onMouseDown={handleMouseDown}
-                      >
-                        <CardContent sx={{ p: 2 }}>
-                          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2, mb: 2 }}>
-                            <Avatar
-                              sx={{
-                                bgcolor: 'primary.main',
-                                width: 48,
-                                height: 48,
-                                fontSize: '1.1rem'
-                              }}
-                            >
-                              {getTenantInitials(tenant)}
-                            </Avatar>
-                            <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-                                <Typography
-                                  variant="subtitle1"
-                                  fontWeight={600}
-                                  sx={{
-                                    wordBreak: 'break-word',
-                                    userSelect: 'text'
-                                  }}
-                                >
+                }}
+              >
+                <PersonIcon sx={{ fontSize: 48, color: 'grey.400', mb: 1 }} />
+                <Typography variant="body2" color="text.secondary">
+                  No tenants currently assigned to this apartment
+                </Typography>
+              </Box>
+            ) : (
+              <TableContainer component={Paper} variant="outlined">
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 600 }}>Full Name</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Gender</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>Contract Exp. Date</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }} align="center">Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {currentTenants.map((tenant) => {
+                      const genderDisplay = getGenderDisplay(tenant.gender);
+                      return (
+                        <TableRow
+                          key={tenant.id}
+                          hover
+                          sx={{
+                            '&:hover': {
+                              cursor: 'pointer'
+                            }
+                          }}
+                          onClick={() => handleTenantClick(tenant.id)}
+                        >
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <Avatar
+                                sx={{
+                                  width: 32,
+                                  height: 32,
+                                  bgcolor: tenant.isPrimary ? 'primary.main' : 'grey.400',
+                                  fontSize: '0.8rem'
+                                }}
+                              >
+                                {getTenantDisplayName(tenant).split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2)}
+                              </Avatar>
+                              <Box>
+                                <Typography variant="body2" sx={{ fontWeight: 500 }}>
                                   {getTenantDisplayName(tenant)}
-                                </Typography>
-
-                                {onGoToTenant && (
-                                  <Tooltip title="View tenant details">
-                                    <IconButton
+                                  {tenant.isPrimary && (
+                                    <Chip
+                                      label="Primary"
                                       size="small"
-                                      className="copy-button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleTenantNavigation(tenant);
-                                      }}
-                                      sx={{ color: 'primary.main' }}
-                                    >
-                                      <ViewIcon fontSize="small" />
-                                    </IconButton>
-                                  </Tooltip>
-                                )}
+                                      color="primary"
+                                      sx={{ ml: 1, height: 20, fontSize: '0.7rem' }}
+                                    />
+                                  )}
+                                </Typography>
+                                <Typography variant="caption" color="text.secondary">
+                                  {tenant.email || 'No email'}
+                                </Typography>
                               </Box>
                             </Box>
-                          </Box>
-
-                          <Stack spacing={1}>
-                            {/* Email with copy button */}
-                            {tenant.email && (
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'space-between' }}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-                                  <EmailIcon fontSize="small" color="action" />
-                                  <Typography
-                                    variant="body2"
-                                    color="text.secondary"
-                                    sx={{
-                                      userSelect: 'text',
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis'
-                                    }}
-                                  >
-                                    {tenant.email}
-                                  </Typography>
-                                </Box>
-                                <Tooltip title="Copy email">
-                                  <IconButton
-                                    size="small"
-                                    className="copy-button"
-                                    onClick={() => handleCopyToClipboard(tenant.email, 'Email')}
-                                    sx={{ color: 'text.secondary' }}
-                                  >
-                                    <CopyIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
+                          </TableCell>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                              <Box sx={{ color: genderDisplay.color }}>
+                                {genderDisplay.icon}
                               </Box>
-                            )}
-
-                            {/* Phone with copy button */}
-                            {tenant.phone && (
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, justifyContent: 'space-between' }}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                  <PhoneIcon fontSize="small" color="action" />
-                                  <Typography
-                                    variant="body2"
-                                    color="text.secondary"
-                                    sx={{ userSelect: 'text' }}
-                                  >
-                                    {tenant.phone}
-                                  </Typography>
-                                </Box>
-                                <Tooltip title="Copy phone">
-                                  <IconButton
-                                    size="small"
-                                    className="copy-button"
-                                    onClick={() => handleCopyToClipboard(tenant.phone, 'Phone')}
-                                    sx={{ color: 'text.secondary' }}
-                                  >
-                                    <CopyIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                              </Box>
-                            )}
-
-                            {/* Additional tenant details if available */}
-                            {tenant.bornOn && (
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                <PersonIcon fontSize="small" color="action" />
-                                <Typography
-                                  variant="body2"
-                                  color="text.secondary"
-                                  sx={{ userSelect: 'text' }}
-                                >
-                                  Born: {formatDate(tenant.bornOn)}
-                                </Typography>
-                              </Box>
-                            )}
-                          </Stack>
-
-                          {/* Navigation hint - only show if onGoToTenant is available */}
-                          {onGoToTenant && (
-                            <Box sx={{
-                              mt: 2,
-                              pt: 1,
-                              borderTop: '1px solid',
-                              borderColor: 'divider',
-                              textAlign: 'center'
-                            }}>
-                              <Typography variant="caption" color="text.secondary">
-                                💡 Select text to copy • Click 👁️ to view details
+                              <Typography variant="body2">
+                                {genderDisplay.text}
                               </Typography>
                             </Box>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  ))}
-                </Grid>
-              )}
-            </Grid>
+                          </TableCell>
+                          <TableCell>
+                            <Typography
+                              variant="body2"
+                              sx={{
+                                fontWeight: 500,
+                                color: tenant.contractExpiryDate
+                                  ? (new Date(tenant.contractExpiryDate) < new Date() ? 'error.main' : 'text.primary')
+                                  : 'text.secondary'
+                              }}
+                            >
+                              {tenant.contractExpiryDate ? formatDate(tenant.contractExpiryDate) : 'No expiry date'}
+                            </Typography>
+                          </TableCell>
+                          <TableCell align="center">
+                            <Tooltip title="View tenant details">
+                              <IconButton
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleTenantClick(tenant.id);
+                                }}
+                              >
+                                <ViewIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </Grid>
 
-            {/* Landlord Information - Always visible to users */}
+          {/* Notes Section */}
+          {apartment.notes && (
             <Grid item xs={12}>
               <Typography
                 variant="subtitle1"
@@ -656,152 +690,30 @@ function ApartmentDetailsDialog({
                   gap: 1
                 }}
               >
-                <BusinessIcon color="primary" fontSize="small" />
-                Landlord Information
+                <DescriptionIcon color="primary" fontSize="small" />
+                Notes
               </Typography>
-
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6}>
-                  <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                    <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                      Company/Name
-                    </Typography>
-                    <Typography
-                      variant="body2"
-                      fontWeight={500}
-                      sx={{ userSelect: 'text' }}
-                    >
-                      {landlordInfo.name}
-                    </Typography>
-                    {landlordInfo.name !== 'Not specified' && (
-                      <Tooltip title="Copy landlord name">
-                        <IconButton
-                          size="small"
-                          className="copy-button"
-                          onClick={() => handleCopyToClipboard(landlordInfo.name, 'Landlord Name')}
-                          sx={{ mt: 1, color: 'text.secondary' }}
-                        >
-                          <CopyIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    )}
-                  </Box>
-                </Grid>
-
-                {landlordInfo.contact_name && (
-                  <Grid item xs={12} sm={6}>
-                    <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                      <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                        Contact Person
-                      </Typography>
-                      <Typography
-                        variant="body2"
-                        fontWeight={500}
-                        sx={{ userSelect: 'text' }}
-                      >
-                        {landlordInfo.contact_name}
-                      </Typography>
-                    </Box>
-                  </Grid>
-                )}
-
-                {landlordInfo.email && (
-                  <Grid item xs={12} sm={6}>
-                    <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                      <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                        <EmailIcon fontSize="small" sx={{ mr: 0.5, verticalAlign: 'middle' }} />
-                        Email
-                      </Typography>
-                      <Typography
-                        variant="body2"
-                        fontWeight={500}
-                        sx={{
-                          userSelect: 'text',
-                          wordBreak: 'break-all'
-                        }}
-                      >
-                        {landlordInfo.email}
-                      </Typography>
-                      <Tooltip title="Copy email">
-                        <IconButton
-                          size="small"
-                          className="copy-button"
-                          onClick={() => handleCopyToClipboard(landlordInfo.email, 'Landlord Email')}
-                          sx={{ mt: 1, color: 'text.secondary' }}
-                        >
-                          <CopyIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  </Grid>
-                )}
-
-                {landlordInfo.phone && (
-                  <Grid item xs={12} sm={6}>
-                    <Box sx={{ p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
-                      <Typography variant="caption" color="text.secondary" gutterBottom display="block">
-                        <PhoneIcon fontSize="small" sx={{ mr: 0.5, verticalAlign: 'middle' }} />
-                        Phone
-                      </Typography>
-                      <Typography
-                        variant="body2"
-                        fontWeight={500}
-                        sx={{ userSelect: 'text' }}
-                      >
-                        {landlordInfo.phone}
-                      </Typography>
-                      <Tooltip title="Copy phone">
-                        <IconButton
-                          size="small"
-                          className="copy-button"
-                          onClick={() => handleCopyToClipboard(landlordInfo.phone, 'Landlord Phone')}
-                          sx={{ mt: 1, color: 'text.secondary' }}
-                        >
-                          <CopyIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  </Grid>
-                )}
-              </Grid>
-            </Grid>
-
-            {/* Additional Notes */}
-            {apartment.notes && (
-              <Grid item xs={12}>
+              <Box
+                sx={{
+                  p: 2,
+                  border: '1px solid',
+                  borderColor: 'divider',
+                  borderRadius: 1,
+                  bgcolor: 'grey.50'
+                }}
+              >
                 <Typography
-                  variant="subtitle1"
+                  variant="body2"
                   sx={{
-                    fontWeight: 600,
-                    mb: 2,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1
+                    whiteSpace: 'pre-wrap',
+                    userSelect: 'text'
                   }}
                 >
-                  <DescriptionIcon color="primary" fontSize="small" />
-                  Notes
+                  {apartment.notes}
                 </Typography>
-                <Box sx={{
-                  p: 2,
-                  bgcolor: 'grey.50',
-                  borderRadius: 1,
-                  border: '1px solid',
-                  borderColor: 'divider'
-                }}>
-                  <Typography
-                    variant="body2"
-                    sx={{
-                      whiteSpace: 'pre-wrap',
-                      userSelect: 'text'
-                    }}
-                  >
-                    {apartment.notes}
-                  </Typography>
-                </Box>
-              </Grid>
-            )}
-          </Grid>
+              </Box>
+            </Grid>
+          )}
         </Box>
       </DialogContent>
 
@@ -866,15 +778,5 @@ function ApartmentDetailsDialog({
     </Dialog>
   );
 }
-
-// Helper function to format dates
-const formatDate = (date) => {
-  if (!date) return 'Not set';
-  try {
-    return new Date(date).toLocaleDateString('en-GB');
-  } catch {
-    return 'Invalid date';
-  }
-};
 
 export default ApartmentDetailsDialog;

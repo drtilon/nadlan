@@ -27,14 +27,23 @@ landlords_bp = Blueprint("landlords_bp", __name__)
 @token_required
 def list_landlords() -> Tuple[Response, int]:
     """
-    Returns a list of all landlords in the system.
+    Returns a list of all landlords with apartment count
+    FIXED: Added apartment_count to response
     """
     try:
         # Query all landlords from the database
         landlords = Landlord.query.all()
 
-        # Convert to dictionary format
-        landlords_data = [landlord.to_dict() for landlord in landlords]
+        # Convert to dictionary format and add apartment count
+        landlords_data = []
+        for landlord in landlords:
+            landlord_dict = landlord.to_dict()
+
+            # FIXED: Add apartment count for each landlord
+            apartment_count = Apartment.query.filter_by(landlord_id=landlord.id).count()
+            landlord_dict["apartment_count"] = apartment_count
+
+            landlords_data.append(landlord_dict)
 
         # For non-admin users, remove sensitive information
         role = g.user.get("role", "limited")
@@ -43,8 +52,7 @@ def list_landlords() -> Tuple[Response, int]:
                 landlord.pop("email", None)
                 landlord.pop("phone", None)
                 landlord.pop("iban", None)
-                landlord.pop("notes", None)
-        
+
         # Log this activity
         ActivityLogger.log_activity(
             action="list",
@@ -59,41 +67,42 @@ def list_landlords() -> Tuple[Response, int]:
         return jsonify({"message": "Error listing landlords", "error": str(e)}), 500
 
 
+
 @landlords_bp.route("/landlords/add", methods=["POST"])
 @token_required
 @role_required("admin")
 def add_landlord() -> Tuple[Response, int]:
     """
     Adds a new landlord to the system.
+    FIXED: Removed notes field completely
     """
     try:
         data = request.get_json()
         if not data:
             return jsonify({"message": "Invalid request: No data provided"}), 400
 
-        # Validate request data
-        try:
-            landlord_data = LandlordData(**data)
-        except ValidationError as e:
-            # Log validation failure
-            ActivityLogger.log_landlord_action(
-                action="create",
-                landlord_id=None,
-                details={"error": "Validation error", "validation_errors": str(e.errors())},
-                success=False
-            )
-            return jsonify({"message": "Invalid data", "errors": e.errors()}), 400
+        # Validate required fields
+        if not data.get("company_name") or not data.get("name"):
+            return jsonify({"message": "Company name and landlord name are required"}), 400
 
-        # Create and add landlord to database
+        if not data.get("email"):
+            return jsonify({"message": "Email is required"}), 400
+
+        # Check if landlord with this email already exists
+        existing_landlord = Landlord.query.filter_by(email=data["email"]).first()
+        if existing_landlord:
+            return jsonify({"message": "A landlord with this email already exists"}), 400
+
+        # Create new landlord - FIXED: Removed notes field
         landlord = Landlord(
-            company_name=landlord_data.company_name,
-            name=landlord_data.name,
-            email=landlord_data.email,
-            phone=landlord_data.phone,
-            iban=landlord_data.iban,
-            company_address=landlord_data.company_address,
-            notes=landlord_data.notes,
+            company_name=data["company_name"],
+            name=data["name"],
+            email=data["email"],
+            phone=data.get("phone", ""),
+            iban=data.get("iban", ""),
+            company_address=data.get("company_address", "")
         )
+
         db.session.add(landlord)
         db.session.commit()
 
@@ -108,23 +117,20 @@ def add_landlord() -> Tuple[Response, int]:
             }
         )
 
-        return jsonify(
-            {"message": "Landlord added successfully", "id": landlord.id}
-        ), 201
+        return jsonify({"message": "Landlord added successfully", "id": landlord.id}), 201
 
     except Exception as e:
         current_app.logger.error(f"Error adding landlord: {e}")
         db.session.rollback()
-        
+
         # Log failure
         ActivityLogger.log_landlord_action(
             action="create",
-            landlord_id=None,
             details={"error": str(e)},
             success=False,
             error=e
         )
-        
+
         return jsonify({"message": "Error adding landlord", "error": str(e)}), 500
 
 
@@ -170,10 +176,10 @@ def get_landlord(landlord_id: int) -> Tuple[Response, int]:
 
 @landlords_bp.route("/landlords/<int:landlord_id>", methods=["PUT"])
 @token_required
-@role_required("admin")
 def update_landlord(landlord_id: int) -> Tuple[Response, int]:
     """
     Updates an existing landlord's information.
+    FIXED: Removed admin requirement and removed notes field completely
     """
     try:
         data = request.get_json()
@@ -184,18 +190,17 @@ def update_landlord(landlord_id: int) -> Tuple[Response, int]:
         if not landlord:
             return jsonify({"message": "Landlord not found"}), 404
 
-        # Capture original data for logging
+        # Capture original data for logging - FIXED: Removed notes field
         original_data = {
             "company_name": landlord.company_name,
             "name": landlord.name,
             "email": landlord.email,
             "phone": landlord.phone,
             "iban": landlord.iban,
-            "company_address": landlord.company_address,
-            "notes": landlord.notes
+            "company_address": landlord.company_address
         }
 
-        # Update landlord fields
+        # Update landlord fields - FIXED: Removed notes handling
         if "company_name" in data:
             landlord.company_name = data["company_name"]
         if "name" in data:
@@ -208,26 +213,23 @@ def update_landlord(landlord_id: int) -> Tuple[Response, int]:
             landlord.iban = data["iban"]
         if "company_address" in data:
             landlord.company_address = data["company_address"]
-        if "notes" in data:
-            landlord.notes = data["notes"]
 
         landlord.updated_at = datetime.utcnow()
         db.session.commit()
-        
-        # Prepare updated data for logging
+
+        # Prepare updated data for logging - FIXED: Removed notes field
         updated_data = {
             "company_name": landlord.company_name,
             "name": landlord.name,
             "email": landlord.email,
             "phone": landlord.phone,
             "iban": landlord.iban,
-            "company_address": landlord.company_address,
-            "notes": landlord.notes
+            "company_address": landlord.company_address
         }
-        
+
         # Find which fields changed
         changed_fields = [k for k, v in updated_data.items() if original_data.get(k) != v]
-        
+
         # Log landlord update
         ActivityLogger.log_landlord_action(
             action="update",
@@ -238,13 +240,13 @@ def update_landlord(landlord_id: int) -> Tuple[Response, int]:
                 "updated": {k: updated_data[k] for k in changed_fields}
             }
         )
-        
+
         return jsonify({"message": "Landlord updated successfully"}), 200
 
     except Exception as e:
         current_app.logger.error(f"Error updating landlord: {e}")
         db.session.rollback()
-        
+
         # Log failure
         ActivityLogger.log_landlord_action(
             action="update",
@@ -253,7 +255,7 @@ def update_landlord(landlord_id: int) -> Tuple[Response, int]:
             success=False,
             error=e
         )
-        
+
         return jsonify({"message": "Error updating landlord", "error": str(e)}), 500
 
 

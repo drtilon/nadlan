@@ -57,7 +57,6 @@ function LandlordsPanel({ showNotification }) {
     phone: '',
     iban: '',
     company_address: '',
-    notes: ''
   });
   const [filteredLandlords, setFilteredLandlords] = useState([]);
   const [formSubmitting, setFormSubmitting] = useState(false);
@@ -129,7 +128,6 @@ function LandlordsPanel({ showNotification }) {
         phone: landlord.phone || '',
         iban: landlord.iban || '',
         company_address: landlord.company_address || '',
-        notes: landlord.notes || ''
       });
     } else {
       // Add mode
@@ -141,7 +139,6 @@ function LandlordsPanel({ showNotification }) {
         phone: '',
         iban: '',
         company_address: '',
-        notes: ''
       });
     }
     setOpenDialog(true);

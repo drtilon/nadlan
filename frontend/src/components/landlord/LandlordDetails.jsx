@@ -1,4 +1,4 @@
-// src/components/LandlordDetails.jsx - COMPLETE FIXED VERSION
+// src/components/LandlordDetails.jsx - FIXED VERSION with working apartment details dialog
 import React, { useState, useEffect } from 'react';
 import {
   Container,
@@ -37,7 +37,7 @@ import {
 } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import api from '../../utils/api';
-import ApartmentDetailsDialog from '../apartment/ApartmentDetailsDialog'; // Import the apartment details dialog
+import ApartmentDetailsDialog from '../apartment/ApartmentDetailsDialog';
 
 function LandlordDetails({ landlordId, onBack, showNotification }) {
   const [landlord, setLandlord] = useState(null);
@@ -67,10 +67,40 @@ function LandlordDetails({ landlordId, onBack, showNotification }) {
     }
   };
 
-  // FIXED: Handle apartment view by opening details dialog
-  const handleViewApartment = (apartment) => {
-    setSelectedApartment(apartment);
-    setApartmentDetailsOpen(true);
+  // FIXED: Handle apartment view by fetching full apartment data (like TenantsPanel)
+  const handleViewApartment = async (apartment) => {
+    try {
+      // Get full apartment details from the API
+      const response = await api.get(`/apartment/${apartment.id}`);
+      const fullApartment = response.data;
+
+      // Calculate expiry status (exactly like TenantsPanel)
+      const calculateExpiryStatus = (contractEndDate) => {
+        if (!contractEndDate) return { status: 'no_date', daysUntilExpiry: null };
+
+        const endDate = new Date(contractEndDate);
+        const today = new Date();
+        const timeDiff = endDate.getTime() - today.getTime();
+        const daysUntilExpiry = Math.ceil(timeDiff / (1000 * 3600 * 24));
+
+        if (daysUntilExpiry < 0) {
+          return { status: 'expired', daysUntilExpiry };
+        } else if (daysUntilExpiry <= 30) {
+          return { status: 'expiring_soon', daysUntilExpiry };
+        } else {
+          return { status: 'valid', daysUntilExpiry };
+        }
+      };
+
+      // Add expiryStatus to apartment object
+      fullApartment.expiryStatus = calculateExpiryStatus(fullApartment.contractEndDate);
+
+      setSelectedApartment(fullApartment);
+      setApartmentDetailsOpen(true);
+    } catch (error) {
+      console.error('Error showing apartment details:', error);
+      showNotification('Failed to load apartment details', 'error');
+    }
   };
 
   // Handle apartment dialog close
@@ -101,42 +131,34 @@ function LandlordDetails({ landlordId, onBack, showNotification }) {
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `contract_${apartmentId}.docx`);
+      link.setAttribute('download', `contract-${apartmentId}.pdf`);
       document.body.appendChild(link);
       link.click();
-      document.body.removeChild(link);
+      link.remove();
       window.URL.revokeObjectURL(url);
 
-      showNotification('Contract generated successfully', 'success');
+      showNotification('Contract generated and downloaded successfully', 'success');
     } catch (error) {
       console.error('Error generating contract:', error);
       showNotification('Failed to generate contract', 'error');
     }
   };
 
-  // Format currency
+  // Helper functions
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(amount);
+    if (!amount) return '€0';
+    return `€${parseFloat(amount).toLocaleString()}`;
   };
 
-  // Calculate total rent across all properties
   const calculateTotalRent = (apartments) => {
-    if (!apartments || !apartments.length) return 0;
-    return apartments.reduce((total, apt) => total + (apt.rent || 0), 0);
+    if (!apartments || apartments.length === 0) return 0;
+    return apartments.reduce((total, apt) => total + (parseFloat(apt.rent) || 0), 0);
   };
 
   if (loading) {
     return (
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-        <Paper sx={{ p: 3 }}>
-          <LinearProgress />
-          <Typography variant="h6" sx={{ mt: 2, textAlign: 'center' }}>
-            Loading landlord details...
-          </Typography>
-        </Paper>
+        <LinearProgress />
       </Container>
     );
   }
@@ -144,11 +166,9 @@ function LandlordDetails({ landlordId, onBack, showNotification }) {
   if (!landlord) {
     return (
       <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
-        <Paper sx={{ p: 3 }}>
-          <Alert severity="error">
-            Landlord not found or error loading data.
-          </Alert>
-        </Paper>
+        <Alert severity="error">
+          Landlord not found
+        </Alert>
       </Container>
     );
   }
@@ -161,22 +181,22 @@ function LandlordDetails({ landlordId, onBack, showNotification }) {
           <IconButton onClick={onBack} sx={{ mr: 2 }}>
             <ArrowBackIcon />
           </IconButton>
-          <Typography variant="h4" component="h1" sx={{ flexGrow: 1 }}>
-            {landlord.company_name}
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold' }}>
+            Landlord Details
           </Typography>
         </Box>
 
-        {/* Landlord Overview Card */}
-        <Card sx={{ mb: 4 }}>
+        {/* Landlord Info Card */}
+        <Card sx={{ mb: 3 }}>
           <CardContent sx={{ p: 3 }}>
-            <Grid container spacing={3} alignItems="center">
-              <Grid item xs={12} md={8}>
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
                 <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                  <Avatar sx={{ width: 60, height: 60, mr: 3, bgcolor: 'primary.main' }}>
-                    <BusinessIcon fontSize="large" />
+                  <Avatar sx={{ bgcolor: 'primary.main', width: 56, height: 56, mr: 2 }}>
+                    <BusinessIcon />
                   </Avatar>
                   <Box>
-                    <Typography variant="h5" gutterBottom>
+                    <Typography variant="h5" sx={{ fontWeight: 'bold' }}>
                       {landlord.name}
                     </Typography>
                     <Typography variant="subtitle1" color="text.secondary">
@@ -185,45 +205,38 @@ function LandlordDetails({ landlordId, onBack, showNotification }) {
                   </Box>
                 </Box>
 
-                <Grid container spacing={2}>
-                  <Grid item xs={12} sm={6}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <Stack spacing={1}>
+                  {landlord.email && (
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
                       <EmailIcon sx={{ mr: 1, color: 'text.secondary' }} />
                       <Typography variant="body2">{landlord.email}</Typography>
                     </Box>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                  )}
+                  {landlord.phone && (
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
                       <PhoneIcon sx={{ mr: 1, color: 'text.secondary' }} />
                       <Typography variant="body2">{landlord.phone}</Typography>
                     </Box>
-                  </Grid>
+                  )}
                   {landlord.company_address && (
-                    <Grid item xs={12}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                        <LocationIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                        <Typography variant="body2">{landlord.company_address}</Typography>
-                      </Box>
-                    </Grid>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <LocationIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                      <Typography variant="body2">{landlord.company_address}</Typography>
+                    </Box>
                   )}
                   {landlord.iban && (
-                    <Grid item xs={12}>
-                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-                        <BankIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                        <Typography variant="body2">{landlord.iban}</Typography>
-                      </Box>
-                    </Grid>
+                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                      <BankIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                      <Typography variant="body2">{landlord.iban}</Typography>
+                    </Box>
                   )}
-                </Grid>
-
-                {landlord.notes && (
-                  <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
-                    <Typography variant="body2">{landlord.notes}</Typography>
-                  </Box>
-                )}
+                </Stack>
               </Grid>
 
-              <Grid item xs={12} md={4}>
+              <Grid item xs={12} md={6}>
+                <Typography variant="h6" gutterBottom>
+                  Portfolio Overview
+                </Typography>
                 <Grid container spacing={2}>
                   <Grid item xs={6}>
                     <Box sx={{ textAlign: 'center', p: 2, borderRadius: 1, bgcolor: 'background.paper', boxShadow: 1 }}>
@@ -247,22 +260,16 @@ function LandlordDetails({ landlordId, onBack, showNotification }) {
                   </Grid>
                 </Grid>
 
-                <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-                  <Button
-                    variant="outlined"
-                    color="primary"
-                    startIcon={<EditIcon />}
-                    onClick={() => showNotification('Edit functionality would open a modal here', 'info')}
-                  >
-                    Edit Landlord
-                  </Button>
-                </Box>
               </Grid>
             </Grid>
           </CardContent>
         </Card>
 
         {/* Properties Section */}
+        <Typography variant="h5" gutterBottom sx={{ fontWeight: 'bold', mb: 2 }}>
+          Properties ({landlord.apartments ? landlord.apartments.length : 0})
+        </Typography>
+
         {!landlord.apartments || landlord.apartments.length === 0 ? (
           <Alert severity="info" sx={{ mt: 2 }}>
             No properties are currently assigned to this landlord.
@@ -323,18 +330,28 @@ function LandlordDetails({ landlordId, onBack, showNotification }) {
         )}
       </Container>
 
-      {/* Apartment Details Dialog */}
+      {/* Apartment Details Dialog - FIXED with proper props */}
       <ApartmentDetailsDialog
         open={apartmentDetailsOpen}
         onClose={handleCloseApartmentDetails}
         apartment={selectedApartment}
-        onEdit={() => {}} // Add edit functionality if needed
+        onEdit={() => {
+          // Optional: Add edit functionality if needed
+          showNotification('Edit functionality would open apartment edit dialog', 'info');
+        }}
         onGoToPayments={handleGoToPayments}
         onGenerateContract={handleGenerateContract}
-        onExtendContract={() => {}} // Add extend contract functionality if needed
-        onOpenContractManagement={() => {}} // Add contract management if needed
+        onExtendContract={() => {
+          // Optional: Add extend contract functionality if needed
+          showNotification('Contract extension functionality would be implemented here', 'info');
+        }}
+        onOpenContractManagement={() => {
+          // Optional: Add contract management if needed
+          showNotification('Contract management would open here', 'info');
+        }}
         onGoToTenant={handleGoToTenant}
-        isAdmin={true} // You might want to pass this as a prop
+        showNotification={showNotification}
+        isAdmin={true}
       />
     </>
   );

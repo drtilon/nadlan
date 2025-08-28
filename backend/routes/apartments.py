@@ -855,35 +855,72 @@ def get_single_apartment(apartment_id):
         # Check if user is admin for enhanced data
         is_admin = g.user.get("role") == "admin"
 
-        # Build apartment data similar to list_apartments format
+        # Get current contract periods and tenants (same as list_apartments logic)
+        current_contracts = apartment.get_current_contract_periods()
+        current_tenants = apartment.get_current_tenants()
+
+        # Get contract dates from current contract periods
+        move_in_date = None
+        contract_end_date = None
+        if current_contracts:
+            # Get the earliest move-in date and latest contract end date
+            contract_tenants = []
+            for contract in current_contracts:
+                contract_tenants.extend(contract.contract_tenants)
+
+            if contract_tenants:
+                move_in_dates = [ct.move_in_date for ct in contract_tenants if ct.move_in_date]
+                if move_in_dates:
+                    move_in_date = min(move_in_dates)
+
+            # Get the latest contract end date
+            end_dates = [cp.end_date for cp in current_contracts if cp.end_date]
+            if end_dates:
+                contract_end_date = max(end_dates)
+
+        # Build apartment data similar to list_apartments format but enhanced
         apt_dict = {
             # Basic apartment info
             "id": apartment.id,
-            "address": apartment.address,
-            "street_name": apartment.street_name,
-            "house_number": apartment.house_number,
-            "city": apartment.city,
-            "state": apartment.state,
-            "zip_code": apartment.zip_code,
+            "address": apartment.address or f"{apartment.street_name or ''} {apartment.house_number or ''}".strip() or "No Address",
+            "street_name": apartment.street_name or "",
+            "house_number": apartment.house_number or "",
+            "city": apartment.city or "",
+            "state": apartment.state or "",
+            "zip_code": apartment.zip_code or "",
+            "country": apartment.country or "Israel",
+            "building": apartment.building or "",
             "floor": apartment.floor,
+            "side": apartment.side or "",
 
             # Space info
-            "bedrooms": apartment.bedrooms,
-            "rooms": apartment.rooms or apartment.bedrooms,  # Fallback
-            "area": apartment.area,
-            "size": apartment.area,  # Alias
+            "bedrooms": apartment.bedrooms or apartment.rooms or 0,
+            "rooms": apartment.bedrooms or apartment.rooms or 0,
+            "area": float(apartment.area) if apartment.area else 0,
+            "size": float(apartment.area) if apartment.area else 0,  # Alias
 
             # Status and preferences
-            "status": apartment.status,
-            "genderPreference": apartment.genderPreference,
-            "maxOccupancy": apartment.maxOccupancy,
+            "status": "occupied" if current_tenants else "vacant",  # Computed status
+            "original_status": apartment.status,  # Keep original for reference
+            "genderPreference": apartment.genderPreference or "mixed",
+            "maxOccupancy": apartment.maxOccupancy or 4,
 
             # Financial info - basic for all users
             "rent": float(apartment.rent) if apartment.rent else 0,
+            "deposit": float(apartment.deposit) if apartment.deposit else 0,
 
-            # Contract dates if available
-            "moveInDate": apartment.moveInDate.isoformat() if apartment.moveInDate else None,
-            "contractEndDate": apartment.contractEndDate.isoformat() if apartment.contractEndDate else None,
+            # FIXED: Contract dates from ContractPeriod data, not apartment fields
+            "moveInDate": move_in_date.isoformat() if move_in_date else None,
+            "contractEndDate": contract_end_date.isoformat() if contract_end_date else None,
+
+            # Tenant information
+            "current_tenant_count": len(current_tenants),
+            "is_full": len(current_tenants) >= (apartment.maxOccupancy or 4),
+            "tenants": [{"id": t.id, "name": t.name, "phone": t.phone, "email": t.email} for t in current_tenants],
+
+            # Contract information
+            "contract_count": len(current_contracts),
+            "has_active_contracts": len(current_contracts) > 0,
 
             # Landlord info
             "landlord_id": apartment.landlord_id,

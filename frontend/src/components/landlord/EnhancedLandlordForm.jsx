@@ -141,29 +141,6 @@ function EnhancedLandlordForm({
               }}
             />
           </Grid>
-
-          <Grid item xs={12}>
-            <Typography variant="subtitle1" gutterBottom fontWeight="medium" sx={{ mt: 2 }}>
-              Additional Information
-            </Typography>
-            <Divider sx={{ mb: 2 }} />
-          </Grid>
-
-          <Grid item xs={12}>
-            <TextField
-              fullWidth
-              label="Notes"
-              name="notes"
-              value={formData.notes || ''}
-              onChange={handleInputChange}
-              multiline
-              rows={3}
-              variant="filled"
-              InputLabelProps={{
-                sx: { fontSize: '1rem', fontWeight: 'medium' }
-              }}
-            />
-          </Grid>
         </Grid>
       </DialogContent>
 

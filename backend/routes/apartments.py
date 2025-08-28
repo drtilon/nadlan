@@ -584,7 +584,7 @@ def edit_apartment_admin(apartment_id):
 def edit_apartment_common(apartment_id, is_admin=False):
     """
     FIXED Common edit logic for both admin and user
-    Handles the fact that Tenant model doesn't have apartment_id column
+    Handles empty string values for numeric fields properly
     """
     try:
         apartment = Apartment.query.get(apartment_id)
@@ -598,7 +598,21 @@ def edit_apartment_common(apartment_id, is_admin=False):
         print(f"Editing apartment {apartment_id}, is_admin: {is_admin}")
         print(f"Received data: {json.dumps(new_apartment_data, indent=2)}")
 
-        # FIXED: Update ALL apartment fields - Basic fields for everyone
+        # FIXED: Helper function to handle empty strings for numeric fields
+        def safe_numeric(value):
+            if value is None or value == '' or value == 0:
+                return None
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return None
+
+        def safe_string(value):
+            if value is None or value == '':
+                return None
+            return str(value)
+
+        # FIXED: Update ALL apartment fields - Basic fields for everyone with proper null handling
         if "street_name" in new_apartment_data:
             apartment.street_name = new_apartment_data["street_name"]
         if "house_number" in new_apartment_data:
@@ -606,17 +620,17 @@ def edit_apartment_common(apartment_id, is_admin=False):
         if "city" in new_apartment_data:
             apartment.city = new_apartment_data["city"]
         if "zip_code" in new_apartment_data:
-            apartment.zip_code = new_apartment_data["zip_code"]
+            apartment.zip_code = safe_string(new_apartment_data["zip_code"])
         if "state" in new_apartment_data:
-            apartment.state = new_apartment_data["state"]
+            apartment.state = safe_string(new_apartment_data["state"])
         if "country" in new_apartment_data:
             apartment.country = new_apartment_data["country"]
         if "building" in new_apartment_data:
-            apartment.building = new_apartment_data["building"]
+            apartment.building = safe_string(new_apartment_data["building"])
         if "floor" in new_apartment_data:
-            apartment.floor = new_apartment_data["floor"]
+            apartment.floor = safe_string(new_apartment_data["floor"])
         if "side" in new_apartment_data:
-            apartment.side = new_apartment_data["side"]
+            apartment.side = safe_string(new_apartment_data["side"])
 
         # FIXED: Property details - handle both 'rooms' and 'bedrooms'
         if "rooms" in new_apartment_data:
@@ -625,9 +639,9 @@ def edit_apartment_common(apartment_id, is_admin=False):
             if hasattr(apartment, 'rooms'):
                 apartment.rooms = new_apartment_data["rooms"]
 
-        # FIXED: Handle 'size' -> 'area' mapping
+        # FIXED: Handle 'size' -> 'area' mapping with safe numeric conversion
         if "size" in new_apartment_data:
-            apartment.area = new_apartment_data["size"]
+            apartment.area = safe_numeric(new_apartment_data["size"])  # This is the fix!
 
         # FIXED: Other basic fields that everyone can edit
         if "rent" in new_apartment_data:
@@ -648,18 +662,21 @@ def edit_apartment_common(apartment_id, is_admin=False):
             apartment.landlord_id = new_apartment_data["landlord_id"]
             print(f"Set landlord_id to: {apartment.landlord_id}")
 
-        # FIXED: Handle date fields properly
+        # FIXED: Handle date fields properly - extract for contract updates
+        move_in_date = None
+        move_out_date = None
+
         if "moveInDate" in new_apartment_data and new_apartment_data["moveInDate"]:
             try:
-                apartment.moveInDate = datetime.strptime(new_apartment_data["moveInDate"], "%Y-%m-%d").date()
+                move_in_date = datetime.strptime(new_apartment_data["moveInDate"], "%Y-%m-%d").date()
             except ValueError:
-                pass  # Ignore invalid date formats
+                pass
 
-        if "contractEndDate" in new_apartment_data and new_apartment_data["contractEndDate"]:
+        if "moveOutDate" in new_apartment_data and new_apartment_data["moveOutDate"]:
             try:
-                apartment.contractEndDate = datetime.strptime(new_apartment_data["contractEndDate"], "%Y-%m-%d").date()
+                move_out_date = datetime.strptime(new_apartment_data["moveOutDate"], "%Y-%m-%d").date()
             except ValueError:
-                pass  # Ignore invalid date formats
+                pass
 
         # FIXED: Update address field from components
         if apartment.street_name or apartment.house_number or apartment.city:
@@ -673,7 +690,7 @@ def edit_apartment_common(apartment_id, is_admin=False):
                     address_parts.append(f", {apartment.city}")
                 else:
                     address_parts.append(apartment.city)
-            apartment.address = "".join(address_parts) if address_parts else apartment.address
+            apartment.address = " ".join(address_parts) if address_parts else apartment.address
 
         # FIXED: ONLY managementFee, rentCost, and model are admin-only
         if is_admin:
@@ -684,117 +701,77 @@ def edit_apartment_common(apartment_id, is_admin=False):
                 print(f"Set model to: {apartment.model}")
 
             if "managementFee" in new_apartment_data:
-                apartment.managementFee = float(new_apartment_data["managementFee"]) if new_apartment_data["managementFee"] is not None else 0.0
+                apartment.managementFee = safe_numeric(new_apartment_data["managementFee"])
                 print(f"Set managementFee to: {apartment.managementFee}")
 
             if "rentCost" in new_apartment_data:
-                apartment.rentCost = float(new_apartment_data["rentCost"]) if new_apartment_data["rentCost"] is not None else 0.0
+                apartment.rentCost = safe_numeric(new_apartment_data["rentCost"])
                 print(f"Set rentCost to: {apartment.rentCost}")
 
         # FIXED: Handle tenant updates using the contract system
         if new_tenants:
             print(f"Processing {len(new_tenants)} tenants...")
 
-            # FIXED: Get current tenants through the contract system (not apartment_id)
+            # Get current tenants through the contract system
             current_tenants = apartment.get_current_tenants()
             current_tenant_ids = {t.id for t in current_tenants}
 
             # Track which tenants should remain
             tenants_to_keep = set()
 
+            # Process new tenants list
+            new_tenant_ids = []
             for tenant_data in new_tenants:
                 if tenant_data.get("isExistingTenant") and tenant_data.get("id"):
-                    # Existing tenant - just mark to keep
-                    tenants_to_keep.add(tenant_data["id"])
-
-                    # Update existing tenant if needed
-                    existing_tenant = next((t for t in current_tenants if t.id == tenant_data["id"]), None)
-                    if existing_tenant:
-                        if "name" in tenant_data:
-                            existing_tenant.name = tenant_data["name"]
-                        if "email" in tenant_data:
-                            existing_tenant.email = tenant_data["email"]
-                        if "phone" in tenant_data:
-                            existing_tenant.phone = tenant_data["phone"]
-
-                elif tenant_data.get("name") and not tenant_data.get("isExistingTenant"):
-                    # FIXED: New tenant - create tenant and add to active contract
-                    new_tenant = Tenant(
+                    # Existing tenant
+                    tenant_id = tenant_data["id"]
+                    tenants_to_keep.add(tenant_id)
+                    new_tenant_ids.append(tenant_id)
+                elif tenant_data.get("name"):
+                    # New tenant - create it
+                    tenant = Tenant(
                         name=tenant_data["name"],
-                        phone=tenant_data.get("phone", ""),
-                        email=tenant_data.get("email", ""),
+                        phone=tenant_data.get("phone"),
+                        email=tenant_data.get("email"),
                         date_of_birth=tenant_data.get("date_of_birth"),
                         refund_iban=tenant_data.get("refund_iban"),
                         passport_id=tenant_data.get("passport_id"),
                         gender=tenant_data.get("gender")
-                        # NOTE: NO apartment_id here since that column doesn't exist
                     )
-                    db.session.add(new_tenant)
-                    db.session.flush()  # Get the ID
-                    tenants_to_keep.add(new_tenant.id)
+                    db.session.add(tenant)
+                    db.session.flush()
+                    new_tenant_ids.append(tenant.id)
 
-                    # FIXED: Add tenant to an active contract period
-                    # Find or create an active contract period for this apartment
-                    active_contract = ContractPeriod.query.filter_by(
-                        apartment_id=apartment.id,
-                        status='active'
-                    ).first()
+            # Update contract with new tenant list
+            from .contract_automation import update_contract_tenants
+            success = update_contract_tenants(apartment_id, new_tenant_ids)
 
-                    if not active_contract:
-                        # Create a new active contract period
-                        from datetime import date
-                        contract_number = f"APT{apartment.id}-{date.today().strftime('%Y%m%d')}-{len(apartment.contract_periods) + 1}"
+            if not success:
+                current_app.logger.warning(f"Failed to update contract tenants for apartment {apartment_id}")
 
-                        active_contract = ContractPeriod(
-                            apartment_id=apartment.id,
-                            contract_number=contract_number,
-                            start_date=date.today(),
-                            monthly_rent=apartment.rent,
-                            security_deposit=apartment.deposit,
-                            status="active"
-                        )
-                        db.session.add(active_contract)
-                        db.session.flush()  # Get the ID
+        # Update contract dates if changed
+        if move_in_date or move_out_date:
+            from .contract_automation import get_active_contract_for_apartment
+            active_contract = get_active_contract_for_apartment(apartment_id)
+            if active_contract:
+                if move_in_date:
+                    active_contract.start_date = move_in_date
+                if move_out_date:
+                    active_contract.end_date = move_out_date
 
-                    # Add the tenant to the contract period
-                    contract_tenant = ContractTenant(
-                        contract_period_id=active_contract.id,
-                        tenant_id=new_tenant.id,
-                        move_in_date=date.today(),
-                        is_primary=len(tenants_to_keep) == 1  # First tenant is primary
-                    )
-                    db.session.add(contract_tenant)
-
-                    print(f"Created new tenant: {new_tenant.name} (ID: {new_tenant.id}) and added to contract {active_contract.contract_number}")
-
-            # FIXED: Handle tenant removals through the contract system
-            tenants_to_remove = current_tenant_ids - tenants_to_keep
-            if tenants_to_remove:
-                print(f"Removing tenants: {tenants_to_remove}")
-                for tenant_id in tenants_to_remove:
-                    # Find and end the contract assignments for this tenant in this apartment
-                    contract_assignments = db.session.query(ContractTenant)\
-                        .join(ContractPeriod)\
-                        .filter(ContractPeriod.apartment_id == apartment.id)\
-                        .filter(ContractTenant.tenant_id == tenant_id)\
-                        .filter(ContractTenant.move_out_date.is_(None))\
-                        .all()
-
-                    for assignment in contract_assignments:
-                        assignment.move_out_date = date.today()
-                        print(f"Set move_out_date for tenant {tenant_id} in contract {assignment.contract_period.contract_number}")
-
-        # FIXED: Commit all changes
         db.session.commit()
 
-        print(f"Successfully updated apartment {apartment_id}")
+        # Log the activity
+        ActivityLogger.log_apartment_action(apartment_id, g.user.get("username"))
 
-        return jsonify({"message": "Apartment updated successfully"}), 200
+        return jsonify({
+            "message": "Apartment updated successfully",
+            "apartment_id": apartment_id
+        }), 200
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error editing apartment {apartment_id}: {str(e)}")
-        print(f"Error editing apartment: {str(e)}")
+        current_app.logger.error(f"Error editing apartment {apartment_id}: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500

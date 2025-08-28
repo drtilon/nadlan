@@ -366,7 +366,7 @@ function ApartmentDetailsForm({
             required
             inputProps={{ min: 0, step: 0.01 }}
             InputProps={{
-              startAdornment: '₪'
+              startAdornment: '€'
             }}
           />
         </Grid>
@@ -380,7 +380,7 @@ function ApartmentDetailsForm({
             onChange={handleChange}
             inputProps={{ min: 0, step: 0.01 }}
             InputProps={{
-              startAdornment: '₪'
+              startAdornment: '€'
             }}
           />
         </Grid>

@@ -28,7 +28,8 @@ import {
   Warning as WarningIcon,
   Error as ErrorIcon,
   MoreVert as MoreVertIcon,
-  Visibility as ViewIcon
+  Visibility as ViewIcon,
+  Schedule as ScheduleIcon
 } from '@mui/icons-material';
 
 // Import utility functions locally
@@ -105,6 +106,76 @@ const getStatusChip = (status, contractEndDate) => {
         }
       }}
     />
+  );
+};
+
+// Contract expiry display component
+const ContractExpiryDisplay = ({ contractEndDate }) => {
+  if (!contractEndDate) {
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <ScheduleIcon sx={{ fontSize: '0.75rem', color: 'text.secondary' }} />
+        <Typography variant="caption" color="text.secondary">
+          No contract end date
+        </Typography>
+      </Box>
+    );
+  }
+
+  const getExpiryStatus = (contractEndDate) => {
+    const endDate = new Date(contractEndDate);
+    const today = new Date();
+    const timeDiff = endDate.getTime() - today.getTime();
+    const daysUntilExpiry = Math.ceil(timeDiff / (1000 * 3600 * 24));
+
+    if (daysUntilExpiry < 0) {
+      return { status: 'expired', daysUntilExpiry, color: 'error.main' };
+    } else if (daysUntilExpiry <= 7) {
+      return { status: 'critical', daysUntilExpiry, color: 'error.main' };
+    } else if (daysUntilExpiry <= 30) {
+      return { status: 'expiring_soon', daysUntilExpiry, color: 'warning.main' };
+    } else {
+      return { status: 'valid', daysUntilExpiry, color: 'success.main' };
+    }
+  };
+
+  const formatDate = (dateStr) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+  };
+
+  const expiryStatus = getExpiryStatus(contractEndDate);
+
+  let displayText = '';
+  if (expiryStatus.status === 'expired') {
+    displayText = `Expired ${Math.abs(expiryStatus.daysUntilExpiry)} days ago`;
+  } else if (expiryStatus.status === 'critical') {
+    displayText = `Expires in ${expiryStatus.daysUntilExpiry} days`;
+  } else if (expiryStatus.status === 'expiring_soon') {
+    displayText = `Expires in ${expiryStatus.daysUntilExpiry} days`;
+  } else {
+    displayText = `Expires ${formatDate(contractEndDate)}`;
+  }
+
+  return (
+    <Tooltip title={`Contract expires: ${formatDate(contractEndDate)}`}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <ScheduleIcon sx={{ fontSize: '0.75rem', color: expiryStatus.color }} />
+        <Typography
+          variant="caption"
+          sx={{
+            color: expiryStatus.color,
+            fontWeight: expiryStatus.status === 'expired' || expiryStatus.status === 'critical' ? 600 : 400
+          }}
+        >
+          {displayText}
+        </Typography>
+      </Box>
+    </Tooltip>
   );
 };
 
@@ -359,6 +430,11 @@ function ApartmentCard({
               {getBuildingInfo()}
             </Typography>
           )}
+
+          {/* Contract Expiry Display - NEW ADDITION */}
+          <Box sx={{ display: 'flex', justifyContent: 'center', mb: 1 }}>
+            <ContractExpiryDisplay contractEndDate={apartment.contractEndDate} />
+          </Box>
 
           {/* Notice bar (badges): status, tenants_count/tenants_capacity, gender */}
           <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1, flexWrap: 'wrap', mt: 1 }}>

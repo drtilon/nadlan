@@ -1,31 +1,30 @@
-// ApartmentDetailsForm.jsx - FIXED VERSION removing primary tenant references
+// ApartmentDetailsForm.jsx - COMPLETE FIXED VERSION with proper field visibility
 import React, { useState, useEffect } from 'react';
 import {
-  Typography,
+  Grid,
   TextField,
   Button,
+  Typography,
+  Box,
   FormControl,
+  InputLabel,
   Select,
   MenuItem,
-  Grid,
-  CircularProgress,
-  Box,
-  Paper,
-  Autocomplete,
-  InputLabel
+  Divider,
+  Alert,
+  FormHelperText,
+  Autocomplete
 } from '@mui/material';
 import {
-  Home as HomeIcon,
-  Person as PersonIcon,
-  People as PeopleIcon,
-  Description as DescriptionIcon,
-  Delete as DeleteIcon,
   Save as SaveIcon,
-  Business as BusinessIcon,
+  Delete as DeleteIcon,
+  Home as HomeIcon,
   AccountBalance as BankIcon,
-  Refresh as RefreshIcon,
-  LocationOn as LocationIcon,
+  Person as PersonIcon,
+  LocationOn as LocationIcon
 } from '@mui/icons-material';
+
+// Import API for landlord fetching
 import api from '../../utils/api';
 
 // Constants
@@ -40,12 +39,17 @@ const PROPERTY_MODELS = {
   RENTAL: 'rental'
 };
 
-const ApartmentDetailsForm = ({
+const GENDER_PREFERENCES = [
+  { value: 'mixed', label: 'Mixed' },
+  { value: 'male', label: 'Male Only' },
+  { value: 'female', label: 'Female Only' }
+];
+
+function ApartmentDetailsForm({
   formData,
-  tenantData,
   handleChange,
+  tenantData,
   handleTenantChange,
-  // REMOVED: setTenantAsPrimary - no more primary tenants
   removeTenant,
   addNewTenant,
   handleTenantSelection,
@@ -57,64 +61,52 @@ const ApartmentDetailsForm = ({
   showNotification,
   isAdmin,
   addedTenantIds,
-  tenantSelection // This prop contains the TenantSelector component
-}) => {
+  tenantSelection
+}) {
+
   const [landlords, setLandlords] = useState([]);
-  const [selectedLandlord, setSelectedLandlord] = useState(null);
   const [loadingLandlords, setLoadingLandlords] = useState(false);
 
-  // Fetch landlords on component mount
+  // Fetch landlords for all users (needed for landlord selection)
   useEffect(() => {
-    fetchLandlords();
-  }, []);
-
-  // Set selected landlord when formData changes or when landlords are loaded
-  useEffect(() => {
-    if (landlords.length > 0 && formData.landlord_id) {
-      const landlord = landlords.find(l => l.id === formData.landlord_id);
-      setSelectedLandlord(landlord || null);
-    }
-  }, [formData.landlord_id, landlords]);
-
-  const fetchLandlords = async () => {
-    setLoadingLandlords(true);
-    try {
-      const response = await api.get('/landlords/list');
-      setLandlords(response.data || []);
-    } catch (error) {
-      console.error('Error fetching landlords:', error);
-      showNotification('Error loading landlords', 'error');
-    } finally {
-      setLoadingLandlords(false);
-    }
-  };
-
-  const handleLandlordChange = (event, newValue) => {
-    setSelectedLandlord(newValue);
-    handleChange({
-      target: {
-        name: 'landlord_id',
-        value: newValue ? newValue.id : null
+    const fetchLandlords = async () => {
+      try {
+        setLoadingLandlords(true);
+        // FIXED: Use correct endpoint /landlords/list instead of /landlords/all
+        const response = await api.get('/landlords/list');
+        if (response.data && Array.isArray(response.data)) {
+          setLandlords(response.data);
+        }
+      } catch (error) {
+        console.error('Error fetching landlords:', error);
+        if (showNotification) {
+          showNotification('Error loading landlords', 'error');
+        }
+      } finally {
+        setLoadingLandlords(false);
       }
-    });
-  };
+    };
+
+    fetchLandlords();
+  }, [showNotification]);
+
+  // FIXED: Get selected landlord for display
+  const selectedLandlord = landlords.find(l => l.id === formData.landlord_id);
 
   return (
     <Grid container spacing={3}>
-      {/* Property Information Header */}
+      {/* Address Section */}
       <Grid item xs={12}>
-        <Paper sx={{ p: 2, mb: 2, backgroundColor: '#f5f5f5' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-            <HomeIcon sx={{ mr: 1, color: 'primary.main' }} />
-            <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-              Property Information
-            </Typography>
-          </Box>
-        </Paper>
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+          <LocationIcon sx={{ mr: 1, color: 'primary.main' }} />
+          <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+            Address Information
+          </Typography>
+        </Box>
       </Grid>
 
-      {/* Address Fields */}
-      <Grid item xs={12} sm={8}>
+      {/* FIXED: All address fields properly mapped */}
+      <Grid item xs={12} sm={6}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>Street Name *</Typography>
           <TextField
@@ -125,14 +117,11 @@ const ApartmentDetailsForm = ({
             fullWidth
             required
             placeholder="Enter street name"
-            InputProps={{
-              startAdornment: <LocationIcon sx={{ mr: 1, color: 'action.active' }} />
-            }}
           />
         </Box>
       </Grid>
 
-      <Grid item xs={12} sm={4}>
+      <Grid item xs={12} sm={3}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>House Number *</Typography>
           <TextField
@@ -147,6 +136,20 @@ const ApartmentDetailsForm = ({
         </Box>
       </Grid>
 
+      <Grid item xs={12} sm={3}>
+        <Box>
+          <Typography variant="body1" sx={{ mb: 1 }}>Floor</Typography>
+          <TextField
+            name="floor"
+            value={formData.floor || ''}
+            onChange={handleChange}
+            variant="outlined"
+            fullWidth
+            placeholder="1, 2, Ground..."
+          />
+        </Box>
+      </Grid>
+
       <Grid item xs={12} sm={6}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>City *</Typography>
@@ -157,14 +160,14 @@ const ApartmentDetailsForm = ({
             variant="outlined"
             fullWidth
             required
-            placeholder="Enter city"
+            placeholder="Tel Aviv"
           />
         </Box>
       </Grid>
 
-      <Grid item xs={12} sm={6}>
+      <Grid item xs={12} sm={3}>
         <Box>
-          <Typography variant="body1" sx={{ mb: 1 }}>Zip Code</Typography>
+          <Typography variant="body1" sx={{ mb: 1 }}>ZIP Code</Typography>
           <TextField
             name="zip_code"
             value={formData.zip_code || ''}
@@ -176,16 +179,29 @@ const ApartmentDetailsForm = ({
         </Box>
       </Grid>
 
-      <Grid item xs={12} sm={4}>
+      <Grid item xs={12} sm={3}>
         <Box>
-          <Typography variant="body1" sx={{ mb: 1 }}>Floor</Typography>
+          <Typography variant="body1" sx={{ mb: 1 }}>State</Typography>
           <TextField
-            name="floor"
-            value={formData.floor || ''}
+            name="state"
+            value={formData.state || ''}
             onChange={handleChange}
             variant="outlined"
             fullWidth
-            placeholder="Ground, 1st, 2nd, etc."
+            placeholder="State/Province"
+          />
+        </Box>
+      </Grid>
+
+      <Grid item xs={12} sm={4}>
+        <Box>
+          <Typography variant="body1" sx={{ mb: 1 }}>Country</Typography>
+          <TextField
+            name="country"
+            value={formData.country || 'Israel'}
+            onChange={handleChange}
+            variant="outlined"
+            fullWidth
           />
         </Box>
       </Grid>
@@ -218,7 +234,17 @@ const ApartmentDetailsForm = ({
         </Box>
       </Grid>
 
-      {/* Property Details */}
+      {/* Property Details Section */}
+      <Grid item xs={12}>
+        <Divider sx={{ my: 2 }} />
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+          <HomeIcon sx={{ mr: 1, color: 'primary.main' }} />
+          <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+            Property Details
+          </Typography>
+        </Box>
+      </Grid>
+
       <Grid item xs={12} sm={4}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>Number of Rooms *</Typography>
@@ -266,7 +292,51 @@ const ApartmentDetailsForm = ({
         </Box>
       </Grid>
 
-      {/* Financial Information */}
+      {/* Financial Information Section */}
+      <Grid item xs={12}>
+        <Divider sx={{ my: 2 }} />
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+          <BankIcon sx={{ mr: 1, color: 'primary.main' }} />
+          <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+            Financial Information
+          </Typography>
+          {!isAdmin && (
+            <Typography variant="body2" color="text.secondary" sx={{ ml: 2, fontStyle: 'italic' }}>
+              (Management Fee and Rent Cost are admin-only fields)
+            </Typography>
+          )}
+        </Box>
+      </Grid>
+
+      {/* FIXED: Admin-only Property Model Selection */}
+      {isAdmin && (
+        <Grid item xs={12} sm={6}>
+          <FormControl fullWidth>
+            <InputLabel>Property Model</InputLabel>
+            <Select
+              name="model"
+              value={formData.model || PROPERTY_MODELS.RENTAL}
+              onChange={handleChange}
+              label="Property Model"
+            >
+              <MenuItem value={PROPERTY_MODELS.RENTAL}>
+                Rental (Fixed Rent Cost)
+              </MenuItem>
+              <MenuItem value={PROPERTY_MODELS.MANAGEMENT}>
+                Management (Percentage Fee)
+              </MenuItem>
+            </Select>
+            <FormHelperText>
+              {formData.model === PROPERTY_MODELS.MANAGEMENT
+                ? 'You earn a percentage of the rent as management fee'
+                : 'You pay a fixed cost and keep the difference as profit'
+              }
+            </FormHelperText>
+          </FormControl>
+        </Grid>
+      )}
+
+      {/* Monthly Rent - Visible to ALL users */}
       <Grid item xs={12} sm={6}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>Monthly Rent *</Typography>
@@ -286,6 +356,7 @@ const ApartmentDetailsForm = ({
         </Box>
       </Grid>
 
+      {/* Security Deposit - Visible to ALL users */}
       <Grid item xs={12} sm={6}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>Security Deposit</Typography>
@@ -301,7 +372,91 @@ const ApartmentDetailsForm = ({
         </Box>
       </Grid>
 
-      {/* Status and Preferences */}
+      {/* FIXED: Admin-only Financial Fields */}
+      {isAdmin && formData.model === PROPERTY_MODELS.MANAGEMENT && (
+        <Grid item xs={12} sm={6}>
+          <Box>
+            <Typography variant="body1" sx={{ mb: 1 }}>Management Fee (%)</Typography>
+            <TextField
+              name="managementFee"
+              type="number"
+              value={formData.managementFee || ''}
+              onChange={(e) => handleChange(e, true)}
+              variant="outlined"
+              fullWidth
+              inputProps={{ min: 0, max: 100, step: 0.1 }}
+              helperText="Percentage of rent you earn as management fee"
+            />
+          </Box>
+        </Grid>
+      )}
+
+      {isAdmin && formData.model === PROPERTY_MODELS.RENTAL && (
+        <Grid item xs={12} sm={6}>
+          <Box>
+            <Typography variant="body1" sx={{ mb: 1 }}>Rent Cost (Fixed)</Typography>
+            <TextField
+              name="rentCost"
+              type="number"
+              value={formData.rentCost || ''}
+              onChange={(e) => handleChange(e, true)}
+              variant="outlined"
+              fullWidth
+              inputProps={{ min: 0, step: 1 }}
+              helperText="Fixed amount you pay as rent cost"
+            />
+          </Box>
+        </Grid>
+      )}
+
+      {/* FIXED: Landlord Selection - Available to ALL users */}
+      <Grid item xs={12} sm={6}>
+        <FormControl fullWidth>
+          <Autocomplete
+            options={landlords}
+            getOptionLabel={(option) => option.name || ''}
+            value={selectedLandlord || null}
+            onChange={(event, newValue) => {
+              handleChange({
+                target: {
+                  name: 'landlord_id',
+                  value: newValue ? newValue.id : null
+                }
+              });
+            }}
+            loading={loadingLandlords}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Landlord"
+                variant="outlined"
+                InputProps={{
+                  ...params.InputProps,
+                  endAdornment: (
+                    <>
+                      {loadingLandlords ? <div>Loading...</div> : null}
+                      {params.InputProps.endAdornment}
+                    </>
+                  ),
+                }}
+              />
+            )}
+          />
+          <FormHelperText>Select the landlord for this property</FormHelperText>
+        </FormControl>
+      </Grid>
+
+      {/* Status and Preferences Section */}
+      <Grid item xs={12}>
+        <Divider sx={{ my: 2 }} />
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+          <PersonIcon sx={{ mr: 1, color: 'primary.main' }} />
+          <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+            Status & Preferences
+          </Typography>
+        </Box>
+      </Grid>
+
       <Grid item xs={12} sm={6}>
         <FormControl fullWidth>
           <InputLabel>Status</InputLabel>
@@ -327,14 +482,16 @@ const ApartmentDetailsForm = ({
             onChange={handleChange}
             label="Gender Preference"
           >
-            <MenuItem value="mixed">Mixed</MenuItem>
-            <MenuItem value="male">Male Only</MenuItem>
-            <MenuItem value="female">Female Only</MenuItem>
+            {GENDER_PREFERENCES.map((option) => (
+              <MenuItem key={option.value} value={option.value}>
+                {option.label}
+              </MenuItem>
+            ))}
           </Select>
         </FormControl>
       </Grid>
 
-      {/* Date Fields */}
+      {/* FIXED: Date Fields */}
       <Grid item xs={12} sm={6}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>Move-in Date</Typography>
@@ -365,65 +522,7 @@ const ApartmentDetailsForm = ({
         </Box>
       </Grid>
 
-      {/* Tenant Information Header */}
-      <Grid item xs={12}>
-        <Paper sx={{ p: 2, mb: 2, backgroundColor: '#f5f5f5' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-            <PeopleIcon sx={{ mr: 1, color: 'primary.main' }} />
-            <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
-              Tenant Information
-            </Typography>
-          </Box>
-        </Paper>
-      </Grid>
-
-      {/* Tenant Selection Component */}
-      <Grid item xs={12}>
-        {tenantSelection}
-      </Grid>
-
-      {/* Landlord Selection */}
-      <Grid item xs={12} sm={6}>
-        <Box>
-          <Typography variant="body1" sx={{ mb: 1 }}>Landlord</Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Autocomplete
-              fullWidth
-              options={landlords}
-              getOptionLabel={(option) => option.company_name || ''}
-              value={selectedLandlord}
-              onChange={handleLandlordChange}
-              loading={loadingLandlords}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  variant="outlined"
-                  placeholder="Select a landlord"
-                  InputProps={{
-                    ...params.InputProps,
-                    startAdornment: <BusinessIcon sx={{ mr: 1, color: 'action.active' }} />,
-                    endAdornment: (
-                      <>
-                        {loadingLandlords ? <CircularProgress size={20} /> : null}
-                        {params.InputProps.endAdornment}
-                      </>
-                    ),
-                  }}
-                />
-              )}
-            />
-            <Button
-              onClick={fetchLandlords}
-              disabled={loadingLandlords}
-              sx={{ minWidth: 'auto', p: 1 }}
-            >
-              <RefreshIcon />
-            </Button>
-          </Box>
-        </Box>
-      </Grid>
-
-      {/* Notes */}
+      {/* Notes Field */}
       <Grid item xs={12}>
         <Box>
           <Typography variant="body1" sx={{ mb: 1 }}>Notes</Typography>
@@ -435,48 +534,91 @@ const ApartmentDetailsForm = ({
             fullWidth
             multiline
             rows={3}
-            placeholder="Additional notes about the apartment..."
-            InputProps={{
-              startAdornment: <DescriptionIcon sx={{ mr: 1, color: 'action.active', alignSelf: 'flex-start', mt: 1 }} />
-            }}
+            placeholder="Additional notes about this apartment..."
           />
         </Box>
       </Grid>
 
+      {/* Tenant Section */}
+      <Grid item xs={12}>
+        <Divider sx={{ my: 2 }} />
+        <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+          <PersonIcon sx={{ mr: 1, color: 'primary.main' }} />
+          <Typography variant="h6" sx={{ fontWeight: 'bold' }}>
+            Tenant Management
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ ml: 2 }}>
+            ({tenantData.length}/{formData.maxOccupancy} occupied)
+          </Typography>
+        </Box>
+
+        {/* Display occupancy warning */}
+        {tenantData.length >= formData.maxOccupancy && (
+          <Alert severity="info" sx={{ mb: 2 }}>
+            This apartment is at maximum occupancy ({formData.maxOccupancy} tenants).
+          </Alert>
+        )}
+
+        {/* Render tenant selection component */}
+        {tenantSelection}
+      </Grid>
+
       {/* Action Buttons */}
       <Grid item xs={12}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2 }}>
-          <Box>
-            {isEdit && isAdmin && (
-              <Button
-                variant="outlined"
-                color="error"
-                startIcon={<DeleteIcon />}
-                onClick={handleDelete}
-                sx={{ mr: 2 }}
-              >
-                Delete Apartment
-              </Button>
-            )}
-          </Box>
+        <Divider sx={{ my: 2 }} />
+        <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', alignItems: 'center' }}>
 
+          {/* Delete Button (Admin only, Edit mode only) */}
+          {isEdit && isAdmin && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteIcon />}
+              onClick={handleDelete}
+              disabled={isSubmitting}
+            >
+              Delete Apartment
+            </Button>
+          )}
+
+          {/* Submit Button */}
           <Button
             type="submit"
             variant="contained"
+            color="primary"
             startIcon={<SaveIcon />}
             disabled={isSubmitting}
-            sx={{ minWidth: 150 }}
+            size="large"
           >
-            {isSubmitting ? (
-              <CircularProgress size={20} color="inherit" />
-            ) : (
-              isEdit ? 'Update Apartment' : 'Create Apartment'
-            )}
+            {isSubmitting
+              ? (isEdit ? 'Updating...' : 'Creating...')
+              : (isEdit ? 'Update Apartment' : 'Create Apartment')
+            }
           </Button>
+        </Box>
+      </Grid>
+
+      {/* FIXED: Admin vs Default User Information */}
+      <Grid item xs={12}>
+        <Box sx={{ mt: 2 }}>
+          {isAdmin ? (
+            <Alert severity="info">
+              <Typography variant="body2">
+                <strong>Admin View:</strong> You can see all fields including Management Fee, Rent Cost, Property Model, and Landlord selection.
+              </Typography>
+            </Alert>
+          ) : (
+            <Alert severity="warning">
+              <Typography variant="body2">
+                <strong>Default User View:</strong> You can edit all basic apartment information including landlord.
+                Only Management Fee and Rent Cost are hidden (admin-only fields).
+              </Typography>
+            </Alert>
+          )}
         </Box>
       </Grid>
     </Grid>
   );
-};
+}
 
 export default ApartmentDetailsForm;

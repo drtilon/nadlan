@@ -1,4 +1,4 @@
-// ApartmentForm.jsx - Complete FIXED version
+// ApartmentForm.jsx - Complete FIXED version with proper edit functionality
 import React, { useState, useEffect } from 'react';
 import {
   Typography,
@@ -29,7 +29,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   const isAdmin = userData && userData.role === 'admin';
 
   const emptyForm = {
-    // Address components
+    // Address components - ALL FIELDS
     street_name: '',
     house_number: '',
     zip_code: '',
@@ -40,21 +40,21 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     floor: '',
     side: '',
 
-    // Property details
+    // Property details - ALL FIELDS
     rooms: 0,
     size: 0,
     maxOccupancy: 1,
 
-    // Financial (basic fields only)
+    // Financial fields - Basic for all users
     rent: 0,
     deposit: 0,
 
-    // Admin-only financial fields (will be filtered out for users)
+    // Admin-only financial fields
     managementFee: 0.00,
     rentCost: 0.00,
-    model: PROPERTY_MODELS.MANAGEMENT,
+    model: PROPERTY_MODELS.RENTAL,
 
-    // Other fields
+    // Other fields - ALL FIELDS
     landlord_id: null,
     moveInDate: '',
     contractEndDate: '',
@@ -63,10 +63,11 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     genderPreference: 'mixed'
   };
 
-  // Clean and process initial data
+  // FIXED: Process initial data properly for edit mode
   const cleanedInitialData = isEdit ? {
     ...initialData,
-    // Handle address components
+
+    // FIXED: Handle ALL address components properly
     street_name: initialData.street_name || initialData.address_components?.street_name || '',
     house_number: initialData.house_number || initialData.address_components?.house_number || '',
     zip_code: initialData.zip_code || initialData.address_components?.zip_code || '',
@@ -77,19 +78,32 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     floor: initialData.floor || initialData.address_components?.floor || '',
     side: initialData.side || initialData.address_components?.side || '',
 
-    // Ensure status is valid
+    // FIXED: Map backend fields to frontend fields
+    rooms: initialData.rooms || initialData.bedrooms || 0,
+    size: initialData.size || initialData.area || 0,
+
+    // FIXED: Ensure all required fields are populated
+    maxOccupancy: initialData.maxOccupancy || 1,
+    rent: initialData.rent || 0,
+    deposit: initialData.deposit || 0,
+
+    // FIXED: Status handling
     status: Object.values(APARTMENT_STATUS).includes(initialData.status)
       ? initialData.status
       : APARTMENT_STATUS.VACANT,
-    landlord_id: initialData.landlord?.id || initialData.landlord_id,
-    maxOccupancy: initialData.maxOccupancy || 1,
 
-    // Financial fields - only include if admin and data exists
-    managementFee: isAdmin && initialData.managementFee !== undefined ? initialData.managementFee : 0.00,
-    rentCost: isAdmin && initialData.rentCost !== undefined ? initialData.rentCost : 0.00,
-    model: isAdmin && initialData.model ? initialData.model : PROPERTY_MODELS.MANAGEMENT,
+    // FIXED: Landlord handling
+    landlord_id: initialData.landlord?.id || initialData.landlord_id || null,
 
-    // Date formatting
+    // FIXED: Gender preference
+    genderPreference: initialData.genderPreference || 'mixed',
+
+    // FIXED: Admin-only financial fields - properly handle defaults
+    managementFee: initialData.managementFee !== undefined ? Number(initialData.managementFee) : 0.00,
+    rentCost: initialData.rentCost !== undefined ? Number(initialData.rentCost) : 0.00,
+    model: initialData.model || PROPERTY_MODELS.RENTAL,
+
+    // FIXED: Date formatting
     moveInDate: initialData.moveInDate ?
       (typeof initialData.moveInDate === 'string' ?
         initialData.moveInDate.split('T')[0] :
@@ -98,6 +112,9 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       (typeof initialData.contractEndDate === 'string' ?
         initialData.contractEndDate.split('T')[0] :
         initialData.contractEndDate) : '',
+
+    // FIXED: Notes handling
+    notes: initialData.notes || ''
   } : {};
 
   const [formData, setFormData] = useState({ ...emptyForm, ...cleanedInitialData });
@@ -108,24 +125,28 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
   const [availableTenants, setAvailableTenants] = useState([]);
   const [addedTenantIds, setAddedTenantIds] = useState(new Set());
 
-  // Initialize tenant data for edit mode
+  // FIXED: Initialize tenant data for edit mode with proper field mapping
   useEffect(() => {
     const initializeTenants = () => {
       if (isEdit && initialData.tenants && Array.isArray(initialData.tenants)) {
+        console.log('Initializing tenants from initial data:', initialData.tenants);
+
         const processedTenants = initialData.tenants.map((tenant, index) => ({
           id: tenant.id,
-          name: tenant.name || '',
-          firstName: tenant.firstName || '',
-          lastName: tenant.lastName || '',
+          name: tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim(),
+          firstName: tenant.firstName || tenant.name?.split(' ')[0] || '',
+          lastName: tenant.lastName || tenant.name?.split(' ').slice(1).join(' ') || '',
           email: tenant.email || '',
           phone: tenant.phone || '',
-          date_of_birth: tenant.date_of_birth || tenant.bornOn || '', // FIXED: Use correct field name
-          refund_iban: tenant.refund_iban || tenant.refundIban || '', // FIXED: Use correct field name
-          passport_id: tenant.passport_id || '',
+          // FIXED: Use correct backend field names
+          date_of_birth: tenant.date_of_birth || tenant.dateOfBirth || tenant.bornOn || '',
+          refund_iban: tenant.refund_iban || tenant.refundIban || '',
+          passport_id: tenant.passport_id || tenant.passportId || '',
           gender: tenant.gender || '',
-          isPrimary: false  // FIXED: Remove primary tenant concept
+          isExistingTenant: true
         }));
 
+        console.log('Processed tenants for form:', processedTenants);
         setTenantData(processedTenants);
 
         // Track existing tenant IDs
@@ -164,11 +185,10 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     fetchAvailableTenants();
   }, [showNotification]);
 
-  // Handle form field changes
+  // FIXED: Handle form field changes with proper validation
   const handleChange = (event, isNumber = false) => {
     const { name, value } = event.target;
-    let processedValue = isNumber ?
-      (value ? parseFloat(value) : 0) : value;
+    let processedValue = isNumber ? (value ? parseFloat(value) : 0) : value;
 
     // Special handling for rooms change - suggest maxOccupancy
     if (name === 'rooms' && isNumber && processedValue > 0) {
@@ -183,19 +203,19 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       }
     }
 
-    // Only allow admin users to modify financial model fields
+    // FIXED: Allow admin users to modify financial model fields
     if (name === 'model' && isAdmin) {
       if (processedValue === PROPERTY_MODELS.MANAGEMENT) {
         setFormData(prev => ({
           ...prev,
           model: processedValue,
-          rentCost: 0
+          rentCost: 0 // Clear rent cost when switching to management
         }));
       } else if (processedValue === PROPERTY_MODELS.RENTAL) {
         setFormData(prev => ({
           ...prev,
           model: processedValue,
-          managementFee: 0
+          managementFee: 0 // Clear management fee when switching to rental
         }));
       } else {
         setFormData(prev => ({
@@ -211,7 +231,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     }
   };
 
-  // Handle tenant changes - FIXED VERSION
+  // Handle tenant changes
   const handleTenantChange = (index, field, value) => {
     setTenantData(prev =>
       prev.map((tenant, i) =>
@@ -219,8 +239,6 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       )
     );
   };
-
-  // REMOVED: setTenantAsPrimary function - no more primary tenants
 
   // Remove tenant
   const removeTenant = (index) => {
@@ -241,7 +259,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     });
   };
 
-  // Add a selected tenant - FIXED VERSION
+  // Add a selected tenant
   const handleTenantSelection = (tenant) => {
     console.log('Tenant selected from autocomplete:', tenant);
 
@@ -262,28 +280,19 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       return;
     }
 
-    const tenantWithDetails = {
-      id: tenant.id,
-      name: tenant.name || '',
-      firstName: tenant.firstName || '',
-      lastName: tenant.lastName || '',
-      email: tenant.email || '',
-      phone: tenant.phone || '',
-      date_of_birth: tenant.date_of_birth || '',  // FIXED: Use correct field name
-      refund_iban: tenant.refund_iban || '',      // FIXED: Use correct field name
-      passport_id: tenant.passport_id || '',
-      gender: tenant.gender || '',
-      isPrimary: false,  // FIXED: No primary tenant concept
+    // Add tenant with proper field mapping
+    const tenantWithMapping = {
+      ...tenant,
       isExistingTenant: true
     };
 
-    setTenantData(prev => [...prev, tenantWithDetails]);
+    setTenantData(prev => [...prev, tenantWithMapping]);
     setAddedTenantIds(prev => new Set([...prev, tenant.id]));
 
-    console.log('Added tenant:', tenantWithDetails);
+    console.log('Added tenant:', tenantWithMapping);
   };
 
-  // Add new tenant button handler
+  // Add new tenant (open form dialog)
   const addNewTenant = () => {
     if (tenantData.length >= formData.maxOccupancy) {
       showNotification(`Cannot add more tenants. Maximum occupancy is ${formData.maxOccupancy}`, 'warning');
@@ -292,7 +301,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     setTenantFormOpen(true);
   };
 
-  // Handle new tenant creation from dialog - FIXED VERSION
+  // Handle new tenant creation from dialog
   const handleTenantCreated = (newTenant) => {
     if (!newTenant) {
       console.warn('No tenant data received from dialog');
@@ -302,7 +311,6 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     const tenantWithTempId = {
       ...newTenant,
       id: `temp-${Date.now()}`,
-      isPrimary: false,  // FIXED: No primary tenant concept
       isExistingTenant: false
     };
 
@@ -312,7 +320,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     console.log('Created new tenant:', tenantWithTempId);
   };
 
-  // Handle form submission - FULLY FIXED VERSION
+  // FIXED: Handle form submission with proper endpoint selection and data cleaning
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (isSubmitting) return;
@@ -320,7 +328,12 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     try {
       setIsSubmitting(true);
 
-      // Basic validations
+      // FIXED: Basic validations
+      if (!formData.street_name || !formData.house_number || !formData.city) {
+        showNotification('Please fill in the required address fields (Street name, House number, City)', 'error');
+        return;
+      }
+
       if (formData.maxOccupancy < 1) {
         showNotification('Maximum occupancy must be at least 1', 'error');
         return;
@@ -331,19 +344,20 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         return;
       }
 
-      // Clean form data
+      // FIXED: Clean form data - remove computed fields
       const cleanedFormData = { ...formData };
       delete cleanedFormData.rentInSentance;
       delete cleanedFormData.address;
 
-      // For non-admin users, remove sensitive fields
+      // FIXED: For non-admin users, remove only financial admin fields from submission
       if (!isAdmin) {
         delete cleanedFormData.managementFee;
         delete cleanedFormData.rentCost;
         delete cleanedFormData.model;
+        // Note: landlord_id is NOT removed - default users CAN edit landlord
       }
 
-      // Process tenants for backend - FIXED VERSION with correct field names
+      // FIXED: Process tenants for backend with correct field names
       const processedTenants = tenantData.map(tenant => {
         const isExistingTenant = tenant.id && !String(tenant.id).startsWith('temp-');
 
@@ -356,13 +370,13 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
             isExistingTenant: true
           };
         } else {
-          // FIXED: Use correct backend field names
+          // FIXED: Use correct backend field names for new tenants
           return {
             name: tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim(),
             email: tenant.email || '',
             phone: tenant.phone || '',
-            date_of_birth: tenant.date_of_birth || '',  // FIXED: Use correct field name
-            refund_iban: tenant.refund_iban || '',      // FIXED: Use correct field name
+            date_of_birth: tenant.date_of_birth || '',
+            refund_iban: tenant.refund_iban || '',
             passport_id: tenant.passport_id || '',
             gender: tenant.gender || '',
             isExistingTenant: false
@@ -378,15 +392,17 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
       console.log('Submitting payload:', payload);
 
       if (isEdit) {
-        // Use role-specific endpoint
-        const endpoint = isAdmin ?
-          `/apartments/admin/edit/${initialData.id}` :
-          `/apartments/user/edit/${initialData.id}`;
+        // FIXED: Use correct endpoints based on user role
+        const endpoint = isAdmin
+          ? `/apartments/edit-admin/${initialData.id}`
+          : `/apartments/edit/${initialData.id}`;
 
+        console.log('Using endpoint:', endpoint);
         await api.put(endpoint, payload);
         showNotification('Apartment updated successfully', 'success');
       } else {
-        await api.post('/add', payload);
+        // FIXED: Use correct endpoint for adding new apartment
+        await api.post('/apartments/add', payload);
         showNotification('Apartment created successfully', 'success');
       }
 
@@ -420,7 +436,7 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
     if (!confirmDelete) return;
 
     try {
-      await api.delete(`/delete/${initialData.id}`);
+      await api.delete(`/apartments/delete/${initialData.id}`);
       showNotification('Apartment deleted successfully', 'success');
 
       if (onSuccess) {
@@ -439,6 +455,11 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
         <Typography variant="h5" sx={{ fontWeight: 'bold' }}>
           {isEdit ? 'Edit Apartment' : 'Add New Apartment'}
         </Typography>
+        {!isAdmin && (
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            Note: Only Management Fee and Rent Cost are hidden from default users
+          </Typography>
+        )}
       </Box>
 
       <form onSubmit={handleSubmit}>
@@ -447,7 +468,6 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
           handleChange={handleChange}
           tenantData={tenantData}
           handleTenantChange={handleTenantChange}
-          // REMOVED: setTenantAsPrimary prop - no more primary tenants
           removeTenant={removeTenant}
           addNewTenant={addNewTenant}
           handleTenantSelection={handleTenantSelection}
@@ -467,7 +487,6 @@ function ApartmentForm({ isEdit = false, initialData = {}, onSuccess, showNotifi
               addedTenantIds={addedTenantIds}
               loading={loading}
               onTenantSelection={handleTenantSelection}
-              // REMOVED: onSetTenantAsPrimary prop - no more primary tenants
               onRemoveTenant={removeTenant}
               onOpenTenantForm={addNewTenant}
             />

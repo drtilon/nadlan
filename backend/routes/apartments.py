@@ -421,10 +421,12 @@ def get_filter_options():
         return jsonify({"error": "Failed to get filter options", "details": str(e)}), 500
 
 
-@apartments_bp.route("/add", methods=["POST"])
+# routes/apartments.py - FIXED VERSION with landlord_id and automatic contract creation
+
+@apartments_bp.route("apartments/add", methods=["POST"])
 @token_required
 def add_apartment():
-    """Add apartment route - UPDATED with new financial fields"""
+    """Add apartment route - FIXED with landlord_id and automatic contract creation"""
     try:
         data = request.get_json()
         if not data:
@@ -437,34 +439,79 @@ def add_apartment():
         # Check if user is admin
         is_admin = g.user.get("role") == "admin"
 
-        # Create apartment - Include new financial fields if user is admin
+        # FIXED: Create apartment with ALL required fields including landlord_id
+        # Handle numeric fields properly - convert empty strings to None
+        def safe_numeric(value):
+            if value is None or value == '' or value == 0:
+                return None
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return None
+
         apartment_fields = {
             "street_name": new_apartment_data.get("street_name"),
             "house_number": new_apartment_data.get("house_number"),
             "city": new_apartment_data.get("city"),
             "zip_code": new_apartment_data.get("zip_code"),
-            "floor": new_apartment_data.get("floor"),
+            "floor": new_apartment_data.get("floor") or None,  # Handle empty strings
             "bedrooms": new_apartment_data.get("rooms"),
-            "area": new_apartment_data.get("size"),
+            "area": safe_numeric(new_apartment_data.get("size")),  # FIXED: Handle empty size
             "rent": new_apartment_data.get("rent"),
+            "deposit": new_apartment_data.get("deposit", 0),
             "maxOccupancy": new_apartment_data.get("maxOccupancy"),
             "genderPreference": new_apartment_data.get("genderPreference"),
-            "state": new_apartment_data.get("state", "available")
+            "state": new_apartment_data.get("state") or None,  # Handle empty strings
+            "notes": new_apartment_data.get("notes", ""),
+            # FIXED: Add landlord_id - THIS WAS MISSING!
+            "landlord_id": new_apartment_data.get("landlord_id")
         }
+
+        # Extract date fields for contract creation (NOT for apartment)
+        move_in_date = None
+        move_out_date = None
+
+        if "moveInDate" in new_apartment_data and new_apartment_data["moveInDate"]:
+            try:
+                move_in_date = datetime.strptime(new_apartment_data["moveInDate"], "%Y-%m-%d").date()
+            except ValueError:
+                move_in_date = date.today()
+
+        if "moveOutDate" in new_apartment_data and new_apartment_data["moveOutDate"]:
+            try:
+                move_out_date = datetime.strptime(new_apartment_data["moveOutDate"], "%Y-%m-%d").date()
+            except ValueError:
+                pass
 
         # Admin-only financial fields
         if is_admin:
             apartment_fields.update({
                 "model": new_apartment_data.get("model", "rental"),
-                "managementFee": new_apartment_data.get("managementFee", 0.0),
-                "rentCost": new_apartment_data.get("rentCost", 0.0)
+                "managementFee": safe_numeric(new_apartment_data.get("managementFee")),
+                "rentCost": safe_numeric(new_apartment_data.get("rentCost"))
             })
 
+        # Create apartment
         apartment = Apartment(**apartment_fields)
+
+        # FIXED: Build address from components
+        if apartment.street_name or apartment.house_number or apartment.city:
+            address_parts = []
+            if apartment.street_name:
+                address_parts.append(apartment.street_name)
+            if apartment.house_number:
+                address_parts.append(apartment.house_number)
+            if apartment.city:
+                if address_parts:
+                    address_parts.append(f", {apartment.city}")
+                else:
+                    address_parts.append(apartment.city)
+            apartment.address = " ".join(address_parts) if address_parts else ""
+
         db.session.add(apartment)
         db.session.flush()  # Get apartment ID
 
-        # Create tenants if provided
+        # FIXED: Create tenants and collect IDs properly
         tenant_ids = []
         for tenant_data in new_tenants:
             if tenant_data.get("name"):
@@ -472,49 +519,51 @@ def add_apartment():
                     name=tenant_data["name"],
                     phone=tenant_data.get("phone"),
                     email=tenant_data.get("email"),
-                    apartment_id=apartment.id
+                    date_of_birth=tenant_data.get("date_of_birth"),
+                    refund_iban=tenant_data.get("refund_iban"),
+                    passport_id=tenant_data.get("passport_id"),
+                    gender=tenant_data.get("gender")
                 )
                 db.session.add(tenant)
                 db.session.flush()
                 tenant_ids.append(tenant.id)
 
-        # Create automatic contract if tenants were added
-        if tenant_ids:
-            contract_number = generate_contract_number(apartment.id)
-            contract_period = ContractPeriod(
-                apartment_id=apartment.id,
-                contract_number=contract_number,
-                start_date=date.today(),
-                monthly_rent=apartment.rent,
-                security_deposit=new_apartment_data.get("deposit", 0),
-                status="active"
-            )
-            db.session.add(contract_period)
-            db.session.flush()
+        # FIXED: ALWAYS create automatic contract when apartment is created (with or without tenants)
+        current_app.logger.info(f"Creating automatic contract for apartment {apartment.id}")
 
-            # Add tenants to contract
-            for tenant_id in tenant_ids:
-                contract_tenant = ContractTenant(
-                    contract_period_id=contract_period.id,
-                    tenant_id=tenant_id,
-                    move_in_date=date.today(),
-                    is_primary=tenant_id == tenant_ids[0]  # First tenant is primary
-                )
-                db.session.add(contract_tenant)
+        # Use the existing contract automation function
+        from .contract_automation import create_automatic_contract
+
+        contract = create_automatic_contract(
+            apartment_id=apartment.id,
+            tenant_ids=tenant_ids if tenant_ids else [],
+            start_date=move_in_date if move_in_date else date.today(),
+            end_date=move_out_date,  # This can be None
+            security_deposit=apartment.deposit
+        )
+
+        if contract:
+            current_app.logger.info(f"Successfully created contract {contract.contract_number} for apartment {apartment.id}")
+        else:
+            current_app.logger.warning(f"Failed to create automatic contract for apartment {apartment.id}")
 
         db.session.commit()
 
         # Log the activity
-        ActivityLogger.log_apartment_created(apartment.id, g.user.get("username"))
+        ActivityLogger.log_apartment_action(apartment.id, g.user.get("username"))
 
         return jsonify({
-            "message": "Apartment added successfully",
-            "apartment_id": apartment.id
+            "message": "Apartment added successfully with automatic contract creation",
+            "apartment_id": apartment.id,
+            "contract_created": contract is not None,
+            "contract_number": contract.contract_number if contract else None
         }), 201
 
     except Exception as e:
         db.session.rollback()
         current_app.logger.error(f"Error adding apartment: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 
@@ -751,7 +800,7 @@ def edit_apartment_common(apartment_id, is_admin=False):
         return jsonify({"error": str(e)}), 500
 
 
-@apartments_bp.route("/delete/<int:apartment_id>", methods=["DELETE"])
+@apartments_bp.route("apartments/delete/<int:apartment_id>", methods=["DELETE"])
 @token_required
 @role_required("admin")
 def delete_apartment(apartment_id):

@@ -1,4 +1,4 @@
-# contract_automation.py
+# contract_automation.py - UPDATED VERSION
 """
 Helper functions for automatic ContractPeriod creation and management
 Add this file to your routes/ directory
@@ -27,11 +27,12 @@ def create_automatic_contract(
     security_deposit: float = None,
 ) -> Optional[ContractPeriod]:
     """
-    Automatically create a contract when an apartment is created or needs a contract
+    UPDATED: Automatically create a contract when an apartment is created or needs a contract
+    Now works even when tenant_ids is empty or None
 
     Args:
         apartment_id: ID of the apartment
-        tenant_ids: List of tenant IDs to assign to contract
+        tenant_ids: List of tenant IDs to assign to contract (can be empty/None)
         start_date: Contract start date (defaults to today)
         end_date: Contract end date (defaults to start_date + 1 year)
         security_deposit: Security deposit amount (defaults to monthly rent if not provided)
@@ -55,9 +56,9 @@ def create_automatic_contract(
         if end_date is None:
             end_date = start_date + timedelta(days=365)  # 1 year contract
 
-        # Set security deposit - default to monthly rent if not provided
+        # Set security deposit - default to apartment deposit or monthly rent if not provided
         if security_deposit is None:
-            security_deposit = float(apartment.rent) if apartment.rent else 0.0
+            security_deposit = float(apartment.deposit) if apartment.deposit else (float(apartment.rent) if apartment.rent else 0.0)
 
         # Generate unique contract number
         contract_number = generate_contract_number(apartment_id)
@@ -66,9 +67,17 @@ def create_automatic_contract(
         apartment_address = getattr(apartment, "address", None)
         if not apartment_address:
             # Build address from components if full address doesn't exist
-            apartment_address = (
-                f"{apartment.street_name} {apartment.house_number}, {apartment.city}"
-            )
+            address_parts = []
+            if apartment.street_name:
+                address_parts.append(apartment.street_name)
+            if apartment.house_number:
+                address_parts.append(apartment.house_number)
+            if apartment.city:
+                if address_parts:
+                    address_parts.append(f", {apartment.city}")
+                else:
+                    address_parts.append(apartment.city)
+            apartment_address = " ".join(address_parts) if address_parts else f"Apartment {apartment_id}"
 
         # Create contract period
         contract = ContractPeriod(
@@ -77,7 +86,7 @@ def create_automatic_contract(
             start_date=start_date,
             end_date=end_date,
             monthly_rent=float(apartment.rent) if apartment.rent else 0.0,
-            security_deposit=security_deposit,  # Use the parameter or calculated default
+            security_deposit=security_deposit,
             status="active",
             notes=f"Auto-generated contract for {apartment_address}",
             created_at=datetime.utcnow(),
@@ -87,11 +96,11 @@ def create_automatic_contract(
         db.session.add(contract)
         db.session.flush()  # Get contract ID
 
-        # Add tenants to contract if provided
-        if tenant_ids:
+        # Add tenants to contract if provided - UPDATED to handle empty tenant_ids
+        if tenant_ids and len(tenant_ids) > 0:
             assign_tenants_to_contract(contract.id, tenant_ids, start_date)
 
-        db.session.commit()
+        # NOTE: Don't commit here, let the calling function handle the commit
 
         current_app.logger.info(
             f"Auto-created contract {contract_number} for apartment {apartment_id} "
@@ -104,8 +113,7 @@ def create_automatic_contract(
         current_app.logger.error(
             f"Error creating auto-contract for apartment {apartment_id}: {e}"
         )
-        db.session.rollback()
-        return None
+        return None  # Don't rollback here, let calling function handle it
 
 
 def assign_tenants_to_contract(
@@ -118,6 +126,10 @@ def assign_tenants_to_contract(
     if not tenant_ids:
         return
 
+    # Use the provided move_in_date or default to today
+    if move_in_date is None:
+        move_in_date = date.today()
+
     # Calculate rent share percentage (equal split)
     rent_share = 100.0 / len(tenant_ids)
 
@@ -126,7 +138,7 @@ def assign_tenants_to_contract(
             contract_period_id=contract_id,
             tenant_id=tenant_id,
             is_primary=False,  # FIXED: No more primary tenant - all are equal
-            move_in_date=move_in_date or date.today(),
+            move_in_date=move_in_date,  # FIXED: Use the actual move-in date
             rent_share_percentage=rent_share,
             created_at=datetime.utcnow(),
         )

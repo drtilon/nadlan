@@ -1,6 +1,6 @@
 # routes/tenants.py - FIXED VERSION preserving all existing endpoints
 from flask import Blueprint, jsonify, g, current_app, request, Response
-from models.models import Tenant, Apartment, ContractPeriod, ContractTenant
+from models.models import Tenant, Apartment, ContractPeriod, ContractTenant,Payment
 from extentions import db
 from typing import Tuple, List
 from .auth import token_required, role_required
@@ -28,6 +28,7 @@ def add_tenant() -> Tuple[Response, int]:
         try:
             tenant_data = TenantData(**data)
         except ValidationError as e:
+            current_app.logger.error(f"Validation error adding tenant: {e}")
             return jsonify({"message": "Validation error", "errors": e.errors()}), 400
 
         # Check if tenant with this name already exists
@@ -57,25 +58,42 @@ def add_tenant() -> Tuple[Response, int]:
         db.session.commit()
 
         # Log activity
-        ActivityLogger.log_activity(
-            action="create",
-            entity_type="tenant",
-            entity_id=tenant.id,
-            details={
-                "tenant_name": tenant.name,
-                "has_passport": bool(tenant.passport_id),
-                "gender": tenant.gender
-            }
-        )
+        try:
+            ActivityLogger.log_activity(
+                action="create",
+                entity_type="tenant",
+                entity_id=tenant.id,
+                details={
+                    "tenant_name": tenant.name,
+                    "has_passport": bool(tenant.passport_id),
+                    "gender": tenant.gender
+                }
+            )
+        except Exception as log_error:
+            current_app.logger.warning(f"Failed to log activity: {log_error}")
 
         current_app.logger.info(f"Tenant added: {tenant.name} (ID: {tenant.id})")
+
+        # Return tenant data as a proper dict - FIXED JSON SERIALIZATION
         return jsonify({
             "message": "Tenant added successfully",
-            "tenant": tenant.to_dict()
+            "tenant": {
+                "id": tenant.id,
+                "name": tenant.name,
+                "email": tenant.email,
+                "phone": tenant.phone,
+                "date_of_birth": tenant.date_of_birth.isoformat() if tenant.date_of_birth else None,
+                "gender": tenant.gender,
+                "passport_id": tenant.passport_id,
+                "refund_iban": tenant.refund_iban,
+                "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
+                "updated_at": tenant.updated_at.isoformat() if tenant.updated_at else None
+            }
         }), 201
 
     except Exception as e:
-        current_app.logger.error(f"Error adding tenant: {e}")
+        current_app.logger.error(f"Error adding tenant: {str(e)}")
+        current_app.logger.error(f"Traceback: {traceback.format_exc()}")
         db.session.rollback()
         return jsonify({"message": "Error adding tenant", "error": str(e)}), 500
 
@@ -100,6 +118,7 @@ def update_tenant(tenant_id) -> Tuple[Response, int]:
         try:
             tenant_update_data = TenantUpdateData(**data)
         except ValidationError as e:
+            current_app.logger.error(f"Validation error updating tenant: {e}")
             return jsonify({"message": "Validation error", "errors": e.errors()}), 400
 
         # Check for name conflicts if name is being updated
@@ -114,46 +133,62 @@ def update_tenant(tenant_id) -> Tuple[Response, int]:
             if existing_passport and existing_passport.id != tenant_id:
                 return jsonify({"message": "A tenant with this passport ID already exists"}), 400
 
-        # Update tenant fields using ACTUAL field names
+        # Update tenant fields
         if tenant_update_data.name:
             tenant.name = tenant_update_data.name
         if tenant_update_data.email:
             tenant.email = tenant_update_data.email
-        if tenant_update_data.phone:
+        if tenant_update_data.phone is not None:  # Allow empty string
             tenant.phone = tenant_update_data.phone
         if tenant_update_data.date_of_birth:
-            tenant.date_of_birth = tenant_update_data.date_of_birth  # ACTUAL field name
-        if tenant_update_data.refund_iban:
-            tenant.refund_iban = tenant_update_data.refund_iban      # ACTUAL field name
-        if tenant_update_data.passport_id is not None:
+            tenant.date_of_birth = tenant_update_data.date_of_birth
+        if tenant_update_data.refund_iban is not None:  # Allow empty string
+            tenant.refund_iban = tenant_update_data.refund_iban
+        if tenant_update_data.passport_id is not None:  # Allow empty string
             tenant.passport_id = tenant_update_data.passport_id
-        if tenant_update_data.gender:
+        if tenant_update_data.gender is not None:  # Allow empty string
             tenant.gender = tenant_update_data.gender
 
-        # Update timestamp
         tenant.updated_at = datetime.utcnow()
 
         db.session.commit()
 
         # Log activity
-        ActivityLogger.log_activity(
-            action="update",
-            entity_type="tenant",
-            entity_id=tenant.id,
-            details={
-                "tenant_name": tenant.name,
-                "updated_fields": [k for k, v in data.items() if v is not None]
-            }
-        )
+        try:
+            ActivityLogger.log_activity(
+                action="update",
+                entity_type="tenant",
+                entity_id=tenant.id,
+                details={
+                    "tenant_name": tenant.name,
+                    "updated_fields": list(data.keys())
+                }
+            )
+        except Exception as log_error:
+            current_app.logger.warning(f"Failed to log activity: {log_error}")
 
         current_app.logger.info(f"Tenant updated: {tenant.name} (ID: {tenant.id})")
+
+        # Return updated tenant data - FIXED JSON SERIALIZATION
         return jsonify({
             "message": "Tenant updated successfully",
-            "tenant": tenant.to_dict()
+            "tenant": {
+                "id": tenant.id,
+                "name": tenant.name,
+                "email": tenant.email,
+                "phone": tenant.phone,
+                "date_of_birth": tenant.date_of_birth.isoformat() if tenant.date_of_birth else None,
+                "gender": tenant.gender,
+                "passport_id": tenant.passport_id,
+                "refund_iban": tenant.refund_iban,
+                "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
+                "updated_at": tenant.updated_at.isoformat() if tenant.updated_at else None
+            }
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error updating tenant: {e}")
+        current_app.logger.error(f"Error updating tenant: {str(e)}")
+        current_app.logger.error(f"Traceback: {traceback.format_exc()}")
         db.session.rollback()
         return jsonify({"message": "Error updating tenant", "error": str(e)}), 500
 
@@ -162,45 +197,37 @@ def update_tenant(tenant_id) -> Tuple[Response, int]:
 @token_required
 def delete_tenant(tenant_id) -> Tuple[Response, int]:
     """
-    Delete a tenant from the system
+    Delete a tenant if they have no active contracts
     """
     try:
         tenant = Tenant.query.get(tenant_id)
         if not tenant:
             return jsonify({"message": "Tenant not found"}), 404
 
-        tenant_name = tenant.name
-
         # Check if tenant has active contracts
-        active_contracts = []
-        for assignment in tenant.contract_assignments:
-            if assignment.is_active():
-                active_contracts.append(assignment)
+        active_contracts = db.session.query(ContractTenant)\
+            .filter(
+                ContractTenant.tenant_id == tenant_id,
+                ContractTenant.move_out_date.is_(None)
+            ).count()
 
-        if active_contracts:
-            contract_details = []
-            for assignment in active_contracts:
-                contract_details.append({
-                    "contract_id": assignment.contract_period_id,
-                    "apartment": assignment.contract_period.apartment.get_short_address()
-                })
+        if active_contracts > 0:
             return jsonify({
-                "message": "Cannot delete tenant with active contracts",
-                "active_contracts": contract_details
+                "message": "Cannot delete tenant with active contracts. Move them out first."
             }), 400
 
         # Log activity before deletion
-        ActivityLogger.log_activity(
-            action="delete",
-            entity_type="tenant",
-            entity_id=tenant.id,
-            details={
-                "tenant_name": tenant_name,
-                "had_contracts": len(tenant.contract_assignments) > 0
-            }
-        )
+        try:
+            ActivityLogger.log_activity(
+                action="delete",
+                entity_type="tenant",
+                entity_id=tenant.id,
+                details={"tenant_name": tenant.name}
+            )
+        except Exception as log_error:
+            current_app.logger.warning(f"Failed to log activity: {log_error}")
 
-        # Delete tenant
+        tenant_name = tenant.name
         db.session.delete(tenant)
         db.session.commit()
 
@@ -208,7 +235,8 @@ def delete_tenant(tenant_id) -> Tuple[Response, int]:
         return jsonify({"message": "Tenant deleted successfully"}), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error deleting tenant: {e}")
+        current_app.logger.error(f"Error deleting tenant: {str(e)}")
+        current_app.logger.error(f"Traceback: {traceback.format_exc()}")
         db.session.rollback()
         return jsonify({"message": "Error deleting tenant", "error": str(e)}), 500
 
@@ -218,85 +246,60 @@ def delete_tenant(tenant_id) -> Tuple[Response, int]:
 @token_required
 def list_tenants() -> Tuple[Response, int]:
     """
-    List all tenants with optional filtering by search term, apartment, and gender
-    FIXED: Updated to use correct parameter names
+    Get list of all tenants with enhanced data including current contracts
     """
     try:
-        # Get query parameters
-        search = request.args.get("search", "").strip()
-        apartment_id = request.args.get("apartment_id", type=int)
-        gender_filter = request.args.get("gender", "").strip().lower()
+        # Get all tenants
+        tenants = Tenant.query.all()
 
-        # Start with base query
-        query = Tenant.query
-
-        # Apply search filter (name or email)
-        if search:
-            search_pattern = f"%{search}%"
-            query = query.filter(
-                or_(
-                    Tenant.name.ilike(search_pattern),
-                    Tenant.email.ilike(search_pattern)
-                )
-            )
-
-        # Apply gender filter
-        if gender_filter and gender_filter != "all":
-            query = query.filter(Tenant.gender.ilike(f"%{gender_filter}%"))
-
-        # Apply apartment filter (through contract assignments)
-        if apartment_id:
-            # Get tenants who have current contracts with the specified apartment
-            today = date.today()
-            tenant_ids_in_apartment = db.session.query(ContractTenant.tenant_id).join(
-                ContractPeriod
-            ).filter(
-                ContractPeriod.apartment_id == apartment_id,
-                ContractPeriod.status == "active",
-                ContractPeriod.start_date <= today,
-                or_(ContractPeriod.end_date.is_(None), ContractPeriod.end_date >= today)
-            ).subquery()
-
-            query = query.filter(Tenant.id.in_(tenant_ids_in_apartment))
-
-        # Get all tenants matching the criteria
-        tenants = query.all()
-
-        # Convert to dictionary format - FIXED: Using standard parameters
         tenants_data = []
         for tenant in tenants:
-            # Option 1: Use the fixed to_dict method with include_current_assignments
-            tenant_dict = tenant.to_dict(include_current_assignments=True)
-            # Option 2 (alternative): Use include_contracts=True
-            # tenant_dict = tenant.to_dict(include_contracts=True)
-            tenants_data.append(tenant_dict)
+            # Get current active contracts for this tenant
+            current_contracts = db.session.query(ContractTenant, ContractPeriod, Apartment)\
+                .join(ContractPeriod, ContractTenant.contract_period_id == ContractPeriod.id)\
+                .join(Apartment, ContractPeriod.apartment_id == Apartment.id)\
+                .filter(
+                    ContractTenant.tenant_id == tenant.id,
+                    ContractTenant.move_out_date.is_(None)  # Still active
+                ).all()
 
-        # Log activity
-        ActivityLogger.log_activity(
-            action="list",
-            entity_type="tenant",
-            details={
-                "count": len(tenants_data),
-                "search": search if search else None,
-                "apartment_filter": apartment_id if apartment_id else None,
-                "gender_filter": gender_filter if gender_filter else None
+            # Transform contract data
+            contract_list = []
+            for contract_tenant, contract_period, apartment in current_contracts:
+                contract_list.append({
+                    "contract_tenant_id": contract_tenant.id,
+                    "apartment_id": apartment.id,
+                    "apartment_address": apartment.address,
+                    "start_date": contract_period.start_date.isoformat() if contract_period.start_date else None,
+                    "end_date": contract_period.end_date.isoformat() if contract_period.end_date else None,
+                    "monthly_rent": float(contract_period.monthly_rent) if contract_period.monthly_rent else 0,
+                    "is_primary": contract_tenant.is_primary
+                })
+
+            # Build tenant data
+            tenant_data = {
+                "id": tenant.id,
+                "name": tenant.name,
+                "email": tenant.email,
+                "phone": tenant.phone,
+                "date_of_birth": tenant.date_of_birth.isoformat() if tenant.date_of_birth else None,
+                "gender": tenant.gender,
+                "passport_id": tenant.passport_id,
+                "refund_iban": tenant.refund_iban,
+                "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
+                "updated_at": tenant.updated_at.isoformat() if tenant.updated_at else None,
+                "current_contracts": contract_list
             }
-        )
+            tenants_data.append(tenant_data)
 
-        current_app.logger.info(f"Listed {len(tenants_data)} tenants")
         return jsonify({
-            "success": True,
             "tenants": tenants_data,
-            "total": len(tenants_data),
-            "filters": {
-                "search": search,
-                "apartment_id": apartment_id,
-                "gender": gender_filter
-            }
+            "count": len(tenants_data)
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error listing tenants: {e}")
+        current_app.logger.error(f"Error listing tenants: {str(e)}")
+        current_app.logger.error(f"Traceback: {traceback.format_exc()}")
         return jsonify({"message": "Error listing tenants", "error": str(e)}), 500
 
 @tenants_bp.route("/tenants/available", methods=["GET"])
@@ -352,114 +355,89 @@ def get_available_tenants():
 @tenants_bp.route("/tenants/<int:tenant_id>", methods=["GET"])
 @token_required
 def get_tenant_details(tenant_id):
-    """Get detailed information about a specific tenant - FIXED VERSION"""
+    """Get detailed information about a specific tenant with all related data - FIXED VERSION"""
     try:
         tenant = Tenant.query.get(tenant_id)
         if not tenant:
             return jsonify({"message": "Tenant not found"}), 404
 
-        # Get basic tenant data
+        # Get current active contracts with apartment info
+        current_contracts_query = db.session.query(ContractTenant, ContractPeriod, Apartment)\
+            .join(ContractPeriod, ContractTenant.contract_period_id == ContractPeriod.id)\
+            .join(Apartment, ContractPeriod.apartment_id == Apartment.id)\
+            .filter(
+                ContractTenant.tenant_id == tenant.id,
+                ContractTenant.move_out_date.is_(None),
+                ContractPeriod.status == 'active'
+            ).all()
+
+        # Get complete move history
+        move_history_query = db.session.query(ContractTenant, ContractPeriod, Apartment)\
+            .join(ContractPeriod, ContractTenant.contract_period_id == ContractPeriod.id)\
+            .join(Apartment, ContractPeriod.apartment_id == Apartment.id)\
+            .filter(ContractTenant.tenant_id == tenant.id)\
+            .order_by(ContractTenant.move_in_date.desc())\
+            .all()
+
+        # Transform current contracts
+        current_contracts_list = []
+        for contract_tenant, contract_period, apartment in current_contracts_query:
+            current_contracts_list.append({
+                "contract_tenant_id": contract_tenant.id,
+                "contract_period_id": contract_period.id,
+                "apartment_id": apartment.id,
+                "apartment_address": apartment.address or apartment.full_address or f"Apartment {apartment.id}",
+                "start_date": contract_period.start_date.isoformat() if contract_period.start_date else None,
+                "end_date": contract_period.end_date.isoformat() if contract_period.end_date else None,
+                "monthly_rent": float(contract_period.monthly_rent) if contract_period.monthly_rent else 0,
+                "security_deposit": float(contract_period.security_deposit) if contract_period.security_deposit else 0,
+                "is_primary": contract_tenant.is_primary,
+                "rent_share_percentage": float(contract_tenant.rent_share_percentage) if contract_tenant.rent_share_percentage else 100.0
+            })
+
+        # Transform move history
+        move_history_list = []
+        for contract_tenant, contract_period, apartment in move_history_query:
+            move_history_list.append({
+                "contract_tenant_id": contract_tenant.id,
+                "contract_period_id": contract_period.id,
+                "apartment_id": apartment.id,
+                "apartment_address": apartment.address or apartment.full_address or f"Apartment {apartment.id}",
+                "move_in_date": contract_tenant.move_in_date.isoformat() if contract_tenant.move_in_date else None,
+                "move_out_date": contract_tenant.move_out_date.isoformat() if contract_tenant.move_out_date else None,
+                "monthly_rent": float(contract_period.monthly_rent) if contract_period.monthly_rent else 0,
+                "security_deposit": float(contract_period.security_deposit) if contract_period.security_deposit else 0,
+                "is_primary": contract_tenant.is_primary,
+                "rent_share_percentage": float(contract_tenant.rent_share_percentage) if contract_tenant.rent_share_percentage else 100.0,
+                "is_current": contract_tenant.move_out_date is None,
+                "contract_start": contract_period.start_date.isoformat() if contract_period.start_date else None,
+                "contract_end": contract_period.end_date.isoformat() if contract_period.end_date else None,
+                "notes": contract_tenant.notes,
+                # FIXED: Use notes field instead of move_out_notes since move_out_notes doesn't exist
+                "move_out_notes": contract_tenant.notes  # Use same notes field
+            })
+
         tenant_data = {
             "id": tenant.id,
             "name": tenant.name,
-            "email": getattr(tenant, 'email', None),
-            "phone": getattr(tenant, 'phone', None),
-            "birthdate": None,
-            "gender": getattr(tenant, 'gender', None),
-            "passport_id": getattr(tenant, 'passport_id', None),
-            "refund_iban": getattr(tenant, 'refund_iban', None)
+            "email": tenant.email,
+            "phone": tenant.phone,
+            "date_of_birth": tenant.date_of_birth.isoformat() if tenant.date_of_birth else None,
+            "gender": tenant.gender,
+            "passport_id": tenant.passport_id,
+            "refund_iban": tenant.refund_iban,
+            "created_at": tenant.created_at.isoformat() if tenant.created_at else None,
+            "updated_at": tenant.updated_at.isoformat() if tenant.updated_at else None,
+            "current_contracts": current_contracts_list,
+            "move_history": move_history_list,
+            "has_active_contract": len(current_contracts_list) > 0
         }
 
-        # Convert dates to string
-        if hasattr(tenant, 'date_of_birth') and tenant.date_of_birth:
-            tenant_data["birthdate"] = tenant.date_of_birth.isoformat()
-        elif hasattr(tenant, 'birthdate') and tenant.birthdate:
-            tenant_data["birthdate"] = tenant.birthdate.isoformat()
-
-        # Try to get current apartment through contract assignments
-        current_apartment = None
-        current_contract_info = None
-
-        # Method 1: Check for current contract assignments
-        try:
-            current_assignment = db.session.query(ContractTenant)\
-                .join(ContractPeriod)\
-                .join(Apartment)\
-                .filter(
-                    ContractTenant.tenant_id == tenant_id,
-                    ContractTenant.move_out_date.is_(None)
-                ).first()
-
-            if current_assignment and current_assignment.contract_period:
-                contract = current_assignment.contract_period
-                apartment = contract.apartment
-
-                if apartment:
-                    # Get apartment address with fallback methods
-                    apartment_address = apartment.address
-                    if not apartment_address:
-                        # Try get_short_address method if it exists
-                        if hasattr(apartment, 'get_short_address'):
-                            apartment_address = apartment.get_short_address()
-                        else:
-                            # Build address from components
-                            if hasattr(apartment, 'street_name') and apartment.street_name:
-                                address_parts = [apartment.street_name]
-                                if hasattr(apartment, 'house_number') and apartment.house_number:
-                                    address_parts.append(apartment.house_number)
-                                if hasattr(apartment, 'city') and apartment.city:
-                                    address_parts.append(apartment.city)
-                                apartment_address = ', '.join(address_parts)
-                            else:
-                                apartment_address = f'Apartment {apartment.id}'
-
-                    current_apartment = {
-                        "id": apartment.id,
-                        "address": apartment_address,
-                        "rent": float(apartment.rent) if apartment.rent else 0
-                    }
-
-                    current_contract_info = {
-                        "contract_id": contract.id,
-                        "start_date": contract.start_date.isoformat() if contract.start_date else None,
-                        "end_date": contract.end_date.isoformat() if contract.end_date else None,
-                        "monthly_rent": float(contract.monthly_rent) if contract.monthly_rent else 0,
-                        "status": contract.status
-                    }
-        except Exception as e:
-            current_app.logger.warning(f"Method 1 failed for tenant {tenant_id}: {e}")
-
-        # Method 2: Fallback to legacy apartment_id if available
-        if not current_apartment and hasattr(tenant, 'apartment_id') and tenant.apartment_id:
-            try:
-                apartment = Apartment.query.get(tenant.apartment_id)
-                if apartment:
-                    apartment_address = apartment.address or f'Apartment {apartment.id}'
-                    current_apartment = {
-                        "id": apartment.id,
-                        "address": apartment_address,
-                        "rent": float(apartment.rent) if apartment.rent else 0
-                    }
-            except Exception as e:
-                current_app.logger.warning(f"Method 2 failed for tenant {tenant_id}: {e}")
-
-        # Add to response
-        tenant_data["apartment"] = current_apartment
-        tenant_data["contract_info"] = current_contract_info
-
-        return jsonify({
-            "success": True,
-            "tenant": tenant_data
-        }), 200
+        return jsonify(tenant_data), 200
 
     except Exception as e:
         current_app.logger.error(f"Error getting tenant details: {e}")
-        current_app.logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({
-            "success": False,
-            "message": "Error getting tenant details",
-            "error": str(e)
-        }), 500
+        return jsonify({"message": "Error getting tenant details", "error": str(e)}), 500
 
 
 @tenants_bp.route("/tenants/analytics", methods=["GET"])
@@ -553,3 +531,278 @@ def legacy_update_tenant(tenant_id):
 def legacy_delete_tenant(tenant_id):
     """Legacy endpoint - redirects to main delete endpoint"""
     return delete_tenant(tenant_id)
+
+
+
+
+@tenants_bp.route("/tenants/<int:tenant_id>/payments", methods=["POST"])
+@token_required
+def add_tenant_payment(tenant_id):
+    """Add a new payment for a tenant - FIXED VERSION"""
+    try:
+        tenant = Tenant.query.get(tenant_id)
+        if not tenant:
+            return jsonify({"message": "Tenant not found"}), 404
+
+        data = request.get_json()
+        amount = data.get('amount')
+        payment_date_str = data.get('payment_date')
+        description = data.get('description', 'Payment')
+        method = data.get('method', 'bank_transfer')
+
+        if not amount or float(amount) <= 0:
+            return jsonify({"message": "Valid payment amount is required"}), 400
+
+        if not payment_date_str:
+            return jsonify({"message": "Payment date is required"}), 400
+
+        try:
+            payment_date = datetime.strptime(payment_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+        # Find tenant's current active contract
+        active_contract = db.session.query(ContractTenant, ContractPeriod)\
+            .join(ContractPeriod, ContractTenant.contract_period_id == ContractPeriod.id)\
+            .filter(
+                ContractTenant.tenant_id == tenant_id,
+                ContractTenant.move_out_date.is_(None),
+                ContractPeriod.status == 'active'
+            ).first()
+
+        if not active_contract:
+            return jsonify({"message": "No active contract found for tenant"}), 400
+
+        contract_tenant, contract_period = active_contract
+
+        # Create payment record with all the field variations your system might need
+        payment = Payment(
+            apartment_id=contract_period.apartment_id,
+            contract_period_id=contract_period.id,
+            month=payment_date.month,
+            year=payment_date.year,
+            amount=float(amount),
+            status='PAID',
+            description=description
+        )
+
+        # Set payment_date field if it exists
+        if hasattr(Payment, 'payment_date'):
+            payment.payment_date = payment_date
+
+        # Set alternative field names that might exist in your system
+        if hasattr(Payment, 'paymentDate'):
+            payment.paymentDate = payment_date
+        if hasattr(Payment, 'paymentStatus'):
+            payment.paymentStatus = 'PAID'
+        if hasattr(Payment, 'paymentDescription'):
+            payment.paymentDescription = description
+        if hasattr(Payment, 'method'):
+            payment.method = method
+        if hasattr(Payment, 'paymentMethod'):
+            payment.paymentMethod = method
+        if hasattr(Payment, 'amountPaid'):
+            payment.amountPaid = float(amount)
+        if hasattr(Payment, 'amountDue'):
+            payment.amountDue = float(amount)
+
+        db.session.add(payment)
+        db.session.commit()
+
+        # Log activity
+        ActivityLogger.log_activity(
+            action="add_payment",
+            entity_type="tenant",
+            entity_id=tenant_id,
+            details={
+                "amount": float(amount),
+                "payment_date": payment_date_str,
+                "apartment_id": contract_period.apartment_id
+            }
+        )
+
+        return jsonify({
+            "message": "Payment added successfully",
+            "payment_id": payment.id
+        }), 201
+
+    except Exception as e:
+        current_app.logger.error(f"Error adding payment for tenant {tenant_id}: {e}")
+        db.session.rollback()
+        return jsonify({"message": "Error adding payment", "error": str(e)}), 500
+
+
+@tenants_bp.route("/tenants/<int:tenant_id>/transfer", methods=["POST"])
+@token_required
+def transfer_tenant(tenant_id):
+    """Transfer a tenant to a new apartment - FIXED VERSION"""
+    try:
+        tenant = Tenant.query.get(tenant_id)
+        if not tenant:
+            return jsonify({"message": "Tenant not found"}), 404
+
+        data = request.get_json()
+        new_apartment_id = data.get('new_apartment_id')
+        transfer_date_str = data.get('transfer_date')
+        notes = data.get('notes', '')
+
+        if not new_apartment_id:
+            return jsonify({"message": "New apartment ID is required"}), 400
+
+        if not transfer_date_str:
+            return jsonify({"message": "Transfer date is required"}), 400
+
+        try:
+            transfer_date = datetime.strptime(transfer_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+        # Check if new apartment exists
+        new_apartment = Apartment.query.get(new_apartment_id)
+        if not new_apartment:
+            return jsonify({"message": "New apartment not found"}), 404
+
+        # Find tenant's current active contract
+        current_contract = db.session.query(ContractTenant, ContractPeriod)\
+            .join(ContractPeriod, ContractTenant.contract_period_id == ContractPeriod.id)\
+            .filter(
+                ContractTenant.tenant_id == tenant_id,
+                ContractTenant.move_out_date.is_(None),
+                ContractPeriod.status == 'active'
+            ).first()
+
+        if not current_contract:
+            return jsonify({"message": "No active contract found for tenant"}), 400
+
+        contract_tenant, contract_period = current_contract
+
+        # Set move out date for current contract
+        contract_tenant.move_out_date = transfer_date
+        # FIXED: Add transfer notes to existing notes field
+        existing_notes = contract_tenant.notes or ""
+        transfer_note = f"Transferred to apartment {new_apartment_id}. {notes}".strip()
+        contract_tenant.notes = f"{existing_notes}\n{transfer_note}".strip() if existing_notes else transfer_note
+
+        # Check if new apartment has active contract period
+        new_contract_period = db.session.query(ContractPeriod)\
+            .filter(
+                ContractPeriod.apartment_id == new_apartment_id,
+                ContractPeriod.status == 'active',
+                ContractPeriod.start_date <= transfer_date,
+                or_(ContractPeriod.end_date.is_(None), ContractPeriod.end_date >= transfer_date)
+            ).first()
+
+        if not new_contract_period:
+            # Create new contract period for the new apartment
+            new_contract_period = ContractPeriod(
+                apartment_id=new_apartment_id,
+                contract_number=f"CON-{datetime.now().year}-{tenant_id:03d}-{new_apartment_id:03d}",
+                start_date=transfer_date,
+                end_date=None,  # Open-ended
+                monthly_rent=new_apartment.rent or 1000.00,  # Use apartment rent or default
+                security_deposit=new_apartment.deposit or 1000.00,
+                status='active',
+                notes=f"Created for tenant transfer from apartment {contract_period.apartment_id}"
+            )
+            db.session.add(new_contract_period)
+            db.session.flush()
+
+        # Create new contract tenant record
+        new_contract_tenant = ContractTenant(
+            contract_period_id=new_contract_period.id,
+            tenant_id=tenant_id,
+            rent_share_percentage=100.0,  # Default to 100%, can be adjusted later
+            is_primary=True,  # Default to primary, can be adjusted later
+            move_in_date=transfer_date,
+            notes=f"Transferred from apartment {contract_period.apartment_id}. {notes}".strip()
+        )
+
+        db.session.add(new_contract_tenant)
+        db.session.commit()
+
+        # Log activity
+        ActivityLogger.log_activity(
+            action="transfer_tenant",
+            entity_type="tenant",
+            entity_id=tenant_id,
+            details={
+                "from_apartment_id": contract_period.apartment_id,
+                "to_apartment_id": new_apartment_id,
+                "transfer_date": transfer_date_str
+            }
+        )
+
+        return jsonify({
+            "message": "Tenant transferred successfully",
+            "new_contract_tenant_id": new_contract_tenant.id
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error transferring tenant {tenant_id}: {e}")
+        db.session.rollback()
+        return jsonify({"message": "Error transferring tenant", "error": str(e)}), 500
+
+
+# FIXED MOVE OUT ENDPOINT
+@tenants_bp.route("/tenants/<int:tenant_id>/move-out", methods=["POST"])
+@token_required
+def move_out_tenant(tenant_id):
+    """Move out a tenant by setting their move_out_date - FIXED VERSION"""
+    try:
+        tenant = Tenant.query.get(tenant_id)
+        if not tenant:
+            return jsonify({"message": "Tenant not found"}), 404
+
+        data = request.get_json()
+        move_out_date_str = data.get('move_out_date')
+        notes = data.get('notes', '')
+
+        if not move_out_date_str:
+            return jsonify({"message": "Move out date is required"}), 400
+
+        try:
+            move_out_date = datetime.strptime(move_out_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+        # Find tenant's current active contract
+        current_contract = db.session.query(ContractTenant)\
+            .filter(
+                ContractTenant.tenant_id == tenant_id,
+                ContractTenant.move_out_date.is_(None)
+            ).first()
+
+        if not current_contract:
+            return jsonify({"message": "No active contract found for tenant"}), 400
+
+        # Set move out date
+        current_contract.move_out_date = move_out_date
+
+        # FIXED: Add move out notes to existing notes field
+        if notes:
+            existing_notes = current_contract.notes or ""
+            move_out_note = f"Moved out: {notes}"
+            current_contract.notes = f"{existing_notes}\n{move_out_note}".strip() if existing_notes else move_out_note
+
+        db.session.commit()
+
+        # Log activity
+        ActivityLogger.log_activity(
+            action="move_out_tenant",
+            entity_type="tenant",
+            entity_id=tenant_id,
+            details={
+                "move_out_date": move_out_date_str,
+                "contract_tenant_id": current_contract.id
+            }
+        )
+
+        return jsonify({
+            "message": "Tenant moved out successfully",
+            "contract_tenant_id": current_contract.id
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error moving out tenant {tenant_id}: {e}")
+        db.session.rollback()
+        return jsonify({"message": "Error processing move out", "error": str(e)}), 500

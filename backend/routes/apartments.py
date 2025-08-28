@@ -810,3 +810,83 @@ def extend_contract(apartment_id):
         db.session.rollback()
         current_app.logger.error(f"Error extending contract: {e}")
         return jsonify({"error": str(e)}), 500
+
+
+@apartments_bp.route("/apartment/<int:apartment_id>", methods=["GET"])
+@token_required
+def get_single_apartment(apartment_id):
+    """Get detailed information for a single apartment by ID"""
+    try:
+        # Get apartment with landlord info
+        apartment = db.session.query(Apartment)\
+            .outerjoin(Landlord)\
+            .filter(Apartment.id == apartment_id)\
+            .first()
+
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
+
+        # Check if user is admin for enhanced data
+        is_admin = g.user.get("role") == "admin"
+
+        # Build apartment data similar to list_apartments format
+        apt_dict = {
+            # Basic apartment info
+            "id": apartment.id,
+            "address": apartment.address,
+            "street_name": apartment.street_name,
+            "house_number": apartment.house_number,
+            "city": apartment.city,
+            "state": apartment.state,
+            "zip_code": apartment.zip_code,
+            "floor": apartment.floor,
+
+            # Space info
+            "bedrooms": apartment.bedrooms,
+            "rooms": apartment.rooms or apartment.bedrooms,  # Fallback
+            "area": apartment.area,
+            "size": apartment.area,  # Alias
+
+            # Status and preferences
+            "status": apartment.status,
+            "genderPreference": apartment.genderPreference,
+            "maxOccupancy": apartment.maxOccupancy,
+
+            # Financial info - basic for all users
+            "rent": float(apartment.rent) if apartment.rent else 0,
+
+            # Contract dates if available
+            "moveInDate": apartment.moveInDate.isoformat() if apartment.moveInDate else None,
+            "contractEndDate": apartment.contractEndDate.isoformat() if apartment.contractEndDate else None,
+
+            # Landlord info
+            "landlord_id": apartment.landlord_id,
+            "landlord": {
+                "id": apartment.landlord.id,
+                "name": apartment.landlord.name,
+                "company_name": apartment.landlord.company_name,
+                "email": apartment.landlord.email if is_admin else "",
+                "phone": apartment.landlord.phone if is_admin else ""
+            } if apartment.landlord else None,
+
+            # Metadata
+            "notes": apartment.notes or "",
+            "created_at": apartment.created_at.isoformat() if apartment.created_at else None,
+            "updated_at": apartment.updated_at.isoformat() if apartment.updated_at else None,
+        }
+
+        # Admin-only financial fields
+        if is_admin and hasattr(apartment, 'managementFee'):
+            apt_dict.update({
+                "managementFee": float(apartment.managementFee) if apartment.managementFee else 0,
+                "rentCost": float(apartment.rentCost) if apartment.rentCost else 0,
+                "model": apartment.model if hasattr(apartment, 'model') else "rental"
+            })
+
+        return jsonify(apt_dict), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error getting apartment {apartment_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "Failed to get apartment", "details": str(e)}), 500

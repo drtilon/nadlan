@@ -249,14 +249,12 @@ def delete_contract_period(contract_id):
 @contract_periods_bp.route("/tenants/<int:tenant_id>/move-history", methods=["GET"])
 @token_required
 def get_tenant_move_history(tenant_id):
-    """Get complete move history for a tenant across all apartments and contracts"""
-    """FIXED: MySQL compatible version"""
+    """Get complete move history for a tenant across all apartments and contracts - FIXED VERSION"""
     try:
         tenant = Tenant.query.get(tenant_id)
         if not tenant:
             return jsonify({"message": "Tenant not found"}), 404
 
-        # FIXED: MySQL compatible query - avoid NULLS FIRST syntax
         # Get all contract tenant records for this tenant, ordered properly for MySQL
         contract_tenants = db.session.query(ContractTenant)\
             .filter(ContractTenant.tenant_id == tenant_id)\
@@ -282,7 +280,7 @@ def get_tenant_move_history(tenant_id):
                 "contract_id": ct.contract_period_id,
                 "contract_number": contract.contract_number if contract else 'Unknown',
                 "apartment_id": contract.apartment_id if contract else None,
-                "apartment_address": apartment.address if apartment else 'Unknown',
+                "apartment_address": apartment.address or apartment.full_address if apartment else 'Unknown',
                 "move_in_date": ct.move_in_date.isoformat() if ct.move_in_date else None,
                 "move_out_date": ct.move_out_date.isoformat() if ct.move_out_date else None,
                 "is_primary": ct.is_primary,
@@ -328,7 +326,6 @@ def get_tenant_move_history(tenant_id):
     except Exception as e:
         current_app.logger.error(f"Error retrieving tenant move history: {e}")
         return jsonify({"message": "Error retrieving tenant move history", "error": str(e)}), 500
-
 # routes/contract_periods.py - ADD THESE MISSING ENDPOINTS
 
 # Add this import at the top if not already present
@@ -784,3 +781,127 @@ def get_active_tenants_detailed_for_apartment(apartment_id):
     except Exception as e:
         current_app.logger.error(f"Error retrieving detailed active tenants: {e}")
         return jsonify({"message": "Error retrieving detailed active tenants", "error": str(e)}), 500
+
+
+
+@contract_periods_bp.route("/tenants/<int:tenant_id>/move-history", methods=["GET"])
+@token_required
+def get_tenant_move_history_enhanced(tenant_id):
+    """Get complete move history for a tenant with enhanced apartment and contract details"""
+    try:
+        tenant = Tenant.query.get(tenant_id)
+        if not tenant:
+            return jsonify({"message": "Tenant not found"}), 404
+
+        # Get all contract tenant records for this tenant, ordered properly
+        contract_tenants = db.session.query(ContractTenant)\
+            .filter(ContractTenant.tenant_id == tenant_id)\
+            .order_by(
+                # MySQL compatible NULL handling
+                db.case(
+                    (ContractTenant.move_out_date.is_(None), 0),  # Active contracts first
+                    else_=1
+                ),
+                ContractTenant.move_out_date.desc(),
+                ContractTenant.move_in_date.desc()
+            )\
+            .all()
+
+        move_history = []
+        summary_data = {
+            "total_apartments": 0,
+            "total_contracts": len(contract_tenants),
+            "current_apartment": None,
+            "estimated_total_rent_paid": 0,
+            "is_currently_active": False
+        }
+
+        apartment_ids_seen = set()
+
+        for ct in contract_tenants:
+            # Get contract and apartment info
+            contract = ContractPeriod.query.get(ct.contract_period_id)
+            apartment = Apartment.query.get(contract.apartment_id) if contract else None
+
+            # Calculate duration
+            duration_days = None
+            if ct.move_in_date:
+                end_date = ct.move_out_date or date.today()
+                duration_days = (end_date - ct.move_in_date).days
+
+            # Determine if this is current
+            is_current = not ct.move_out_date and contract and contract.status == 'active'
+
+            history_entry = {
+                "contract_tenant_id": ct.id,
+                "contract_id": ct.contract_period_id,
+                "contract_number": contract.contract_number if contract else f'Contract {ct.contract_period_id}',
+                "apartment_id": contract.apartment_id if contract else None,
+                "apartment_address": apartment.address or apartment.full_address if apartment else f'Apartment {contract.apartment_id if contract else "Unknown"}',
+                "move_in_date": ct.move_in_date.isoformat() if ct.move_in_date else None,
+                "move_out_date": ct.move_out_date.isoformat() if ct.move_out_date else None,
+                "is_primary": ct.is_primary,
+                "rent_share_percentage": float(ct.rent_share_percentage) if ct.rent_share_percentage else 100.0,
+                "monthly_rent": float(contract.monthly_rent) if contract and contract.monthly_rent else 0,
+                "security_deposit": float(contract.security_deposit) if contract and contract.security_deposit else 0,
+                "notes": ct.notes,
+                "move_out_notes": ct.move_out_notes,
+                "is_current": is_current,
+                "duration_days": duration_days,
+                "contract_start_date": contract.start_date.isoformat() if contract and contract.start_date else None,
+                "contract_end_date": contract.end_date.isoformat() if contract and contract.end_date else None,
+                "contract_status": contract.status if contract else "unknown"
+            }
+
+            # Add apartment-specific details if available
+            if apartment:
+                history_entry.update({
+                    "apartment_details": {
+                        "full_address": apartment.full_address,
+                        "city": apartment.city,
+                        "zip_code": apartment.zip_code,
+                        "country": apartment.country,
+                        "building": apartment.building,
+                        "floor": apartment.floor,
+                        "apartment_number": apartment.apartment_number,
+                        "rooms": apartment.rooms,
+                        "bedrooms": apartment.bedrooms,
+                        "area": float(apartment.area) if apartment.area else None,
+                        "property_type": "Apartment"  # Could be enhanced with actual property type
+                    }
+                })
+
+                # Track unique apartments
+                if apartment.id:
+                    apartment_ids_seen.add(apartment.id)
+
+            # Update summary
+            if is_current:
+                summary_data["current_apartment"] = history_entry
+                summary_data["is_currently_active"] = True
+
+            # Estimate rent paid
+            if duration_days and contract and contract.monthly_rent:
+                months_lived = duration_days / 30.44  # Average days per month
+                rent_share = (ct.rent_share_percentage or 100.0) / 100.0
+                estimated_rent = float(contract.monthly_rent) * rent_share * months_lived
+                summary_data["estimated_total_rent_paid"] += estimated_rent
+
+            move_history.append(history_entry)
+
+        summary_data["total_apartments"] = len(apartment_ids_seen)
+
+        return jsonify({
+            "tenant": {
+                "id": tenant.id,
+                "name": tenant.name,
+                "email": tenant.email,
+                "phone": tenant.phone
+            },
+            "move_history": move_history,
+            "summary": summary_data
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error retrieving tenant move history: {e}")
+        return jsonify({"message": "Error retrieving tenant move history", "error": str(e)}), 500

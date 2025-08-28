@@ -1,4 +1,4 @@
-// components/TenantsPanel.jsx - COMPLETE ENHANCED FIXED VERSION
+// components/TenantsPanel.jsx - COMPLETE FIXED VERSION with Apartment Click Dialog
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -62,6 +62,7 @@ import { green, red, orange, blue, grey } from '@mui/material/colors';
 import api from '../../utils/api';
 import EnhancedTenantForm from './EnhancedTenantForm';
 import Pagination from '../common/Pagination';
+import ApartmentDetailsDialog from '../apartment/ApartmentDetailsDialog';
 
 function TenantsPanel({ showNotification }) {
   const navigate = useNavigate();
@@ -96,6 +97,10 @@ function TenantsPanel({ showNotification }) {
   // Action menu
   const [actionMenuAnchor, setActionMenuAnchor] = useState(null);
   const [selectedTenant, setSelectedTenant] = useState(null);
+
+  // Apartment details dialog - NEW
+  const [apartmentDetailsDialogOpen, setApartmentDetailsDialogOpen] = useState(false);
+  const [selectedApartmentForDetails, setSelectedApartmentForDetails] = useState(null);
 
   // Filtered and paginated data
   const [filteredTenants, setFilteredTenants] = useState([]);
@@ -133,57 +138,33 @@ function TenantsPanel({ showNotification }) {
     try {
       // Fetch tenants with enhanced data
       const tenantsResponse = await api.get('/tenants/list');
+      const tenantsData = tenantsResponse.data.tenants || [];
 
-      let tenantsData = [];
-
-      // Handle different response structures
-      if (tenantsResponse.data.success && tenantsResponse.data.tenants) {
-        tenantsData = tenantsResponse.data.tenants;
-      } else if (Array.isArray(tenantsResponse.data)) {
-        tenantsData = tenantsResponse.data;
-      } else {
-        console.warn('Unexpected tenants response structure:', tenantsResponse.data);
-        tenantsData = [];
-      }
+      // Fetch apartments for filter dropdown - CORRECT ENDPOINT
+      const apartmentsResponse = await api.get('/list');
+      const apartmentsData = apartmentsResponse.data.apartments || [];
 
       setTenants(tenantsData);
-
-      // Fetch apartments for filters and address mapping
-      const apartmentsResponse = await api.get('/list');
-      let apartmentsData = [];
-
-      if (apartmentsResponse.data && apartmentsResponse.data.apartments) {
-        apartmentsData = apartmentsResponse.data.apartments;
-      } else if (Array.isArray(apartmentsResponse.data)) {
-        apartmentsData = apartmentsResponse.data;
-      } else {
-        console.warn('Unexpected apartments response structure:', apartmentsResponse.data);
-        apartmentsData = [];
-      }
-
       setApartments(apartmentsData);
-
-      // Calculate stats
-      calculateStats(tenantsData);
-
+      updateStats(tenantsData);
     } catch (error) {
       console.error('Error fetching data:', error);
-      showNotification('Error loading tenant data', 'error');
-      setTenants([]);
-      setApartments([]);
+      if (showNotification) {
+        showNotification('Failed to load data', 'error');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const calculateStats = (tenantsData) => {
+  const updateStats = (tenantsData) => {
     const total = tenantsData.length;
     const withContracts = tenantsData.filter(tenant =>
       tenant.current_contracts && tenant.current_contracts.length > 0
     ).length;
     const withoutContracts = total - withContracts;
-    const activeContracts = tenantsData.reduce((acc, tenant) =>
-      acc + (tenant.current_contracts ? tenant.current_contracts.length : 0), 0
+    const activeContracts = tenantsData.reduce(
+      (sum, tenant) => sum + (tenant.current_contracts ? tenant.current_contracts.length : 0), 0
     );
 
     setStats({
@@ -261,10 +242,10 @@ function TenantsPanel({ showNotification }) {
         name: tenant.name || '',
         email: tenant.email || '',
         phone: tenant.phone || '',
-        date_of_birth: tenant.date_of_birth || tenant.birthdate || '',
+        date_of_birth: tenant.date_of_birth || '',
         gender: tenant.gender || '',
         passport_id: tenant.passport_id || '',
-        refund_iban: tenant.refund_iban || tenant.refundIban || ''
+        refund_iban: tenant.refund_iban || ''
       });
     } else {
       // Add mode
@@ -284,18 +265,23 @@ function TenantsPanel({ showNotification }) {
 
   const handleCloseDialog = () => {
     setOpenDialog(false);
-    setFormSubmitting(false);
     setEditingTenant(null);
+    setFormData({
+      name: '',
+      email: '',
+      phone: '',
+      date_of_birth: '',
+      gender: '',
+      passport_id: '',
+      refund_iban: ''
+    });
   };
 
   const handleSubmit = async () => {
-    if (!formData.name.trim()) {
-      showNotification('Tenant name is required', 'error');
-      return;
-    }
-
-    if (!formData.email.trim()) {
-      showNotification('Email is required', 'error');
+    if (!formData.name || !formData.email) {
+      if (showNotification) {
+        showNotification('Name and email are required', 'error');
+      }
       return;
     }
 
@@ -303,28 +289,35 @@ function TenantsPanel({ showNotification }) {
     try {
       if (editingTenant) {
         // Update existing tenant
-        await api.put(`/tenants/${editingTenant.id}`, formData);
-        showNotification('Tenant updated successfully', 'success');
+        await api.put(`/tenants/update/${editingTenant.id}`, formData);
+        if (showNotification) {
+          showNotification('Tenant updated successfully', 'success');
+        }
       } else {
-        // Add new tenant - using the correct endpoint
+        // Add new tenant
         await api.post('/tenants/add', formData);
-        showNotification('Tenant added successfully', 'success');
+        if (showNotification) {
+          showNotification('Tenant added successfully', 'success');
+        }
       }
 
-      fetchData();
       handleCloseDialog();
+      fetchData(); // Refresh data
     } catch (error) {
       console.error('Error saving tenant:', error);
-      const errorMessage = error.response?.data?.message || 'Error saving tenant data';
-      showNotification(errorMessage, 'error');
+      const errorMessage = error.response?.data?.message || 'Failed to save tenant';
+      if (showNotification) {
+        showNotification(errorMessage, 'error');
+      }
     } finally {
       setFormSubmitting(false);
     }
   };
 
-  const handleActionMenuOpen = (event, tenant) => {
-    setActionMenuAnchor(event.currentTarget);
+  const handleActionMenuClick = (event, tenant) => {
+    event.stopPropagation();
     setSelectedTenant(tenant);
+    setActionMenuAnchor(event.currentTarget);
   };
 
   const handleActionMenuClose = () => {
@@ -353,54 +346,78 @@ function TenantsPanel({ showNotification }) {
 
     setFormSubmitting(true);
     try {
-      await api.delete(`/tenants/${tenantToDelete.id}`);
-      showNotification('Tenant deleted successfully', 'success');
-      fetchData();
+      await api.delete(`/tenants/delete/${tenantToDelete.id}`);
+      if (showNotification) {
+        showNotification('Tenant deleted successfully', 'success');
+      }
       setConfirmDeleteOpen(false);
       setTenantToDelete(null);
+      fetchData(); // Refresh data
     } catch (error) {
       console.error('Error deleting tenant:', error);
-      const errorMessage = error.response?.data?.message || 'Error deleting tenant';
-      showNotification(errorMessage, 'error');
+      const errorMessage = error.response?.data?.message || 'Failed to delete tenant';
+      if (showNotification) {
+        showNotification(errorMessage, 'error');
+      }
     } finally {
       setFormSubmitting(false);
     }
   };
 
-  const getContractStatusInfo = (tenant) => {
-    if (!tenant.current_contracts || tenant.current_contracts.length === 0) {
-      return { status: 'No Contract', color: grey[500], bgColor: grey[100] };
-    }
+  // NEW: Handle apartment click to open details dialog
+  const handleApartmentClick = async (apartmentId, event) => {
+    event.stopPropagation(); // Prevent row click
 
-    const contractCount = tenant.current_contracts.length;
-    if (contractCount === 1) {
-      return { status: 'Active Contract', color: green[700], bgColor: green[100] };
-    } else {
-      return { status: `${contractCount} Contracts`, color: blue[700], bgColor: blue[100] };
-    }
-  };
-
-  const getApartmentInfo = (tenant) => {
-    if (!tenant.current_contracts || tenant.current_contracts.length === 0) {
-      return 'Not Assigned';
-    }
-
-    const apartments = tenant.current_contracts.map(contract => contract.apartment_address);
-    return apartments.join(', ');
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return '';
     try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString();
-    } catch (e) {
-      return dateString;
+      // First try to find apartment from our loaded list (faster)
+      let apartment = apartments.find(apt => apt.id === apartmentId);
+
+      // If not found in list, fetch from API
+      if (!apartment) {
+        const response = await api.get(`/apartment/${apartmentId}`);
+        apartment = response.data;
+      }
+
+      if (!apartment) {
+        if (showNotification) {
+          showNotification('Apartment not found', 'error');
+        }
+        return;
+      }
+
+      // Calculate expiry status to match what ApartmentDetailsDialog expects
+      const calculateExpiryStatus = (contractEndDate) => {
+        if (!contractEndDate) return { status: 'no_date', daysUntilExpiry: null };
+
+        const endDate = new Date(contractEndDate);
+        const today = new Date();
+        const timeDiff = endDate.getTime() - today.getTime();
+        const daysUntilExpiry = Math.ceil(timeDiff / (1000 * 3600 * 24));
+
+        if (daysUntilExpiry < 0) {
+          return { status: 'expired', daysUntilExpiry };
+        } else if (daysUntilExpiry <= 30) {
+          return { status: 'expiring_soon', daysUntilExpiry };
+        } else {
+          return { status: 'valid', daysUntilExpiry };
+        }
+      };
+
+      // Add expiryStatus to apartment object
+      apartment.expiryStatus = calculateExpiryStatus(apartment.contractEndDate);
+
+      setSelectedApartmentForDetails(apartment);
+      setApartmentDetailsDialogOpen(true);
+    } catch (error) {
+      console.error('Error showing apartment details:', error);
+      if (showNotification) {
+        showNotification('Failed to load apartment details', 'error');
+      }
     }
   };
 
-  const handlePageChange = (page) => {
-    setCurrentPage(page);
+  const handlePageChange = (newPage) => {
+    setCurrentPage(newPage);
   };
 
   const handleItemsPerPageChange = (newItemsPerPage) => {
@@ -408,172 +425,145 @@ function TenantsPanel({ showNotification }) {
     setCurrentPage(1);
   };
 
+  const getGenderIcon = (gender) => {
+    if (!gender) return null;
+    return gender.toLowerCase() === 'male' ? '♂️' : gender.toLowerCase() === 'female' ? '♀️' : '⚧';
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return 'Not set';
+    return new Date(dateString).toLocaleDateString();
+  };
+
   return (
-    <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
-      {/* Header with Stats */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12}>
-          <Paper elevation={3} sx={{ p: 3 }}>
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-              <Typography variant="h4" component="h1" sx={{ display: 'flex', alignItems: 'center' }}>
-                <PersonIcon sx={{ mr: 1 }} /> Tenant Management
-              </Typography>
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<PersonAddIcon />}
-                onClick={() => handleOpenDialog()}
-                size="large"
-              >
-                Add New Tenant
-              </Button>
-            </Box>
-
-            {/* Stats Cards */}
-            <Grid container spacing={2}>
-              <Grid item xs={12} sm={3}>
-                <Card variant="outlined">
-                  <CardContent sx={{ p: 2, textAlign: 'center' }}>
-                    <Typography variant="h4" color="primary" fontWeight="bold">
-                      {stats.total}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Total Tenants
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} sm={3}>
-                <Card variant="outlined">
-                  <CardContent sx={{ p: 2, textAlign: 'center' }}>
-                    <Typography variant="h4" color="success.main" fontWeight="bold">
-                      {stats.withContracts}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      With Contracts
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} sm={3}>
-                <Card variant="outlined">
-                  <CardContent sx={{ p: 2, textAlign: 'center' }}>
-                    <Typography variant="h4" color="warning.main" fontWeight="bold">
-                      {stats.withoutContracts}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Without Contracts
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} sm={3}>
-                <Card variant="outlined">
-                  <CardContent sx={{ p: 2, textAlign: 'center' }}>
-                    <Typography variant="h4" color="info.main" fontWeight="bold">
-                      {stats.activeContracts}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Active Contracts
-                    </Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
-          </Paper>
-        </Grid>
-      </Grid>
-
-      {/* Filters and Search */}
-      <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" sx={{ mb: 2, display: 'flex', alignItems: 'center' }}>
-          <FilterIcon sx={{ mr: 1 }} /> Filters & Search
-        </Typography>
-
-        <Grid container spacing={2} alignItems="center">
-          {/* Search */}
-          <Grid item xs={12} md={4}>
-            <TextField
-              fullWidth
-              placeholder="Search tenants..."
+    <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Paper elevation={1} sx={{ p: 3 }}>
+        {/* Header */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold' }}>
+            Tenants Management
+          </Typography>
+          <Stack direction="row" spacing={2}>
+            <Button
               variant="outlined"
-              size="small"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon />
-                  </InputAdornment>
-                ),
-              }}
-            />
-          </Grid>
+              startIcon={<RefreshIcon />}
+              onClick={fetchData}
+              disabled={loading}
+            >
+              Refresh
+            </Button>
+            <Button
+              variant="contained"
+              startIcon={<PersonAddIcon />}
+              onClick={() => handleOpenDialog()}
+            >
+              Add Tenant
+            </Button>
+          </Stack>
+        </Box>
 
-          {/* Gender Filter */}
-          <Grid item xs={12} sm={6} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Gender</InputLabel>
-              <Select
-                value={genderFilter}
-                onChange={(e) => setGenderFilter(e.target.value)}
-                label="Gender"
-              >
-                <MenuItem value="all">All Genders</MenuItem>
-                <MenuItem value="male">Male</MenuItem>
-                <MenuItem value="female">Female</MenuItem>
-                <MenuItem value="other">Other</MenuItem>
-              </Select>
-            </FormControl>
+        {/* Stats Cards */}
+        <Grid container spacing={3} sx={{ mb: 3 }}>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" color="primary">{stats.total}</Typography>
+                <Typography variant="body2" color="text.secondary">Total Tenants</Typography>
+              </CardContent>
+            </Card>
           </Grid>
-
-          {/* Apartment Filter */}
-          <Grid item xs={12} sm={6} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Apartment</InputLabel>
-              <Select
-                value={apartmentFilter}
-                onChange={(e) => setApartmentFilter(e.target.value)}
-                label="Apartment"
-              >
-                <MenuItem value="all">All Apartments</MenuItem>
-                {apartments.map((apartment) => (
-                  <MenuItem key={apartment.id} value={apartment.id.toString()}>
-                    {apartment.address || `Apt ${apartment.id}`}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" color="success.main">{stats.withContracts}</Typography>
+                <Typography variant="body2" color="text.secondary">With Contracts</Typography>
+              </CardContent>
+            </Card>
           </Grid>
-
-          {/* Contract Status Filter */}
-          <Grid item xs={12} sm={6} md={2}>
-            <FormControl fullWidth size="small">
-              <InputLabel>Contract Status</InputLabel>
-              <Select
-                value={contractStatusFilter}
-                onChange={(e) => setContractStatusFilter(e.target.value)}
-                label="Contract Status"
-              >
-                <MenuItem value="all">All Statuses</MenuItem>
-                <MenuItem value="with_contracts">With Contracts</MenuItem>
-                <MenuItem value="without_contracts">Without Contracts</MenuItem>
-              </Select>
-            </FormControl>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" color="warning.main">{stats.withoutContracts}</Typography>
+                <Typography variant="body2" color="text.secondary">Without Contracts</Typography>
+              </CardContent>
+            </Card>
           </Grid>
+          <Grid item xs={12} sm={6} md={3}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" color="info.main">{stats.activeContracts}</Typography>
+                <Typography variant="body2" color="text.secondary">Active Contracts</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
 
-          {/* Action Buttons */}
-          <Grid item xs={12} md={2}>
-            <Stack direction="row" spacing={1}>
-              <Button
-                variant="outlined"
-                startIcon={<RefreshIcon />}
-                onClick={fetchData}
-                disabled={loading}
+        {/* Filters */}
+        <Box sx={{ mb: 3 }}>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} md={3}>
+              <TextField
+                fullWidth
                 size="small"
-              >
-                Refresh
-              </Button>
+                placeholder="Search tenants..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                InputProps={{
+                  startAdornment: (
+                    <InputAdornment position="start">
+                      <SearchIcon />
+                    </InputAdornment>
+                  )
+                }}
+              />
+            </Grid>
+            <Grid item xs={6} md={2}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Gender</InputLabel>
+                <Select
+                  value={genderFilter}
+                  onChange={(e) => setGenderFilter(e.target.value)}
+                  label="Gender"
+                >
+                  <MenuItem value="all">All Genders</MenuItem>
+                  <MenuItem value="male">Male</MenuItem>
+                  <MenuItem value="female">Female</MenuItem>
+                  <MenuItem value="other">Other</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={6} md={2}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Apartment</InputLabel>
+                <Select
+                  value={apartmentFilter}
+                  onChange={(e) => setApartmentFilter(e.target.value)}
+                  label="Apartment"
+                >
+                  <MenuItem value="all">All Apartments</MenuItem>
+                  {apartments.map((apartment) => (
+                    <MenuItem key={apartment.id} value={apartment.id.toString()}>
+                      {apartment.address}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={6} md={2}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Contract Status</InputLabel>
+                <Select
+                  value={contractStatusFilter}
+                  onChange={(e) => setContractStatusFilter(e.target.value)}
+                  label="Contract Status"
+                >
+                  <MenuItem value="all">All Tenants</MenuItem>
+                  <MenuItem value="with_contracts">With Contracts</MenuItem>
+                  <MenuItem value="without_contracts">Without Contracts</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={6} md={1}>
               <Button
                 variant="outlined"
                 startIcon={<ClearIcon />}
@@ -582,21 +572,15 @@ function TenantsPanel({ showNotification }) {
               >
                 Clear
               </Button>
-            </Stack>
+            </Grid>
           </Grid>
-        </Grid>
-      </Paper>
+        </Box>
 
-      {/* Main Content */}
-      <Paper elevation={3} sx={{ p: 3 }}>
-        {loading ? (
-          <Box sx={{ width: '100%', mt: 2 }}>
-            <LinearProgress />
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1, textAlign: 'center' }}>
-              Loading tenants...
-            </Typography>
-          </Box>
-        ) : (
+        {/* Loading State */}
+        {loading && <LinearProgress sx={{ mb: 2 }} />}
+
+        {/* Content */}
+        {!loading && (
           <>
             {filteredTenants.length === 0 ? (
               <Alert severity="info" sx={{ mt: 2 }}>
@@ -622,14 +606,12 @@ function TenantsPanel({ showNotification }) {
                         <TableCell>Contact</TableCell>
                         <TableCell>Personal Info</TableCell>
                         <TableCell>Current Apartment</TableCell>
-                        <TableCell>Contract Status</TableCell>
                         <TableCell>Financial</TableCell>
                         <TableCell align="center">Actions</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {paginatedTenants.map((tenant) => {
-                        const contractInfo = getContractStatusInfo(tenant);
                         return (
                           <TableRow
                             key={tenant.id}
@@ -641,10 +623,10 @@ function TenantsPanel({ showNotification }) {
                             <TableCell>
                               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                                 <Avatar sx={{ bgcolor: blue[500] }}>
-                                  {tenant.name?.charAt(0)?.toUpperCase() || 'T'}
+                                  {tenant.name?.charAt(0).toUpperCase() || 'T'}
                                 </Avatar>
                                 <Box>
-                                  <Typography variant="subtitle2" fontWeight="bold">
+                                  <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                                     {tenant.name}
                                   </Typography>
                                   <Typography variant="caption" color="text.secondary">
@@ -656,88 +638,104 @@ function TenantsPanel({ showNotification }) {
 
                             {/* Contact */}
                             <TableCell>
-                              <Stack spacing={0.5}>
-                                {tenant.email && (
-                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                    <EmailIcon sx={{ fontSize: 16, color: 'action.active' }} />
-                                    <Typography variant="body2">{tenant.email}</Typography>
-                                  </Box>
-                                )}
+                              <Box>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                                  <EmailIcon fontSize="small" color="action" />
+                                  <Typography variant="body2">{tenant.email}</Typography>
+                                </Box>
                                 {tenant.phone && (
-                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                    <PhoneIcon sx={{ fontSize: 16, color: 'action.active' }} />
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <PhoneIcon fontSize="small" color="action" />
                                     <Typography variant="body2">{tenant.phone}</Typography>
                                   </Box>
                                 )}
-                              </Stack>
+                              </Box>
                             </TableCell>
 
                             {/* Personal Info */}
                             <TableCell>
-                              <Stack spacing={0.5}>
+                              <Box>
                                 {tenant.gender && (
-                                  <Chip
-                                    label={tenant.gender}
-                                    size="small"
-                                    variant="outlined"
-                                    color="primary"
-                                  />
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                                    <span>{getGenderIcon(tenant.gender)}</span>
+                                    <Typography variant="body2" sx={{ textTransform: 'capitalize' }}>
+                                      {tenant.gender}
+                                    </Typography>
+                                  </Box>
                                 )}
-                                {(tenant.date_of_birth || tenant.birthdate) && (
-                                  <Typography variant="caption" color="text.secondary">
-                                    <BirthdayIcon sx={{ fontSize: 14, mr: 0.5 }} />
-                                    {formatDate(tenant.date_of_birth || tenant.birthdate)}
-                                  </Typography>
+                                {tenant.date_of_birth && (
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <BirthdayIcon fontSize="small" color="action" />
+                                    <Typography variant="body2">{formatDate(tenant.date_of_birth)}</Typography>
+                                  </Box>
                                 )}
                                 {tenant.passport_id && (
                                   <Typography variant="caption" color="text.secondary">
-                                    ID: {tenant.passport_id}
+                                    Passport: {tenant.passport_id}
                                   </Typography>
                                 )}
-                              </Stack>
+                              </Box>
                             </TableCell>
 
                             {/* Current Apartment */}
                             <TableCell>
-                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                <HomeIcon sx={{ fontSize: 16, color: 'action.active' }} />
-                                <Typography variant="body2">
-                                  {getApartmentInfo(tenant)}
-                                </Typography>
-                              </Box>
-                            </TableCell>
-
-                            {/* Contract Status */}
-                            <TableCell>
-                              <Chip
-                                label={contractInfo.status}
-                                size="small"
-                                sx={{
-                                  color: contractInfo.color,
-                                  backgroundColor: contractInfo.bgColor,
-                                  fontWeight: 'medium'
-                                }}
-                                icon={<ContractIcon sx={{ fontSize: 16 }} />}
-                              />
-                            </TableCell>
-
-                            {/* Financial Info */}
-                            <TableCell>
-                              {(tenant.refund_iban || tenant.refundIban) && (
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                                  <IbanIcon sx={{ fontSize: 16, color: 'action.active' }} />
-                                  <Typography variant="caption" color="text.secondary">
-                                    IBAN Available
-                                  </Typography>
+                              {tenant.current_contracts && tenant.current_contracts.length > 0 ? (
+                                <Box>
+                                  {tenant.current_contracts.map((contract, index) => (
+                                    <Chip
+                                      key={index}
+                                      label={contract.apartment_address}
+                                      size="small"
+                                      variant="outlined"
+                                      icon={<HomeIcon />}
+                                      onClick={(event) => handleApartmentClick(contract.apartment_id, event)}
+                                      sx={{
+                                        mb: 0.5,
+                                        mr: 0.5,
+                                        cursor: 'pointer',
+                                        '&:hover': {
+                                          backgroundColor: 'primary.light',
+                                          color: 'white'
+                                        }
+                                      }}
+                                    />
+                                  ))}
                                 </Box>
+                              ) : (
+                                <Typography variant="body2" color="text.secondary">
+                                  No apartment assigned
+                                </Typography>
                               )}
                             </TableCell>
 
+                            {/* Financial */}
+                            <TableCell>
+                              <Box>
+                                {tenant.current_contracts && tenant.current_contracts.length > 0 ? (
+                                  <Typography variant="body2" color="success.main">
+                                    €{tenant.current_contracts.reduce((sum, contract) => sum + (contract.monthly_rent || 0), 0)}/month
+                                  </Typography>
+                                ) : (
+                                  <Typography variant="body2" color="text.secondary">
+                                    No rent
+                                  </Typography>
+                                )}
+                                {tenant.refund_iban && (
+                                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <IbanIcon fontSize="small" color="action" />
+                                    <Typography variant="caption" color="text.secondary">
+                                      IBAN on file
+                                    </Typography>
+                                  </Box>
+                                )}
+                              </Box>
+                            </TableCell>
+
                             {/* Actions */}
-                            <TableCell align="center" onClick={(e) => e.stopPropagation()}>
+                            <TableCell align="center">
                               <IconButton
                                 size="small"
-                                onClick={(e) => handleActionMenuOpen(e, tenant)}
+                                onClick={(event) => handleActionMenuClick(event, tenant)}
                               >
                                 <MoreIcon />
                               </IconButton>
@@ -916,6 +914,22 @@ function TenantsPanel({ showNotification }) {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Apartment Details Dialog - NEW */}
+      <ApartmentDetailsDialog
+        apartment={selectedApartmentForDetails}
+        open={apartmentDetailsDialogOpen}
+        onClose={() => {
+          setApartmentDetailsDialogOpen(false);
+          setSelectedApartmentForDetails(null);
+        }}
+        onGoToTenant={(tenantId) => {
+          setApartmentDetailsDialogOpen(false);
+          navigate(`/tenants/${tenantId}`);
+        }}
+        showNotification={showNotification}
+        isAdmin={true}
+      />
     </Container>
   );
 }

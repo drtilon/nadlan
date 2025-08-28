@@ -251,7 +251,7 @@ class Tenant(db.Model):
     @property
     def current_contracts(self):
         """
-        FIXED: Property to return current contracts in the format expected by frontend
+        Property to return current contracts in the format expected by frontend
         This matches the structure from your tenant data
         """
         current_assignments = self.get_current_contract_assignments()
@@ -278,8 +278,11 @@ class Tenant(db.Model):
 
         return contracts
 
-    def to_dict(self, include_contracts=True, include_historical=False):
-        """Convert to dictionary with enhanced contract information"""
+    def to_dict(self, include_contracts=True, include_historical=False, include_current_assignments=None):
+        """
+        Convert to dictionary with enhanced contract information
+        FIXED: Added include_current_assignments parameter to maintain compatibility
+        """
         result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
         # Convert date/datetime objects
@@ -289,6 +292,10 @@ class Tenant(db.Model):
             result["created_at"] = result["created_at"].isoformat()
         if result.get("updated_at"):
             result["updated_at"] = result["updated_at"].isoformat()
+
+        # Handle legacy parameter name mapping
+        if include_current_assignments is not None:
+            include_contracts = include_current_assignments
 
         # FIXED: Include current contracts using the property
         if include_contracts:

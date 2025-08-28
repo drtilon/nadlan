@@ -213,12 +213,13 @@ def delete_tenant(tenant_id) -> Tuple[Response, int]:
         return jsonify({"message": "Error deleting tenant", "error": str(e)}), 500
 
 
+
 @tenants_bp.route("/tenants/list", methods=["GET"])
 @token_required
 def list_tenants() -> Tuple[Response, int]:
     """
     List all tenants with optional filtering by search term, apartment, and gender
-    PRESERVED: This endpoint was in your original file
+    FIXED: Updated to use correct parameter names
     """
     try:
         # Get query parameters
@@ -261,10 +262,13 @@ def list_tenants() -> Tuple[Response, int]:
         # Get all tenants matching the criteria
         tenants = query.all()
 
-        # Convert to dictionary format
+        # Convert to dictionary format - FIXED: Using standard parameters
         tenants_data = []
         for tenant in tenants:
+            # Option 1: Use the fixed to_dict method with include_current_assignments
             tenant_dict = tenant.to_dict(include_current_assignments=True)
+            # Option 2 (alternative): Use include_contracts=True
+            # tenant_dict = tenant.to_dict(include_contracts=True)
             tenants_data.append(tenant_dict)
 
         # Log activity
@@ -295,13 +299,12 @@ def list_tenants() -> Tuple[Response, int]:
         current_app.logger.error(f"Error listing tenants: {e}")
         return jsonify({"message": "Error listing tenants", "error": str(e)}), 500
 
-
 @tenants_bp.route("/tenants/available", methods=["GET"])
 @token_required
 def get_available_tenants():
     """
     Get tenants that are not currently assigned to any active contract
-    PRESERVED: This endpoint was in your original file
+    FIXED: Updated to use correct parameter names
     """
     try:
         # Get all tenants
@@ -324,10 +327,10 @@ def get_available_tenants():
             if not has_active_contract:
                 available_tenants.append(tenant)
 
-        # Convert to dictionary format
+        # Convert to dictionary format - FIXED: Using standard parameters
         tenants_data = []
         for tenant in available_tenants:
-            tenant_dict = tenant.to_dict()
+            tenant_dict = tenant.to_dict(include_contracts=True)
             tenants_data.append(tenant_dict)
 
         # Log activity
@@ -343,6 +346,7 @@ def get_available_tenants():
     except Exception as e:
         current_app.logger.error(f"Error listing available tenants: {e}")
         return jsonify({"message": "Error listing available tenants", "error": str(e)}), 500
+
 
 
 @tenants_bp.route("/tenants/<int:tenant_id>", methods=["GET"])

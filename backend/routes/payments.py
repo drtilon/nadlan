@@ -8,6 +8,9 @@ from datetime import datetime, date, timedelta
 from activity_logger import ActivityLogger
 import json
 import calendar
+from sqlalchemy import case, func
+
+
 
 payments_bp = Blueprint("payments_bp", __name__)
 
@@ -15,8 +18,7 @@ payments_bp = Blueprint("payments_bp", __name__)
 @token_required
 def get_payment_history(apartment_id):
     """
-    Get comprehensive payment history for an apartment.
-    FIXED: Use payment_date instead of paymentDate
+    Get comprehensive payment history for an apartment - MYSQL FIXED VERSION
     """
     try:
         apartment = Apartment.query.get(apartment_id)
@@ -29,10 +31,14 @@ def get_payment_history(apartment_id):
         if year_filter:
             query = query.filter_by(year=year_filter)
 
-        # FIXED: Use payment_date instead of paymentDate and handle NULL values properly
+        # FIXED: MySQL-compatible NULL handling instead of .nullslast()
         payments = query.order_by(
-            Payment.payment_date.desc().nullslast(),
-            Payment.updated_at.desc()
+            case(
+                (Payment.payment_date.is_(None), 1),  # NULLs get value 1 (sorted last)
+                else_=0  # Non-NULLs get value 0 (sorted first)
+            ).asc(),
+            Payment.payment_date.desc(),  # Then by actual date descending
+            Payment.updated_at.desc()     # Finally by updated_at
         ).all()
 
         history = []
@@ -85,7 +91,6 @@ def get_payment_history(apartment_id):
     except Exception as e:
         current_app.logger.error(f"Error retrieving payment history: {e}")
         return jsonify({"message": "Error retrieving payment history", "error": str(e)}), 500
-
 @payments_bp.route("/payment/individual", methods=["POST"])
 @token_required
 def add_individual_payment():
@@ -333,183 +338,338 @@ def delete_individual_payment(payment_id):
         current_app.logger.error(f"Error deleting payment: {e}")
         return jsonify({"message": "Error deleting payment", "error": str(e)}), 500
 
-@payments_bp.route("/payments/<int:apartment_id>", methods=["POST"])
+@payments_bp.route("/payment", methods=["POST"])
 @token_required
-def update_batch_payments(apartment_id):
+def create_individual_payment():
     """
-    LEGACY ENDPOINT - Updates/creates batch payments for multiple months.
-    FIXED: Use payment_date instead of paymentDate
+    Create individual payment - FIXED to handle month conversion from string to integer
     """
     try:
         data = request.get_json()
         if not data:
             return jsonify({"message": "No data provided"}), 400
 
-        selected_year = data.get("year", datetime.now().year)
-        payments_data = data.get("payments", {})
+        # Extract data exactly as your frontend sends it
+        apartment_id = data.get('apartment_id')
+        amount = data.get('amount')
+        tenant_name = data.get('tenant_name')
+        payment_method = data.get('payment_method', 'bank_transfer')
+        payment_date_str = data.get('payment_date')
+        payment_type = data.get('payment_type', 'rent')
+        month_name = data.get('month')  # Frontend sends 'August', 'January', etc.
+        year = data.get('year')
+        notes = data.get('notes', '')
+        contract_period_id = data.get('contract_period_id')
 
-        month_list = [
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December"
-        ]
+        # Basic validation
+        if not apartment_id:
+            return jsonify({"message": "Apartment ID is required"}), 400
+        if not amount or float(amount) <= 0:
+            return jsonify({"message": "Valid amount is required"}), 400
+        if not tenant_name:
+            return jsonify({"message": "Tenant name is required"}), 400
+
+        # Validate apartment exists
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
+
+        # FIXED: Convert month name to integer (1-12)
+        month_mapping = {
+            'January': 1, 'February': 2, 'March': 3, 'April': 4,
+            'May': 5, 'June': 6, 'July': 7, 'August': 8,
+            'September': 9, 'October': 10, 'November': 11, 'December': 12
+        }
+
+        # Convert month name to integer
+        if month_name and isinstance(month_name, str):
+            month_int = month_mapping.get(month_name)
+            if not month_int:
+                return jsonify({"message": f"Invalid month name: {month_name}"}), 400
+        elif month_name and isinstance(month_name, int):
+            month_int = month_name  # Already an integer
+        else:
+            month_int = datetime.now().month  # Default to current month
+
+        # Parse payment date
+        payment_date = None
+        if payment_date_str:
+            try:
+                payment_date = datetime.strptime(payment_date_str, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({"message": "Invalid payment date format. Use YYYY-MM-DD"}), 400
+
+        # Create payment record
+        new_payment = Payment(
+            apartment_id=apartment_id,
+            month=month_int,  # FIXED: Use integer month (1-12) not string
+            year=year or datetime.now().year,
+            amount=float(amount),  # Required field in your model
+            status='paid',
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+
+        # Set optional fields based on what exists in your Payment model
+        if hasattr(new_payment, 'payment_date'):
+            new_payment.payment_date = payment_date
+        elif hasattr(new_payment, 'paymentDate'):
+            new_payment.paymentDate = payment_date
+
+        if hasattr(new_payment, 'tenant_name'):
+            new_payment.tenant_name = tenant_name
+
+        if hasattr(new_payment, 'payment_method'):
+            new_payment.payment_method = payment_method
+        elif hasattr(new_payment, 'paymentMethod'):
+            new_payment.paymentMethod = payment_method
+
+        if hasattr(new_payment, 'payment_type'):
+            new_payment.payment_type = payment_type
+
+        if hasattr(new_payment, 'notes'):
+            new_payment.notes = notes
+
+        if hasattr(new_payment, 'contract_period_id') and contract_period_id:
+            new_payment.contract_period_id = contract_period_id
+
+        # Create legacy tenants JSON for backward compatibility
+        tenant_data = [{
+            "name": tenant_name,
+            "amountPaid": float(amount),
+            "amountDue": float(amount),
+            "paid": True
+        }]
+        if hasattr(new_payment, 'tenants'):
+            new_payment.tenants = json.dumps(tenant_data)
+
+        # Set other legacy fields for backward compatibility (with defaults from your model)
+        for field, value in [
+            ('internet', 0.0),
+            ('electricity', 0.0),
+            ('other', 0.0),
+            ('extraPayments', '{}'),
+            ('tenant_payments', None)
+        ]:
+            if hasattr(new_payment, field):
+                setattr(new_payment, field, value)
+
+        db.session.add(new_payment)
+        db.session.commit()
+
+        # Log activity
+        ActivityLogger.log_payment_action(
+            action="create_individual",
+            payment_id=new_payment.id,
+            apartment_id=apartment_id,
+            details={
+                "amount": float(amount),
+                "tenant_name": tenant_name,
+                "payment_method": payment_method,
+                "payment_type": payment_type,
+                "month": month_int,
+                "month_name": month_name,
+                "year": year
+            }
+        )
+
+        return jsonify({
+            "message": "Individual payment created successfully",
+            "payment_id": new_payment.id,
+            "apartment_id": apartment_id,
+            "amount": float(amount),
+            "tenant_name": tenant_name,
+            "month": month_int,
+            "month_name": month_name,
+            "year": year,
+            "payment_date": payment_date.isoformat() if payment_date else None
+        }), 201
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Error creating individual payment: {e}")
+        return jsonify({"message": "Error creating individual payment", "error": str(e)}), 500
+
+
+@payments_bp.route("/payments/<int:apartment_id>", methods=["POST"])
+@token_required
+def update_batch_payments(apartment_id):
+    """
+    FIXED: Updates/creates batch payments with proper month name to integer conversion
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"message": "No data provided"}), 400
+
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
+
+        payments_data = data.get('payments', {})
+        selected_year = data.get('year', datetime.now().year)
+
+        if not payments_data:
+            return jsonify({"message": "No payment data provided"}), 400
+
+        # Month name to integer mapping
+        month_mapping = {
+            'January': 1, 'February': 2, 'March': 3, 'April': 4,
+            'May': 5, 'June': 6, 'July': 7, 'August': 8,
+            'September': 9, 'October': 10, 'November': 11, 'December': 12
+        }
 
         results = []
         updated_count = 0
         created_count = 0
 
-        for month, month_data in payments_data.items():
-            if month not in month_list:
+        for month_name, payment_info in payments_data.items():
+            # FIXED: Convert month name to integer
+            if isinstance(month_name, str) and month_name in month_mapping:
+                month_int = month_mapping[month_name]
+            elif isinstance(month_name, int):
+                month_int = month_name  # Already an integer
+            else:
+                current_app.logger.warning(f"Invalid month format: {month_name}")
                 continue
 
-            tenants = month_data.get("tenants", [])
-            internet = float(month_data.get("internet", 0))
-            electricity = float(month_data.get("electricity", 0))
-            other = float(month_data.get("other", 0))
-            extra_payments = month_data.get("extraPayments", {})
-            extra_payments_json = json.dumps(extra_payments) if isinstance(extra_payments, dict) else "{}"
+            status = payment_info.get('status', 'paid')
+            tenants = payment_info.get('tenants', [])
+            extra_payments = payment_info.get('extraPayments', {})
+            payment_date_str = payment_info.get('paymentDate')
+            payment_method = payment_info.get('paymentMethod', 'bank_transfer')
+            notes = payment_info.get('notes', '')
+            contract_period_id = payment_info.get('contract_period_id')
 
-            # Reset paid status for all tenants if not explicitly paid
-            for tenant in tenants:
-                if not tenant.get("paid", False):
-                    tenant["amountPaid"] = 0
-            tenants_json = json.dumps(tenants)
-
-            payment_date_str = month_data.get("paymentDate")
-            payment_method = month_data.get("paymentMethod", "bank_transfer")
-            notes = month_data.get("notes", "")
-            status = month_data.get("status", "not_paid")
-
+            # Parse payment date
             payment_date = None
             if payment_date_str:
                 try:
-                    payment_date = datetime.fromisoformat(payment_date_str.replace("Z", "+00:00"))
-                except ValueError:
+                    payment_date = datetime.fromisoformat(payment_date_str.replace("Z", "+00:00")).date()
+                except:
                     try:
-                        payment_date = datetime.strptime(payment_date_str, "%Y-%m-%d")
-                    except ValueError:
-                        payment_date = datetime.utcnow()
+                        payment_date = datetime.strptime(payment_date_str, '%Y-%m-%d').date()
+                    except:
+                        payment_date = datetime.utcnow().date()
 
-            # Look for existing batch payment
-            payment = Payment.query.filter_by(
+            # Prepare data
+            tenants_json = json.dumps(tenants)
+            extra_payments_json = json.dumps(extra_payments)
+
+            # Calculate amounts
+            total_amount = sum(float(t.get('amountDue', 0)) for t in tenants)
+            internet = float(extra_payments.get('internet', 0))
+            electricity = float(extra_payments.get('electricity', 0))
+            other = float(extra_payments.get('other', 0))
+
+            # Look for existing payment using integer month
+            existing_payment = Payment.query.filter_by(
                 apartment_id=apartment_id,
-                month=month,
+                month=month_int,  # FIXED: Use integer month
                 year=selected_year
-            ).filter(
-                Payment.month.in_(month_list)
             ).first()
 
-            if payment:
-                # Update existing batch payment - FIXED: Use payment_date
-                original_status = getattr(payment, 'status', 'unknown')
-                original_amount_paid = 0
-
-                if hasattr(payment, 'tenants') and payment.tenants:
-                    try:
-                        original_tenants = json.loads(payment.tenants)
-                        original_amount_paid = sum(float(t.get("amountPaid", 0)) for t in original_tenants)
-                    except:
-                        pass
+            if existing_payment:
+                # Update existing payment
+                original_status = getattr(existing_payment, 'status', 'unknown')
 
                 # Update fields
-                if hasattr(payment, 'status'):
-                    payment.status = status
-                if hasattr(payment, 'tenants'):
-                    payment.tenants = tenants_json
+                if hasattr(existing_payment, 'status'):
+                    existing_payment.status = status
+                if hasattr(existing_payment, 'tenants'):
+                    existing_payment.tenants = tenants_json
+                if hasattr(existing_payment, 'amount'):
+                    existing_payment.amount = total_amount
 
-                # Handle legacy fields
+                # Update other fields
                 for field, value in [
                     ('internet', internet),
                     ('electricity', electricity),
                     ('other', other),
                     ('extraPayments', extra_payments_json),
-                    ('year', selected_year)
+                    ('notes', notes)
                 ]:
-                    if hasattr(payment, field):
-                        setattr(payment, field, value)
+                    if hasattr(existing_payment, field):
+                        setattr(existing_payment, field, value)
 
-                # Update payment date - FIXED: Use payment_date field
-                if status == "paid" and payment_date_str:
-                    if hasattr(payment, 'payment_date'):
-                        payment.payment_date = payment_date
-                    elif hasattr(payment, 'paymentDate'):
-                        payment.paymentDate = payment_date
+                # Update payment date
+                if status == "paid" and payment_date:
+                    if hasattr(existing_payment, 'payment_date'):
+                        existing_payment.payment_date = payment_date
+                    elif hasattr(existing_payment, 'paymentDate'):
+                        existing_payment.paymentDate = payment_date
 
                 # Update payment method
-                if hasattr(payment, 'payment_method'):
-                    payment.payment_method = payment_method
-                elif hasattr(payment, 'paymentMethod'):
-                    payment.paymentMethod = payment_method
+                if hasattr(existing_payment, 'payment_method'):
+                    existing_payment.payment_method = payment_method
+                elif hasattr(existing_payment, 'paymentMethod'):
+                    existing_payment.paymentMethod = payment_method
 
-                payment.updated_at = datetime.utcnow()
+                # Update contract period
+                if hasattr(existing_payment, 'contract_period_id') and contract_period_id:
+                    existing_payment.contract_period_id = contract_period_id
+
+                existing_payment.updated_at = datetime.utcnow()
                 updated_count += 1
-
-                new_amount_paid = sum(float(t.get("amountPaid", 0)) for t in tenants)
 
                 # Log payment update
                 ActivityLogger.log_payment_action(
                     action="update_batch",
-                    payment_id=payment.id,
+                    payment_id=existing_payment.id,
                     apartment_id=apartment_id,
                     details={
-                        "month": month,
+                        "month": month_int,
+                        "month_name": month_name,
                         "year": selected_year,
                         "original_status": original_status,
                         "new_status": status,
-                        "original_amount": original_amount_paid,
-                        "new_amount": new_amount_paid
+                        "amount": total_amount
                     }
                 )
 
             else:
-                # Create new payment - use new model structure
+                # Create new payment
                 new_payment = Payment(
                     apartment_id=apartment_id,
-                    month=month,
-                    year=selected_year
+                    month=month_int,  # FIXED: Use integer month
+                    year=selected_year,
+                    status=status,
+                    amount=total_amount,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
                 )
 
-                # Set amount based on tenants
-                total_amount = sum(float(t.get("amountDue", 0)) for t in tenants)
-                if hasattr(new_payment, 'amount'):
-                    new_payment.amount = total_amount
+                # Set optional fields
+                if hasattr(new_payment, 'tenants'):
+                    new_payment.tenants = tenants_json
 
-                # Set payment details
                 if hasattr(new_payment, 'payment_date') and status == "paid" and payment_date:
                     new_payment.payment_date = payment_date
+                elif hasattr(new_payment, 'paymentDate') and status == "paid" and payment_date:
+                    new_payment.paymentDate = payment_date
 
                 if hasattr(new_payment, 'payment_method'):
                     new_payment.payment_method = payment_method
-
-                if hasattr(new_payment, 'payment_type'):
-                    new_payment.payment_type = 'rent'
-
-                if hasattr(new_payment, 'notes'):
-                    new_payment.notes = notes
-
-                # Legacy fields for backward compatibility
-                if hasattr(new_payment, 'status'):
-                    new_payment.status = status
-                if hasattr(new_payment, 'tenants'):
-                    new_payment.tenants = tenants_json
-                if hasattr(new_payment, 'paymentDate') and status == "paid" and payment_date:
-                    new_payment.paymentDate = payment_date
-                if hasattr(new_payment, 'paymentMethod'):
+                elif hasattr(new_payment, 'paymentMethod'):
                     new_payment.paymentMethod = payment_method
 
+                if hasattr(new_payment, 'contract_period_id') and contract_period_id:
+                    new_payment.contract_period_id = contract_period_id
+
+                # Set other fields
                 for field, value in [
                     ('internet', internet),
                     ('electricity', electricity),
                     ('other', other),
-                    ('extraPayments', extra_payments_json)
+                    ('extraPayments', extra_payments_json),
+                    ('notes', notes),
+                    ('tenant_payments', None)
                 ]:
                     if hasattr(new_payment, field):
                         setattr(new_payment, field, value)
 
-                new_payment.created_at = datetime.utcnow()
-                new_payment.updated_at = datetime.utcnow()
-
                 db.session.add(new_payment)
-                db.session.flush()
+                db.session.flush()  # Get the ID
                 created_count += 1
 
                 # Log payment creation
@@ -518,7 +678,8 @@ def update_batch_payments(apartment_id):
                     payment_id=new_payment.id,
                     apartment_id=apartment_id,
                     details={
-                        "month": month,
+                        "month": month_int,
+                        "month_name": month_name,
                         "year": selected_year,
                         "status": status,
                         "amount": total_amount
@@ -526,8 +687,9 @@ def update_batch_payments(apartment_id):
                 )
 
             results.append({
-                "month": month,
-                "action": "updated" if payment else "created",
+                "month": month_name,
+                "month_int": month_int,
+                "action": "updated" if existing_payment else "created",
                 "status": status
             })
 
@@ -547,3 +709,134 @@ def update_batch_payments(apartment_id):
         db.session.rollback()
         current_app.logger.error(f"Error updating batch payments: {e}")
         return jsonify({"message": "Error updating batch payments", "error": str(e)}), 500
+
+
+@payments_bp.route("/payments/<int:apartment_id>", methods=["GET"])
+@token_required
+def get_batch_payments_data(apartment_id):
+    """
+    Get batch payments data - handles GET /api/payments/{apartment_id}?year=2025
+    This endpoint loads existing payment data for the batch payment interface
+    """
+    try:
+        apartment = Apartment.query.get(apartment_id)
+        if not apartment:
+            return jsonify({"message": "Apartment not found"}), 404
+
+        # Get year filter from query parameters (used by frontend)
+        year_filter = request.args.get('year', type=int)
+        if not year_filter:
+            year_filter = datetime.now().year
+
+        # Get all payments for this apartment and year
+        payments = Payment.query.filter_by(
+            apartment_id=apartment_id,
+            year=year_filter
+        ).order_by(
+            # Use your fixed MySQL-compatible ordering
+            case(
+                (Payment.payment_date.is_(None) if hasattr(Payment, 'payment_date') else True, 1),
+                else_=0
+            ).asc(),
+            Payment.payment_date.desc() if hasattr(Payment, 'payment_date') else Payment.paymentDate.desc(),
+            Payment.updated_at.desc()
+        ).all()
+
+        # Month integer to name mapping (for frontend compatibility)
+        month_names = {
+            1: 'January', 2: 'February', 3: 'March', 4: 'April',
+            5: 'May', 6: 'June', 7: 'July', 8: 'August',
+            9: 'September', 10: 'October', 11: 'November', 12: 'December'
+        }
+
+        # Structure the response exactly as your frontend expects
+        payments_data = {}
+
+        for payment in payments:
+            # Convert month integer back to month name for frontend
+            month_key = month_names.get(payment.month, f"Month_{payment.month}")
+
+            # Extract tenant information
+            tenants_info = []
+            if hasattr(payment, 'tenants') and payment.tenants:
+                try:
+                    tenants_info = json.loads(payment.tenants)
+                except:
+                    tenants_info = []
+
+            # If no tenants JSON, create from individual payment fields
+            if not tenants_info and hasattr(payment, 'tenant_name') and payment.tenant_name:
+                amount = float(payment.amount) if hasattr(payment, 'amount') and payment.amount else 0
+                tenants_info = [{
+                    "name": payment.tenant_name,
+                    "amountPaid": amount,
+                    "amountDue": amount,
+                    "paid": True
+                }]
+
+            # Get payment date (handle both field types)
+            payment_date = None
+            if hasattr(payment, 'payment_date') and payment.payment_date:
+                payment_date = payment.payment_date.isoformat()
+            elif hasattr(payment, 'paymentDate') and payment.paymentDate:
+                payment_date = payment.paymentDate.isoformat()
+
+            # Extract extra payments
+            extra_payments = {"internet": 0, "electricity": 0, "other": 0}
+            if hasattr(payment, 'extraPayments') and payment.extraPayments:
+                try:
+                    extra_payments = json.loads(payment.extraPayments)
+                except:
+                    extra_payments = {
+                        "internet": getattr(payment, 'internet', 0) or 0,
+                        "electricity": getattr(payment, 'electricity', 0) or 0,
+                        "other": getattr(payment, 'other', 0) or 0
+                    }
+            else:
+                # Fallback to individual fields
+                extra_payments = {
+                    "internet": getattr(payment, 'internet', 0) or 0,
+                    "electricity": getattr(payment, 'electricity', 0) or 0,
+                    "other": getattr(payment, 'other', 0) or 0
+                }
+
+            # Build the payment data structure your frontend expects
+            payments_data[month_key] = {
+                "status": getattr(payment, 'status', 'paid'),
+                "tenants": tenants_info,
+                "extraPayments": extra_payments,
+                "paymentDate": payment_date,
+                "paymentMethod": getattr(payment, 'payment_method', getattr(payment, 'paymentMethod', 'bank_transfer')),
+                "notes": getattr(payment, 'notes', ''),
+                "contract_period_id": getattr(payment, 'contract_period_id', None)
+            }
+
+        current_app.logger.info(f"Returning batch payments data for apartment {apartment_id}, year {year_filter}: {len(payments_data)} months")
+
+        # Return in the exact format your frontend expects
+        return jsonify({
+            "payments": payments_data,
+            "apartment_id": apartment_id,
+            "year": year_filter
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error getting batch payments data for apartment {apartment_id}: {e}")
+        return jsonify({"message": "Error retrieving payments data", "error": str(e)}), 500
+
+
+# ALSO MAKE SURE YOUR ROUTE SUPPORTS BOTH GET AND POST METHODS
+# Update your existing POST endpoint to handle both methods:
+
+@payments_bp.route("/payments/<int:apartment_id>", methods=["GET", "POST"])
+@token_required
+def handle_batch_payments(apartment_id):
+    """
+    Handle both GET and POST for batch payments
+    GET: Load existing payment data
+    POST: Update/create batch payments
+    """
+    if request.method == "GET":
+        return get_batch_payments_data(apartment_id)
+    else:  # POST
+        return update_batch_payments(apartment_id)

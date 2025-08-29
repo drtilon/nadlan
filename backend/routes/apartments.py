@@ -467,9 +467,7 @@ def get_filter_options():
             .filter(Apartment.rooms.isnot(None))
             .all()
         )
-        all_room_counts = set(
-            [r[0] for r in room_counts] + [r[0] for r in room_counts_legacy]
-        )
+        all_room_counts = set([r[0] for r in room_counts_legacy])
 
         return jsonify(
             {

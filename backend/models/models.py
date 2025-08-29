@@ -103,8 +103,6 @@ class Apartment(db.Model):
 
     # Property details
     rooms = db.Column(db.Integer, default=1)
-    bedrooms = db.Column(db.Integer, default=1)
-    bathrooms = db.Column(db.Integer, default=1)
     area = db.Column(db.Numeric(10, 2), nullable=True)
     maxOccupancy = db.Column(db.Integer, default=4)
     genderPreference = db.Column(db.String(20), default="mixed")

@@ -1,4 +1,4 @@
-# models/models.py - Complete Fixed Database Models
+# models/models.py - FIXED VERSION - Relationship conflict resolved
 from datetime import date, datetime
 from extentions import db, bcrypt
 from sqlalchemy import func
@@ -158,55 +158,28 @@ class Apartment(db.Model):
         """Convert to dictionary with optional related data - UPDATED to include new financial fields"""
         result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
-        # Convert date/datetime objects
+        # Convert datetime fields to ISO format strings
         if result.get("created_at"):
             result["created_at"] = result["created_at"].isoformat()
         if result.get("updated_at"):
             result["updated_at"] = result["updated_at"].isoformat()
-        if result.get("moveInDate"):
-            result["moveInDate"] = result["moveInDate"].isoformat()
-        if result.get("contractEndDate"):
-            result["contractEndDate"] = result["contractEndDate"].isoformat()
 
-        # Convert Decimal to float - INCLUDING NEW FINANCIAL FIELDS
-        if result.get("rent"):
-            result["rent"] = float(result["rent"])
-        if result.get("deposit"):
-            result["deposit"] = float(result["deposit"])
-        if result.get("managementFee"):
-            result["managementFee"] = float(result["managementFee"])
-        if result.get("rentCost"):
-            result["rentCost"] = float(result["rentCost"])
-        if result.get("area"):
-            result["area"] = float(result["area"])
-
-        # Ensure new financial fields are always present with default values
-        if "managementFee" not in result or result["managementFee"] is None:
-            result["managementFee"] = 0.0
-        if "rentCost" not in result or result["rentCost"] is None:
-            result["rentCost"] = 0.0
-        if "model" not in result or result["model"] is None:
-            result["model"] = "rental"
-
-        # Add computed fields
-        result["short_address"] = self.get_short_address()
+        # Convert Decimal fields to float for JSON serialization
+        for field in ["rent", "deposit", "managementFee", "rentCost", "area"]:
+            if result.get(field) is not None:
+                result[field] = float(result[field])
 
         # Add related data if requested
-        if include_landlord and self.landlord:
-            result["landlord"] = self.landlord.to_dict(include_apartments=False)
-
         if include_contract_periods and self.contract_periods:
-            result["contract_periods"] = [cp.to_dict(include_apartment=False) for cp in self.contract_periods]
-            result["current_contract_periods"] = [cp.to_dict(include_apartment=False) for cp in self.get_current_contract_periods()]
+            result["contract_periods"] = [cp.to_dict(include_apartment=False, include_tenants=True) for cp in self.contract_periods]
 
         if include_tenants:
-            current_tenants = self.get_current_tenants()
-            result["tenants"] = [tenant.to_dict(include_contracts=False) for tenant in current_tenants]
-            result["current_tenant_count"] = len(current_tenants)
-            result["is_full"] = len(current_tenants) >= self.maxOccupancy
+            result["current_tenants"] = [tenant.to_dict() for tenant in self.get_current_tenants()]
+
+        if include_landlord and self.landlord:
+            result["landlord"] = self.landlord.to_dict()
 
         return result
-
 
     def __repr__(self):
         return f"<Apartment {self.id}: {self.get_short_address()}>"
@@ -270,55 +243,55 @@ class Tenant(db.Model):
                     "monthly_rent": float(contract.monthly_rent) if contract.monthly_rent else 0.0,
                     "move_in_date": assignment.move_in_date.isoformat() if assignment.move_in_date else None,
                     "move_out_date": assignment.move_out_date.isoformat() if assignment.move_out_date else None,
-                    "rent_share_percentage": float(assignment.rent_share_percentage) if assignment.rent_share_percentage else 0.0,
-                    "security_deposit": float(contract.security_deposit) if contract.security_deposit else 0.0,
-                    "status": contract.status
+                    "rent_share_percentage": float(assignment.rent_share_percentage) if assignment.rent_share_percentage else 100.0
                 }
+
                 contracts.append(contract_info)
 
         return contracts
 
-    def to_dict(self, include_contracts=True, include_historical=False, include_current_assignments=None):
-        """
-        Convert to dictionary with enhanced contract information
-        FIXED: Added include_current_assignments parameter to maintain compatibility
-        """
+    def to_dict(self, include_contracts=True, include_historical_contracts=False):
+        """Convert to dictionary with optional contract data"""
         result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
-        # Convert date/datetime objects
-        if result.get("date_of_birth"):
-            result["date_of_birth"] = result["date_of_birth"].isoformat()
+        # Convert datetime fields to ISO format strings
         if result.get("created_at"):
             result["created_at"] = result["created_at"].isoformat()
         if result.get("updated_at"):
             result["updated_at"] = result["updated_at"].isoformat()
+        if result.get("date_of_birth"):
+            result["date_of_birth"] = result["date_of_birth"].isoformat()
 
-        # Handle legacy parameter name mapping
-        if include_current_assignments is not None:
-            include_contracts = include_current_assignments
-
-        # FIXED: Include current contracts using the property
+        # Add current contracts
         if include_contracts:
             result["current_contracts"] = self.current_contracts
 
-        # Include historical contracts if requested
-        if include_historical:
-            historical_assignments = [ca for ca in self.contract_assignments if not ca.is_active()]
+        # Add historical contracts if requested
+        if include_historical_contracts:
+            all_assignments = self.contract_assignments
             historical_contracts = []
 
-            for assignment in historical_assignments:
-                if assignment.contract_period and assignment.contract_period.apartment:
+            for assignment in all_assignments:
+                if assignment.contract_period:
                     contract = assignment.contract_period
-                    apartment = contract.apartment
+                    apartment = contract.apartment if contract else None
 
-                    historical_info = {
-                        "apartment_address": apartment.address if apartment else f"Apartment ID {contract.apartment_id}",
+                    historical_contract = {
+                        "contract_period_id": contract.id if contract else None,
+                        "contract_number": contract.contract_number if contract else "Unknown",
+                        "apartment_address": apartment.address if apartment else f"Apartment ID {contract.apartment_id if contract else 'Unknown'}",
+                        "apartment_id": contract.apartment_id if contract else None,
+                        "start_date": contract.start_date.isoformat() if contract and contract.start_date else None,
+                        "end_date": contract.end_date.isoformat() if contract and contract.end_date else None,
                         "move_in_date": assignment.move_in_date.isoformat() if assignment.move_in_date else None,
                         "move_out_date": assignment.move_out_date.isoformat() if assignment.move_out_date else None,
-                        "monthly_rent": float(contract.monthly_rent) if contract.monthly_rent else 0.0,
-                        "rent_share_percentage": float(assignment.rent_share_percentage) if assignment.rent_share_percentage else 0.0,
+                        "is_primary": assignment.is_primary,
+                        "rent_share_percentage": float(assignment.rent_share_percentage) if assignment.rent_share_percentage else 100.0,
+                        "monthly_rent": float(contract.monthly_rent) if contract and contract.monthly_rent else 0.0,
+                        "is_active": assignment.is_active()
                     }
-                    historical_contracts.append(historical_info)
+
+                    historical_contracts.append(historical_contract)
 
             result["historical_contracts"] = historical_contracts
 
@@ -434,30 +407,30 @@ class ContractTenant(db.Model):
         An assignment is active if:
         1. There's no move_out_date (or it's in the future)
         2. The associated contract period is active
-        3. The move_in_date is in the past or today
+        3. The move_in_date has passed
         """
         if check_date is None:
             check_date = date.today()
 
-        # Check if moved out
+        # Check if tenant has moved out
         if self.move_out_date and self.move_out_date <= check_date:
             return False
 
-        # Check if moved in yet
+        # Check if tenant has moved in yet
         if self.move_in_date and self.move_in_date > check_date:
             return False
 
-        # Check if contract period is active
-        if self.contract_period and not self.contract_period.is_active(check_date):
-            return False
+        # Check if the contract period itself is active
+        if self.contract_period:
+            return self.contract_period.is_active(check_date)
 
-        return True
+        return False
 
-    def to_dict(self):
-        """Convert to dictionary"""
+    def to_dict(self, include_tenant=True, include_contract_period=True):
+        """Convert to dictionary with optional related data"""
         result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
-        # Convert date/datetime objects
+        # Convert date/datetime objects to ISO format strings
         if result.get("move_in_date"):
             result["move_in_date"] = result["move_in_date"].isoformat()
         if result.get("move_out_date"):
@@ -471,8 +444,7 @@ class ContractTenant(db.Model):
         if result.get("rent_share_percentage"):
             result["rent_share_percentage"] = float(result["rent_share_percentage"])
 
-        # Add tenant and contract info
-        if self.tenant:
+        if include_tenant and self.tenant:
             result["tenant"] = {
                 "id": self.tenant.id,
                 "name": self.tenant.name,
@@ -480,7 +452,7 @@ class ContractTenant(db.Model):
                 "phone": self.tenant.phone
             }
 
-        if self.contract_period:
+        if include_contract_period and self.contract_period:
             result["contract_period"] = {
                 "id": self.contract_period.id,
                 "contract_number": self.contract_period.contract_number,
@@ -516,50 +488,32 @@ class Payment(db.Model):
     month = db.Column(db.Integer, nullable=False)  # 1-12
     year = db.Column(db.Integer, nullable=False)
     amount = db.Column(db.Numeric(10, 2), nullable=False)
-    payment_date = db.Column(db.Date, nullable=True)  # Null if unpaid
+    payment_date = db.Column(db.Date, nullable=True)
     payment_method = db.Column(db.String(50), nullable=True)
-    payment_type = db.Column(db.Enum("rent", "deposit", "utilities", "other"), default="rent")
+    payment_type = db.Column(db.String(50), default="rent")
 
     # Additional charges
-    internet = db.Column(db.Numeric(8, 2), default=0.00)
-    electricity = db.Column(db.Numeric(8, 2), default=0.00)
-    other = db.Column(db.Numeric(8, 2), default=0.00)
+    internet = db.Column(db.Numeric(10, 2), default=0.00)
+    electricity = db.Column(db.Numeric(10, 2), default=0.00)
+    other = db.Column(db.Numeric(10, 2), default=0.00)
 
-    # Tenant-specific payment details (JSON)
+    # JSON fields for complex data
     tenant_payments = db.Column(db.Text, nullable=True)  # JSON string
-    tenants = db.Column(db.Text, nullable=True)  # Legacy field
-    extraPayments = db.Column(db.Text, default="{}")  # Legacy field
+    extraPayments = db.Column(db.Text, default="{}")    # JSON string
 
-    # Status and notes
-    status = db.Column(db.String(20), default="outstanding")  # outstanding, paid, partial
+    # Status and metadata
+    status = db.Column(db.String(20), default="outstanding")
     notes = db.Column(db.Text, nullable=True)
 
     # Timestamps
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    def is_paid(self):
-        """Check if payment is fully paid"""
-        return self.payment_date is not None and self.status == "paid"
-
-    def get_tenant_payments(self):
-        """Get tenant payment details as dictionary"""
-        if self.tenant_payments:
-            try:
-                return json.loads(self.tenant_payments)
-            except json.JSONDecodeError:
-                return {}
-        return {}
-
-    def set_tenant_payments(self, payments_dict):
-        """Set tenant payment details from dictionary"""
-        self.tenant_payments = json.dumps(payments_dict)
-
-    def to_dict(self, include_contract_period=True):
-        """Convert to dictionary"""
+    def to_dict(self, include_apartment=True, include_contract_period=True):
+        """Convert to dictionary with optional related data"""
         result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
-        # Convert date/datetime objects
+        # Convert datetime and date objects to ISO format strings
         if result.get("payment_date"):
             result["payment_date"] = result["payment_date"].isoformat()
         if result.get("created_at"):
@@ -567,36 +521,38 @@ class Payment(db.Model):
         if result.get("updated_at"):
             result["updated_at"] = result["updated_at"].isoformat()
 
-        # Convert Decimal to float
-        numeric_fields = ["amount", "internet", "electricity", "other"]
-        for field in numeric_fields:
-            if result.get(field):
+        # Convert Decimal fields to float
+        for field in ["amount", "internet", "electricity", "other"]:
+            if result.get(field) is not None:
                 result[field] = float(result[field])
 
         # Parse JSON fields
-        result["tenant_payments_data"] = self.get_tenant_payments()
+        if result.get("tenant_payments"):
+            try:
+                result["tenant_payments"] = json.loads(result["tenant_payments"])
+            except:
+                result["tenant_payments"] = []
 
-        # Add computed fields
-        result["is_paid"] = self.is_paid()
-        result["month_year"] = f"{result['year']}-{str(result['month']).zfill(2)}"
+        if result.get("extraPayments"):
+            try:
+                result["extraPayments"] = json.loads(result["extraPayments"])
+            except:
+                result["extraPayments"] = {}
 
-        # Include contract period info
+        if include_apartment and self.apartment:
+            result["apartment"] = self.apartment.to_dict(include_contract_periods=False, include_tenants=False)
+
         if include_contract_period and self.contract_period:
-            result["contract_period"] = {
-                "id": self.contract_period.id,
-                "contract_number": self.contract_period.contract_number,
-                "apartment_address": self.contract_period.apartment.address if self.contract_period.apartment else None
-            }
+            result["contract_period"] = self.contract_period.to_dict(include_apartment=False, include_tenants=False)
 
         return result
 
     def __repr__(self):
-        status = "PAID" if self.is_paid() else "OUTSTANDING"
-        return f"<Payment {self.id}: {self.month}/{self.year} - €{self.amount} ({status})>"
+        return f"<Payment {self.id}: {self.year}-{self.month:02d} - ₪{self.amount}>"
 
 
 class Contract(db.Model):
-    """File-based contracts (PDFs, Word docs, etc.)"""
+    """File contracts for apartments - FIXED VERSION"""
     __tablename__ = "contracts"
     __table_args__ = {"extend_existing": True}
 
@@ -611,16 +567,53 @@ class Contract(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # FIXED: Remove the conflicting relationship - Apartment already has backref
+    # apartment = db.relationship("Apartment", backref="contracts")  # REMOVED THIS LINE
+
     def to_dict(self):
-        """Convert to dictionary"""
+        """Convert to dictionary - FIXED to match frontend expectations"""
         result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
 
-        if result.get("created_at"):
-            result["created_at"] = result["created_at"].isoformat()
-        if result.get("updated_at"):
-            result["updated_at"] = result["updated_at"].isoformat()
+        # Convert datetime fields to ISO format
+        created_at_iso = result.get("created_at").isoformat() if result.get("created_at") else None
+        updated_at_iso = result.get("updated_at").isoformat() if result.get("updated_at") else None
 
-        return result
+        # Get file extension from filename for fileType
+        file_extension = "Unknown"
+        if result.get("file_name"):
+            parts = result["file_name"].rsplit('.', 1)
+            if len(parts) > 1:
+                file_extension = parts[1].upper()
+
+        # Map backend field names to frontend expected names
+        frontend_result = {
+            "id": result.get("id"),
+            "fileName": result.get("file_name", "Unknown"),  # Frontend expects fileName
+            "fileSize": result.get("file_size", 0),  # Frontend expects fileSize
+            "fileType": file_extension,  # Frontend expects fileType (file extension)
+            "uploadDate": created_at_iso,  # Frontend expects uploadDate
+            "notes": result.get("description") or "No notes",  # Frontend expects notes
+            "apartmentId": result.get("apartment_id"),
+            "mimeType": result.get("mime_type"),
+            "filePath": result.get("file_path"),
+            "contractType": result.get("contract_type", "rental_agreement"),
+            "createdAt": created_at_iso,
+            "updatedAt": updated_at_iso
+        }
+
+        return frontend_result
+
+    def get_file_size_mb(self):
+        """Get file size in MB"""
+        if self.file_size:
+            return round(self.file_size / (1024 * 1024), 2)
+        return 0
+
+    def get_file_extension(self):
+        """Get file extension from filename"""
+        if self.file_name and '.' in self.file_name:
+            return self.file_name.rsplit('.', 1)[1].lower()
+        return None
 
     def __repr__(self):
         return f"<Contract {self.id}: {self.file_name}>"

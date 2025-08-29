@@ -1,13 +1,12 @@
-# initalized/init_apartment.py - FIXED VERSION with correct month handling
+# final_init_apartment.py - Complete working initialization with fixed models
 
 from models.models import (
-    Apartment, Tenant, User, Payment, Landlord, ContractPeriod, ContractTenant,
-    Contract, ContractTemplate
+    Apartment, Tenant, User, Payment, Landlord, ContractPeriod, ContractTenant
 )
 from extentions import db
 from flask import current_app
 from datetime import date, datetime, timedelta
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, text, func
 import json
 
 
@@ -40,342 +39,325 @@ def ensure_db_schema():
         raise
 
 
-def generate_sample_data():
-    """Generate sample apartments, landlords and tenants if they don't exist"""
-    apartments = []
+def check_if_demo_data_exists():
+    """Check if our demo data already exists"""
+    demo_apartment = Apartment.query.filter_by(street_name="HaYarkon Street", house_number="123").first()
+    if demo_apartment:
+        current_app.logger.info("Demo data already exists. Skipping creation.")
+        return True
+    return False
+
+
+def create_demo_landlord():
+    """Create a sample landlord"""
+    landlord = Landlord(
+        name="Prime Properties Management",
+        email="info@primeproperties.co.il",
+        phone="+972-3-555-0123",
+        company_name="Prime Properties Ltd.",
+        iban="IL620108000000012345678",
+        company_address="15 Rothschild Blvd, Tel Aviv-Yafo, 6688101, Israel"
+    )
+
+    db.session.add(landlord)
+    db.session.flush()
+    return landlord
+
+
+def create_demo_apartment(landlord):
+    """Create one apartment with complete details"""
+    apartment = Apartment(
+        street_name="HaYarkon Street",
+        house_number="123",
+        building="Building A",
+        floor="5",
+        side="East",
+        city="Tel Aviv-Yafo",
+        zip_code="6340506",
+        full_address="123 HaYarkon Street, Building A, Floor 5, Tel Aviv-Yafo",
+        rent=7500.00,
+        deposit=15000.00,
+        managementFee=500.00,
+        rentCost=6800.00,
+        rooms=4,
+        bedrooms=3,
+        bathrooms=2,
+        area=95.5,
+        maxOccupancy=4,
+        genderPreference="mixed",
+        status="occupied",
+        notes="Premium apartment with sea view - DEMO DATA",
+        landlord_id=landlord.id
+    )
+
+    db.session.add(apartment)
+    db.session.flush()
+    return apartment
+
+
+def create_demo_tenants():
+    """Create 10 different tenants"""
+    tenants_data = [
+        {"name": "Sarah Cohen", "email": "sarah.cohen@demo.com", "phone": "+972-50-111-1111", "passport_id": "123456789", "gender": "female"},
+        {"name": "David Levi", "email": "david.levi@demo.com", "phone": "+972-52-222-2222", "passport_id": "234567890", "gender": "male"},
+        {"name": "Maya Goldstein", "email": "maya.goldstein@demo.com", "phone": "+972-54-333-3333", "passport_id": "345678901", "gender": "female"},
+        {"name": "Michael Brown", "email": "michael.brown@demo.com", "phone": "+972-50-444-4444", "passport_id": "456789012", "gender": "male"},
+        {"name": "Rachel Green", "email": "rachel.green@demo.com", "phone": "+972-52-555-5555", "passport_id": "567890123", "gender": "female"},
+        {"name": "Jonathan Miller", "email": "jonathan.miller@demo.com", "phone": "+972-54-666-6666", "passport_id": "678901234", "gender": "male"},
+        {"name": "Emma Wilson", "email": "emma.wilson@demo.com", "phone": "+972-50-777-7777", "passport_id": "789012345", "gender": "female"},
+        {"name": "Daniel Garcia", "email": "daniel.garcia@demo.com", "phone": "+972-52-888-8888", "passport_id": "890123456", "gender": "male"},
+        {"name": "Sophia Martinez", "email": "sophia.martinez@demo.com", "phone": "+972-54-999-9999", "passport_id": "901234567", "gender": "female"},
+        {"name": "Alexander Davis", "email": "alexander.davis@demo.com", "phone": "+972-50-000-0000", "passport_id": "012345678", "gender": "male"}
+    ]
+
     tenants = []
-
-    try:
-        # Check if we have existing data
-        existing_apartments = Apartment.query.count()
-        existing_tenants = Tenant.query.count()
-
-        if existing_apartments > 0 and existing_tenants > 0:
-            current_app.logger.info("Sample data already exists, skipping generation...")
-            apartments = Apartment.query.all()
-            tenants = Tenant.query.all()
-            return apartments, tenants
-
-        current_app.logger.info("🏠 Creating sample landlords...")
-
-        # Create sample landlords
-        landlord1 = Landlord(
-            name="David Ben Gurion",
-            email="david@example.com",
-            phone="+972-50-123-4567",
-            company_name="Ben Gurion Real Estate",
-            iban="IL620108000000012612345",
-            company_address="123 Independence St, Tel Aviv, Israel"
+    for tenant_data in tenants_data:
+        tenant = Tenant(
+            name=tenant_data["name"],
+            email=tenant_data["email"],
+            phone=tenant_data["phone"],
+            passport_id=tenant_data["passport_id"],
+            gender=tenant_data["gender"],
+            date_of_birth=date(1990, 1, 1),  # Set a default birth date
+            refund_iban=f"IL620108000000{len(tenants):09d}"  # Generate unique IBAN
         )
+        tenants.append(tenant)
+        db.session.add(tenant)
 
-        landlord2 = Landlord(
-            name="Golda Meir",
-            email="golda@example.com",
-            phone="+972-52-987-6543",
-            company_name="Meir Properties Ltd",
-            iban="IL620108000000098765432",
-            company_address="456 Herzl Blvd, Jerusalem, Israel"
-        )
-
-        db.session.add_all([landlord1, landlord2])
-        db.session.flush()  # Get IDs
-
-        current_app.logger.info("🏠 Creating sample apartments...")
-
-        # Create sample apartments
-        sample_apartments = [
-            {
-                "full_address": "123 Dizengoff Street, Tel Aviv, Israel",
-                "address": "123 Dizengoff Street",
-                "street_name": "Dizengoff",
-                "house_number": "123",
-                "city": "Tel Aviv",
-                "zip_code": "12345",
-                "model": "rental",
-                "rent": 5500.00,
-                "deposit": 11000.00,
-                "landlord_id": landlord1.id,
-                "managementFee": 550.00,
-                "rentCost": 4950.00
-            },
-            {
-                "full_address": "456 Ben Yehuda Street, Tel Aviv, Israel",
-                "address": "456 Ben Yehuda Street",
-                "street_name": "Ben Yehuda",
-                "house_number": "456",
-                "city": "Tel Aviv",
-                "zip_code": "67890",
-                "model": "management",
-                "rent": 4500.00,
-                "deposit": 9000.00,
-                "landlord_id": landlord2.id,
-                "managementFee": 450.00,
-                "rentCost": 4050.00
-            },
-            {
-                "full_address": "789 Rothschild Boulevard, Tel Aviv, Israel",
-                "address": "789 Rothschild Boulevard",
-                "street_name": "Rothschild",
-                "house_number": "789",
-                "city": "Tel Aviv",
-                "zip_code": "54321",
-                "model": "rental",
-                "rent": 6200.00,
-                "deposit": 12400.00,
-                "landlord_id": landlord1.id,
-                "managementFee": 620.00,
-                "rentCost": 5580.00
-            }
-        ]
-
-        for apt_data in sample_apartments:
-            apartment = Apartment(**apt_data)
-            apartments.append(apartment)
-            db.session.add(apartment)
-
-        current_app.logger.info("👥 Creating sample tenants...")
-
-        # Create sample tenants
-        sample_tenants = [
-            {
-                "name": "Sarah Cohen",
-                "email": "sarah.cohen@example.com",
-                "phone": "+972-54-111-2222",
-                "passport_id": "123456789",
-                "gender": "female",
-                "date_of_birth": date(1990, 5, 15),
-                "refund_iban": "IL620108000000111111111"
-            },
-            {
-                "name": "David Levi",
-                "email": "david.levi@example.com",
-                "phone": "+972-53-333-4444",
-                "passport_id": "987654321",
-                "gender": "male",
-                "date_of_birth": date(1985, 8, 20),
-                "refund_iban": "IL620108000000222222222"
-            },
-            {
-                "name": "Rachel Green",
-                "email": "rachel.green@example.com",
-                "phone": "+972-52-555-6666",
-                "passport_id": "456789123",
-                "gender": "female",
-                "date_of_birth": date(1992, 11, 10),
-                "refund_iban": "IL620108000000333333333"
-            },
-            {
-                "name": "Michael Brown",
-                "email": "michael.brown@example.com",
-                "phone": "+972-55-777-8888",
-                "passport_id": "789123456",
-                "gender": "male",
-                "date_of_birth": date(1988, 2, 28),
-                "refund_iban": "IL620108000000444444444"
-            }
-        ]
-
-        for tenant_data in sample_tenants:
-            tenant = Tenant(**tenant_data)
-            tenants.append(tenant)
-            db.session.add(tenant)
-
-        db.session.flush()
-        current_app.logger.info(f"Created {len(apartments)} apartments and {len(tenants)} tenants")
-
-        return apartments, tenants
-
-    except Exception as e:
-        current_app.logger.error(f"Error generating sample data: {e}")
-        db.session.rollback()
-        raise
+    db.session.flush()
+    return tenants
 
 
-def create_sample_contracts(apartments, tenants):
-    """Create sample contract periods with tenant assignments"""
-    contract_periods = []
+def create_demo_contract_periods(apartment, tenants):
+    """Create 3 past contract periods with different tenant combinations"""
+    contracts = []
 
-    try:
-        # Check if contracts already exist
-        existing_contracts = ContractPeriod.query.count()
-        if existing_contracts > 0:
-            current_app.logger.info("Contracts already exist, skipping creation...")
-            return ContractPeriod.query.all()
+    # Contract 1: January 2024 - December 2024 (3 tenants)
+    contract1 = ContractPeriod(
+        apartment_id=apartment.id,
+        contract_number=f"DEMO-2024-{apartment.id:03d}",
+        start_date=date(2024, 1, 1),
+        end_date=date(2024, 12, 31),
+        monthly_rent=7000.00,
+        security_deposit=14000.00,
+        status="completed",
+        notes="DEMO: First year contract - 3 tenants"
+    )
+    db.session.add(contract1)
+    db.session.flush()
 
-        current_app.logger.info("📋 Creating sample contracts...")
-
-        # Contract 1: Apartment 1 with 2 tenants
-        contract1 = ContractPeriod(
-            apartment_id=apartments[0].id,
-            contract_number="CON-2025-001",
-            start_date=date(2025, 6, 1),
-            end_date=date(2026, 5, 31),
-            monthly_rent=apartments[0].rent,
-            security_deposit=apartments[0].deposit,
-            status="active",
-            notes="Standard 12-month rental agreement"
-        )
-
-        db.session.add(contract1)
-        db.session.flush()
-
-        # Assign tenants to contract 1
-        ct1_1 = ContractTenant(
+    # Contract 1 tenant assignments
+    tenant_assignments_1 = [
+        ContractTenant(
             contract_period_id=contract1.id,
-            tenant_id=tenants[0].id,
-            rent_share_percentage=55.0,
+            tenant_id=tenants[0].id,  # Sarah Cohen
+            rent_share_percentage=40.0,
             is_primary=True,
-            move_in_date=date(2025, 6, 1)
-        )
-
-        ct1_2 = ContractTenant(
+            move_in_date=date(2024, 1, 1),
+            move_out_date=date(2024, 12, 31)
+        ),
+        ContractTenant(
             contract_period_id=contract1.id,
-            tenant_id=tenants[1].id,
-            rent_share_percentage=45.0,
+            tenant_id=tenants[1].id,  # David Levi
+            rent_share_percentage=35.0,
             is_primary=False,
-            move_in_date=date(2025, 6, 1)
+            move_in_date=date(2024, 1, 1),
+            move_out_date=date(2024, 12, 31)
+        ),
+        ContractTenant(
+            contract_period_id=contract1.id,
+            tenant_id=tenants[2].id,  # Maya Goldstein
+            rent_share_percentage=25.0,
+            is_primary=False,
+            move_in_date=date(2024, 1, 1),
+            move_out_date=date(2024, 12, 31)
         )
+    ]
+    db.session.add_all(tenant_assignments_1)
+    contracts.append(contract1)
 
-        db.session.add_all([ct1_1, ct1_2])
+    # Contract 2: January 2025 - June 2025 (4 tenants)
+    contract2 = ContractPeriod(
+        apartment_id=apartment.id,
+        contract_number=f"DEMO-2025-{apartment.id:03d}-A",
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 6, 30),
+        monthly_rent=7200.00,
+        security_deposit=14400.00,
+        status="completed",
+        notes="DEMO: Second contract - 4 tenants"
+    )
+    db.session.add(contract2)
+    db.session.flush()
 
-        # Contract 2: Apartment 2 with 1 tenant
-        contract2 = ContractPeriod(
-            apartment_id=apartments[1].id,
-            contract_number="CON-2025-002",
-            start_date=date(2025, 7, 1),
-            end_date=date(2026, 6, 30),
-            monthly_rent=apartments[1].rent,
-            security_deposit=apartments[1].deposit,
-            status="active",
-            notes="Management model contract"
-        )
-
-        db.session.add(contract2)
-        db.session.flush()
-
-        ct2_1 = ContractTenant(
+    # Contract 2 tenant assignments
+    tenant_assignments_2 = [
+        ContractTenant(
             contract_period_id=contract2.id,
-            tenant_id=tenants[2].id,
-            rent_share_percentage=100.0,
+            tenant_id=tenants[3].id,  # Michael Brown
+            rent_share_percentage=30.0,
+            is_primary=True,
+            move_in_date=date(2025, 1, 1),
+            move_out_date=date(2025, 6, 30)
+        ),
+        ContractTenant(
+            contract_period_id=contract2.id,
+            tenant_id=tenants[4].id,  # Rachel Green
+            rent_share_percentage=25.0,
+            is_primary=False,
+            move_in_date=date(2025, 1, 1),
+            move_out_date=date(2025, 6, 30)
+        ),
+        ContractTenant(
+            contract_period_id=contract2.id,
+            tenant_id=tenants[5].id,  # Jonathan Miller
+            rent_share_percentage=25.0,
+            is_primary=False,
+            move_in_date=date(2025, 1, 1),
+            move_out_date=date(2025, 6, 30)
+        ),
+        ContractTenant(
+            contract_period_id=contract2.id,
+            tenant_id=tenants[6].id,  # Emma Wilson
+            rent_share_percentage=20.0,
+            is_primary=False,
+            move_in_date=date(2025, 1, 1),
+            move_out_date=date(2025, 6, 30)
+        )
+    ]
+    db.session.add_all(tenant_assignments_2)
+    contracts.append(contract2)
+
+    # Contract 3: July 2025 - Present (3 tenants, ongoing with some outstanding payments)
+    contract3 = ContractPeriod(
+        apartment_id=apartment.id,
+        contract_number=f"DEMO-2025-{apartment.id:03d}-B",
+        start_date=date(2025, 7, 1),
+        end_date=date(2026, 6, 30),
+        monthly_rent=7500.00,
+        security_deposit=15000.00,
+        status="active",
+        notes="DEMO: Current active contract - 3 tenants"
+    )
+    db.session.add(contract3)
+    db.session.flush()
+
+    # Contract 3 tenant assignments
+    tenant_assignments_3 = [
+        ContractTenant(
+            contract_period_id=contract3.id,
+            tenant_id=tenants[7].id,  # Daniel Garcia
+            rent_share_percentage=40.0,
             is_primary=True,
             move_in_date=date(2025, 7, 1)
-        )
-
-        db.session.add(ct2_1)
-
-        # Contract 3: Apartment 3 with 2 tenants
-        contract3 = ContractPeriod(
-            apartment_id=apartments[2].id,
-            contract_number="CON-2025-003",
-            start_date=date(2025, 8, 1),
-            end_date=date(2026, 7, 31),
-            monthly_rent=apartments[2].rent,
-            security_deposit=apartments[2].deposit,
-            status="active",
-            notes="Premium location rental"
-        )
-
-        db.session.add(contract3)
-        db.session.flush()
-
-        ct3_1 = ContractTenant(
+        ),
+        ContractTenant(
             contract_period_id=contract3.id,
-            tenant_id=tenants[1].id,  # David can have multiple contracts
-            rent_share_percentage=60.0,
-            is_primary=True,
-            move_in_date=date(2025, 8, 1)
-        )
-
-        ct3_2 = ContractTenant(
-            contract_period_id=contract3.id,
-            tenant_id=tenants[3].id,
-            rent_share_percentage=40.0,
+            tenant_id=tenants[8].id,  # Sophia Martinez
+            rent_share_percentage=35.0,
             is_primary=False,
-            move_in_date=date(2025, 8, 1)
+            move_in_date=date(2025, 7, 1)
+        ),
+        ContractTenant(
+            contract_period_id=contract3.id,
+            tenant_id=tenants[9].id,  # Alexander Davis
+            rent_share_percentage=25.0,
+            is_primary=False,
+            move_in_date=date(2025, 7, 1)
         )
+    ]
+    db.session.add_all(tenant_assignments_3)
+    contracts.append(contract3)
 
-        db.session.add_all([ct3_1, ct3_2])
-
-        contract_periods = [contract1, contract2, contract3]
-        db.session.flush()
-
-        current_app.logger.info(f"Created {len(contract_periods)} contract periods")
-        return contract_periods
-
-    except Exception as e:
-        current_app.logger.error(f"Error creating contracts: {e}")
-        db.session.rollback()
-        raise
+    db.session.flush()
+    return contracts
 
 
-def create_sample_payments(contract_periods):
-    """Create sample payment records for the contracts"""
-    try:
-        # Check if payments already exist
-        existing_payments = Payment.query.count()
-        if existing_payments > 0:
-            current_app.logger.info("Payments already exist, skipping creation...")
-            return
+def create_demo_payments(contracts):
+    """Create payment records for all contracts"""
+    payments_created = 0
+    total_outstanding = 0.0
+    outstanding_details = []
 
-        current_app.logger.info("💰 Creating sample payments...")
+    current_date = date.today()
 
-        for contract in contract_periods:
-            # Create payments for each month from contract start to current month
-            start_date = contract.start_date
-            current_date = datetime.now().date()
+    for contract in contracts:
+        current_app.logger.info(f"Creating payments for contract {contract.contract_number}")
 
-            # Create payments from start date to current month
-            payment_date = start_date.replace(day=1)
+        # Get contract tenants
+        contract_tenants = ContractTenant.query.filter_by(contract_period_id=contract.id).all()
 
-            while payment_date <= current_date and payment_date <= (contract.end_date or date(2030, 12, 31)):
-                # Determine if payment is paid (past months) or outstanding (future months)
-                is_paid = payment_date < current_date
+        # Create payments for each month of the contract
+        payment_date = contract.start_date.replace(day=1)
 
-                # Calculate tenant payments based on rent share
-                tenant_payments = []
-                for ct in contract.contract_tenants:
-                    if ct.is_active():
-                        tenant_amount = float(contract.monthly_rent) * (float(ct.rent_share_percentage) / 100.0)
-                        tenant_payments.append({
-                            "tenantId": ct.tenant_id,
-                            "tenantName": ct.tenant.name,
-                            "amountPaid": tenant_amount if is_paid else 0.0,
-                            "isPrimary": ct.is_primary
-                        })
+        while payment_date <= contract.end_date and payment_date <= current_date:
+            # Determine payment status
+            is_paid = True
 
-                # FIXED: Use month number instead of month name
-                payment = Payment(
-                    apartment_id=contract.apartment_id,
-                    contract_period_id=contract.id,
-                    month=payment_date.month,  # Use integer month (1-12)
-                    year=payment_date.year,
-                    amount=contract.monthly_rent,
-                    payment_date=payment_date if is_paid else None,
-                    payment_method="bank_transfer" if is_paid else None,
-                    payment_type="rent",
-                    internet=0.0,
-                    electricity=0.0,
-                    other=0.0,
-                    tenant_payments=json.dumps(tenant_payments),
-                    extraPayments="{}",
-                    status="paid" if is_paid else "outstanding",
-                    notes=f"{'PAID' if is_paid else 'OUTSTANDING'} - Rent for {payment_date.strftime('%B %Y')}"
-                )
+            # For the current active contract, make some recent payments outstanding
+            if contract.status == "active":
+                if payment_date.year == 2025 and payment_date.month >= 7:
+                    # Make July and August paid, September outstanding
+                    if payment_date.month >= 9:
+                        is_paid = False
 
-                db.session.add(payment)
+            # Calculate tenant payments
+            tenant_payments = []
+            month_outstanding = 0.0
 
-                # Move to next month
-                if payment_date.month == 12:
-                    payment_date = payment_date.replace(year=payment_date.year + 1, month=1)
-                else:
-                    payment_date = payment_date.replace(month=payment_date.month + 1)
+            for ct in contract_tenants:
+                tenant_amount = float(contract.monthly_rent) * (float(ct.rent_share_percentage) / 100.0)
+                tenant_amount_paid = tenant_amount if is_paid else 0.0
 
-        current_app.logger.info("Sample payments created")
+                tenant_payments.append({
+                    "tenantId": ct.tenant_id,
+                    "tenantName": ct.tenant.name,
+                    "amountDue": tenant_amount,
+                    "amountPaid": tenant_amount_paid,
+                    "isPrimary": ct.is_primary
+                })
 
-    except Exception as e:
-        current_app.logger.error(f"Error creating sample payments: {e}")
-        db.session.rollback()
-        raise
+                if not is_paid:
+                    month_outstanding += tenant_amount
+                    outstanding_details.append({
+                        "tenant": ct.tenant.name,
+                        "month": payment_date.strftime("%B %Y"),
+                        "amount": tenant_amount
+                    })
+
+            # Create payment record
+            payment = Payment(
+                apartment_id=contract.apartment_id,
+                contract_period_id=contract.id,
+                month=payment_date.month,
+                year=payment_date.year,
+                amount=contract.monthly_rent,
+                payment_date=payment_date if is_paid else None,
+                payment_method="bank_transfer" if is_paid else None,
+                payment_type="rent",
+                internet=0.0,
+                electricity=0.0,
+                other=0.0,
+                tenant_payments=json.dumps(tenant_payments),
+                extraPayments="{}",
+                status="paid" if is_paid else "outstanding",
+                notes=f"DEMO: {'PAID' if is_paid else 'OUTSTANDING'} - Rent for {payment_date.strftime('%B %Y')} - Contract {contract.contract_number}"
+            )
+
+            db.session.add(payment)
+            payments_created += 1
+
+            if not is_paid:
+                total_outstanding += float(contract.monthly_rent)
+
+            # Move to next month
+            if payment_date.month == 12:
+                payment_date = payment_date.replace(year=payment_date.year + 1, month=1)
+            else:
+                payment_date = payment_date.replace(month=payment_date.month + 1)
+
+    db.session.flush()
+    return payments_created, total_outstanding, outstanding_details
 
 
 def create_admin_user():
@@ -393,43 +375,142 @@ def create_admin_user():
         current_app.logger.info(f"Admin user '{admin_username}' already exists")
 
 
-def initialize_database():
-    """Main function to initialize the database with proper structure and sample data"""
+def calculate_outstanding_summary():
+    """Calculate detailed outstanding amounts"""
     try:
-        current_app.logger.info("🚀 Starting database initialization...")
+        # Get all outstanding payments
+        outstanding_payments = Payment.query.filter_by(status='outstanding').all()
+
+        total_outstanding = 0.0
+        outstanding_by_tenant = {}
+        outstanding_by_month = {}
+
+        for payment in outstanding_payments:
+            payment_amount = float(payment.amount)
+            total_outstanding += payment_amount
+
+            month_year = f"{payment.year}-{payment.month:02d}"
+            outstanding_by_month[month_year] = outstanding_by_month.get(month_year, 0) + payment_amount
+
+            # Parse tenant payments from JSON
+            if payment.tenant_payments:
+                try:
+                    tenant_payments = json.loads(payment.tenant_payments)
+                    for tenant_payment in tenant_payments:
+                        tenant_name = tenant_payment.get('tenantName', 'Unknown')
+                        tenant_amount_due = tenant_payment.get('amountDue', 0)
+                        tenant_amount_paid = tenant_payment.get('amountPaid', 0)
+                        tenant_outstanding = tenant_amount_due - tenant_amount_paid
+
+                        if tenant_outstanding > 0:
+                            if tenant_name not in outstanding_by_tenant:
+                                outstanding_by_tenant[tenant_name] = 0
+                            outstanding_by_tenant[tenant_name] += tenant_outstanding
+                except:
+                    pass
+
+        return {
+            "total_outstanding": total_outstanding,
+            "outstanding_by_tenant": outstanding_by_tenant,
+            "outstanding_by_month": outstanding_by_month,
+            "total_outstanding_payments": len(outstanding_payments)
+        }
+
+    except Exception as e:
+        current_app.logger.error(f"Error calculating outstanding summary: {e}")
+        return {"error": str(e)}
+
+
+def initialize_database():
+    """Main function to initialize database with demo data (WORKING VERSION)"""
+    try:
+        current_app.logger.info("🚀 Starting DEMO database initialization...")
 
         # Step 1: Ensure database schema
         ensure_db_schema()
 
-        # Step 2: Generate sample data if needed
-        apartments, tenants = generate_sample_data()
+        # Step 2: Check if demo data already exists
+        if check_if_demo_data_exists():
+            outstanding_summary = calculate_outstanding_summary()
+            current_app.logger.info(f"✅ Demo data exists. Total outstanding: ₪{outstanding_summary.get('total_outstanding', 0):,.2f}")
+            return {"success": True, "message": "Demo data already exists", "outstanding_summary": outstanding_summary}
 
-        # Step 3: Create sample contracts if data was generated
-        if apartments and tenants:
-            contract_periods = create_sample_contracts(apartments, tenants)
+        # Step 3: Create demo landlord
+        landlord = create_demo_landlord()
+        current_app.logger.info("✅ Demo landlord created")
 
-            # Step 4: Create sample payments
-            create_sample_payments(contract_periods)
+        # Step 4: Create demo apartment
+        apartment = create_demo_apartment(landlord)
+        current_app.logger.info("✅ Demo apartment created")
 
-        # Step 5: Create admin user
+        # Step 5: Create 10 demo tenants
+        tenants = create_demo_tenants()
+        current_app.logger.info(f"✅ Created {len(tenants)} demo tenants")
+
+        # Step 6: Create 3 contract periods with tenant assignments
+        contracts = create_demo_contract_periods(apartment, tenants)
+        current_app.logger.info(f"✅ Created {len(contracts)} demo contract periods")
+
+        # Step 7: Create payments for all contracts
+        payments_created, total_outstanding, outstanding_details = create_demo_payments(contracts)
+        current_app.logger.info(f"✅ Created {payments_created} demo payment records")
+
+        # Step 8: Create admin user
         create_admin_user()
 
-        # Final commit
+        # Step 9: Final commit
         db.session.commit()
 
-        # Log summary
-        total_apartments = Apartment.query.count()
-        total_tenants = Tenant.query.count()
-        total_contracts = ContractPeriod.query.count()
-        total_assignments = ContractTenant.query.count()
-        total_payments = Payment.query.count()
+        # Step 10: Calculate detailed outstanding summary
+        outstanding_summary = calculate_outstanding_summary()
 
-        current_app.logger.info("✅ Database initialization completed successfully!")
-        current_app.logger.info(f"📊 Summary: {total_apartments} apartments, {total_tenants} tenants, {total_contracts} contracts, {total_assignments} tenant assignments, {total_payments} payments")
+        # Log final summary
+        current_app.logger.info("=" * 60)
+        current_app.logger.info("🎉 DEMO DATABASE INITIALIZATION COMPLETED SUCCESSFULLY!")
+        current_app.logger.info("=" * 60)
+        current_app.logger.info(f"📊 DEMO DATA SUMMARY:")
+        current_app.logger.info(f"   • Demo Apartment: 123 HaYarkon Street, Tel Aviv-Yafo")
+        current_app.logger.info(f"   • Demo Tenants: {len(tenants)}")
+        current_app.logger.info(f"   • Demo Contract Periods: {len(contracts)}")
+        current_app.logger.info(f"   • Demo Payment Records: {payments_created}")
+        current_app.logger.info("=" * 60)
+        current_app.logger.info(f"💰 OUTSTANDING AMOUNTS:")
+        current_app.logger.info(f"   • Total Outstanding: ₪{outstanding_summary.get('total_outstanding', 0):,.2f}")
+        current_app.logger.info(f"   • Outstanding Payments: {outstanding_summary.get('total_outstanding_payments', 0)}")
 
-        return True
+        if outstanding_summary.get('outstanding_by_tenant'):
+            current_app.logger.info("   • By Tenant:")
+            for tenant, amount in outstanding_summary['outstanding_by_tenant'].items():
+                current_app.logger.info(f"     - {tenant}: ₪{amount:,.2f}")
+
+        if outstanding_summary.get('outstanding_by_month'):
+            current_app.logger.info("   • By Month:")
+            for month, amount in outstanding_summary['outstanding_by_month'].items():
+                current_app.logger.info(f"     - {month}: ₪{amount:,.2f}")
+
+        current_app.logger.info("=" * 60)
+        current_app.logger.info("🔑 DEMO LOGIN: username=admin, password=admin123")
+        current_app.logger.info("=" * 60)
+
+        return {
+            "success": True,
+            "message": "Demo data created successfully",
+            "summary": {
+                "apartments": 1,
+                "tenants": len(tenants),
+                "contracts": len(contracts),
+                "payments": payments_created,
+                "outstanding_summary": outstanding_summary
+            }
+        }
 
     except Exception as e:
-        current_app.logger.error(f"❌ Database initialization failed: {e}")
+        current_app.logger.error(f"❌ Demo database initialization failed: {e}")
         db.session.rollback()
-        return False
+        return {"success": False, "error": str(e)}
+
+
+if __name__ == "__main__":
+    # For direct execution
+    print("This script should be run within the Flask application context")
+    print("Use: from final_init_apartment import initialize_database; initialize_database()")

@@ -1,11 +1,11 @@
-# routes/fast_analytics.py - COMPLETE FIXED VERSION with Contract Period Support
+# routes/fast_analytics.py - COMPLETE FIXED VERSION with proper relationships and field handling
 
 from flask import Blueprint, request, jsonify, current_app
 from .auth import token_required, role_required
 from extentions import db
-from models.models import Apartment, Payment, Tenant, ContractPeriod
+from models.models import Apartment, Payment, Tenant, ContractPeriod, ContractTenant
 from datetime import datetime, date, timedelta
-from sqlalchemy import func, text, and_, or_, case, desc, asc,extract
+from sqlalchemy import func, text, and_, or_, case, desc, asc, extract
 from typing import Optional, Dict, List, Any, Union
 import json
 from decimal import Decimal
@@ -33,7 +33,7 @@ def extract_payment_amount(payment: Payment) -> float:
         amount: float = 0
         if hasattr(payment, "amount") and payment.amount:
             amount = float(payment.amount)
-        elif payment.tenants:
+        elif hasattr(payment, "tenants") and payment.tenants:
             tenants_data: List[Dict] = json.loads(payment.tenants)
             amount = sum(float(tenant.get("amountPaid", 0)) for tenant in tenants_data)
         return amount
@@ -62,70 +62,95 @@ def calculate_apartment_profit(apartment: Apartment) -> float:
         current_app.logger.error(f"Error calculating profit for apartment {apartment.id}: {e}")
         return 0.0
 
-def get_current_contract_for_apartment(apartment_id: int) -> Optional[ContractPeriod]:
-    """Get the currently active contract period for an apartment"""
+def get_current_contract_for_apartment(apartment_id: int, target_date: date = None) -> Optional[ContractPeriod]:
+    """Get the active contract for an apartment at a given date"""
     try:
-        today = date.today()
-        current_contract = ContractPeriod.query.filter(
-            and_(
-                ContractPeriod.apartment_id == apartment_id,
-                ContractPeriod.start_date <= today,
-                or_(
-                    ContractPeriod.end_date.is_(None),
-                    ContractPeriod.end_date >= today
-                ),
-                ContractPeriod.status == 'active'
-            )
+        if target_date is None:
+            target_date = date.today()
+
+        contract = ContractPeriod.query.filter(
+            ContractPeriod.apartment_id == apartment_id,
+            ContractPeriod.start_date <= target_date,
+            or_(
+                ContractPeriod.end_date.is_(None),
+                ContractPeriod.end_date >= target_date
+            ),
+            ContractPeriod.status == "active"
         ).first()
-        return current_contract
+
+        return contract
     except Exception as e:
         current_app.logger.error(f"Error getting current contract for apartment {apartment_id}: {e}")
         return None
 
-def get_contract_payments(apartment_id: int, contract_period_id: int, start_date: date, end_date: date) -> List[Payment]:
-    """Get payments for a specific contract period within a date range"""
+def get_apartment_tenants(apartment_id: int) -> List[str]:
+    """FIXED: Get current tenants for an apartment through contract assignments"""
     try:
-        # Get payments that belong to this contract period
+        current_date = date.today()
+
+        # Get active contract tenants for this apartment
+        tenant_assignments = db.session.query(ContractTenant).join(ContractPeriod).filter(
+            ContractPeriod.apartment_id == apartment_id,
+            ContractPeriod.status == "active",
+            ContractPeriod.start_date <= current_date,
+            or_(
+                ContractPeriod.end_date.is_(None),
+                ContractPeriod.end_date >= current_date
+            ),
+            or_(
+                ContractTenant.move_out_date.is_(None),
+                ContractTenant.move_out_date >= current_date
+            )
+        ).all()
+
+        # Get unique tenant names
+        tenant_names = []
+        for assignment in tenant_assignments:
+            if assignment.tenant and assignment.tenant.name:
+                if assignment.tenant.name not in tenant_names:
+                    tenant_names.append(assignment.tenant.name)
+
+        return tenant_names if tenant_names else ["No tenants assigned"]
+
+    except Exception as e:
+        current_app.logger.error(f"Error getting tenants for apartment {apartment_id}: {e}")
+        return ["Error loading tenants"]
+
+def get_contract_payments(apartment_id: int, contract_id: int, start_date: date, end_date: date) -> List[Payment]:
+    """Get payments for a contract within a date range"""
+    try:
+        # FIXED: Use proper field names and date filtering
         payments = Payment.query.filter(
+            Payment.apartment_id == apartment_id,
+            Payment.contract_period_id == contract_id,
             and_(
-                Payment.apartment_id == apartment_id,
-                Payment.contract_period_id == contract_period_id,
-                Payment.paymentDate >= start_date,
-                Payment.paymentDate <= end_date,
-                Payment.status.in_(["paid", "completed"])
-            )
+                Payment.year * 100 + Payment.month >= start_date.year * 100 + start_date.month,
+                Payment.year * 100 + Payment.month <= end_date.year * 100 + end_date.month
+            ),
+            Payment.status.in_(["paid", "completed", "partial"])
         ).all()
 
-        # Also include legacy payments (without contract_period_id) if they fall within the contract period dates
-        legacy_payments = Payment.query.filter(
-            and_(
-                Payment.apartment_id == apartment_id,
-                Payment.contract_period_id.is_(None),
-                Payment.paymentDate >= start_date,
-                Payment.paymentDate <= end_date,
-                Payment.status.in_(["paid", "completed"])
-            )
-        ).all()
-
-        return payments + legacy_payments
+        return payments
     except Exception as e:
         current_app.logger.error(f"Error getting contract payments: {e}")
         return []
 
-def calculate_outstanding_for_contract(apartment: Apartment, contract: ContractPeriod, target_date: date) -> float:
-    """Calculate outstanding amount for a specific contract up to a target date"""
+def calculate_outstanding_for_contract(apartment: Apartment, contract: ContractPeriod, target_date: date = None) -> float:
+    """Calculate outstanding amount for a specific contract"""
     try:
-        if not contract or not contract.monthly_rent:
+        if target_date is None:
+            target_date = date.today()
+
+        if contract.start_date > target_date:
             return 0.0
 
-        # Calculate how many months of rent should have been paid by target_date
+        # Calculate months elapsed
         months_elapsed = 0
         current_month = contract.start_date.replace(day=1)
         target_month = target_date.replace(day=1)
 
         while current_month <= target_month:
             months_elapsed += 1
-            # Move to next month
             if current_month.month == 12:
                 current_month = current_month.replace(year=current_month.year + 1, month=1)
             else:
@@ -154,19 +179,28 @@ def calculate_outstanding_for_contract(apartment: Apartment, contract: ContractP
 @token_required
 @role_required("admin")
 def get_financial_overview():
-    """Get simplified financial overview - shows ALL payments collected this month"""
+    """FIXED: Get financial overview with proper field handling and frontend-compatible structure"""
     try:
         current_date: datetime = datetime.now()
         current_year: int = request.args.get("year", current_date.year, type=int)
         current_month: int = current_date.month
+        current_date_obj = current_date.date()
 
         month_names: List[str] = [
             "January", "February", "March", "April", "May", "June",
             "July", "August", "September", "October", "November", "December",
         ]
 
-        # Get all apartments
+        # Get all apartments and active contracts
         apartments = Apartment.query.all()
+        active_contracts = ContractPeriod.query.filter(
+            ContractPeriod.status == "active",
+            ContractPeriod.start_date <= current_date_obj,
+            or_(
+                ContractPeriod.end_date.is_(None),
+                ContractPeriod.end_date >= current_date_obj
+            )
+        ).all()
 
         # Calculate current month data
         current_month_start = date(current_year, current_month, 1)
@@ -175,11 +209,11 @@ def get_financial_overview():
         else:
             current_month_end = date(current_year, current_month + 1, 1) - timedelta(days=1)
 
-        # FIXED: Calculate ALL payments made THIS MONTH (regardless of which contract they're for)
+        # FIXED: Get payments made THIS MONTH with proper field handling
         current_month_payments = Payment.query.filter(
             and_(
-                extract('month', Payment.paymentDate) == current_month,
-                extract('year', Payment.paymentDate) == current_year,
+                Payment.month == current_month,
+                Payment.year == current_year,
                 Payment.status.in_(["paid", "completed", "partial"])
             )
         ).all()
@@ -192,69 +226,106 @@ def get_financial_overview():
 
         # Calculate outstanding from active contracts
         current_month_outstanding = 0.0
-        apartments_with_contracts = 0
-        apartments_with_payments = 0
+        apartments_with_contracts = len(active_contracts)
+        apartments_with_payments = len(set(p.apartment_id for p in current_month_payments))
 
-        for apartment in apartments:
-            # Get current active contract
-            current_contract = get_current_contract_for_apartment(apartment.id)
-
-            if current_contract:
-                apartments_with_contracts += 1
-
-                # Check if this apartment made any payments this month
-                apartment_payments_this_month = [p for p in current_month_payments if p.apartment_id == apartment.id]
-                if apartment_payments_this_month:
-                    apartments_with_payments += 1
-
-                # Calculate outstanding for this contract
-                outstanding = calculate_outstanding_for_contract(
-                    apartment,
-                    current_contract,
-                    current_month_end
-                )
+        for contract in active_contracts:
+            apartment = contract.apartment
+            if apartment:
+                outstanding = calculate_outstanding_for_contract(apartment, contract, current_month_end)
                 current_month_outstanding += outstanding
 
-        # Calculate current month profit (same as before)
-        current_month_profit = sum(calculate_apartment_profit(apt) for apt in apartments)
+        # Calculate expected revenue (from active contracts)
+        expected_revenue = sum(float(contract.monthly_rent) for contract in active_contracts)
 
-        # FIXED: Get monthly breakdown showing ALL payments made in each month
+        # Calculate collection rate
+        collection_rate = (current_month_collected / expected_revenue * 100) if expected_revenue > 0 else 100
+
+        # Calculate net profit (simplified calculation)
+        current_month_net_profit = 0.0
+        for apartment in apartments:
+            profit = calculate_apartment_profit(apartment)
+            current_month_net_profit += profit
+
+        # Monthly breakdown for the year
         monthly_breakdown = []
-        for month_idx, month in enumerate(month_names):
-            # Get ALL payments made in this month (not just from specific contracts)
-            monthly_payments = Payment.query.filter(
+        for month in range(1, 13):
+            month_start = date(current_year, month, 1)
+            if month == 12:
+                month_end = date(current_year + 1, 1, 1) - timedelta(days=1)
+            else:
+                month_end = date(current_year, month + 1, 1) - timedelta(days=1)
+
+            # Get payments for this month
+            month_payments = Payment.query.filter(
                 and_(
-                    extract('month', Payment.paymentDate) == month_idx + 1,
-                    extract('year', Payment.paymentDate) == current_year,
+                    Payment.month == month,
+                    Payment.year == current_year,
                     Payment.status.in_(["paid", "completed", "partial"])
                 )
             ).all()
 
-            month_collected = sum(extract_payment_amount(p) for p in monthly_payments)
+            month_collected = sum(extract_payment_amount(p) for p in month_payments)
+
+            # Calculate expected for this month (contracts active during this month)
+            month_expected = sum(
+                float(contract.monthly_rent) for contract in ContractPeriod.query.filter(
+                    ContractPeriod.status == "active",
+                    ContractPeriod.start_date <= month_end,
+                    or_(
+                        ContractPeriod.end_date.is_(None),
+                        ContractPeriod.end_date >= month_start
+                    )
+                ).all()
+            )
+
+            month_collection_rate = (month_collected / month_expected * 100) if month_expected > 0 else 100
+            month_net_profit = current_month_net_profit  # Simplified - same for all months
 
             monthly_breakdown.append({
                 "month": month,
-                "collected": month_collected,
-                "net_profit": current_month_profit  # Simplified - same for all months
+                "month_name": month_names[month - 1],
+                "expected": float(month_expected),
+                "collected": float(month_collected),
+                "net_profit": float(month_net_profit),
+                "collection_rate": round(month_collection_rate, 2),
+                "outstanding": float(month_expected - month_collected) if month_expected > month_collected else 0
             })
 
+        # Summary calculations
+        total_expected_year = sum(m["expected"] for m in monthly_breakdown)
+        total_collected_year = sum(m["collected"] for m in monthly_breakdown)
+        avg_collection_rate = (total_collected_year / total_expected_year * 100) if total_expected_year > 0 else 100
+
+        # FIXED: Return structure that matches frontend expectations
         response = {
+            "year": current_year,
             "current_month": {
-                "collected": current_month_collected,
-                "net_profit": current_month_profit,
-                "outstanding": current_month_outstanding
-            },
-            "outstanding": {
-                "total_amount": current_month_outstanding
+                "month": current_month,
+                "month_name": month_names[current_month - 1],
+                "expected_revenue": float(expected_revenue),
+                "collected": float(current_month_collected),
+                "net_profit": float(current_month_net_profit),
+                "outstanding": float(current_month_outstanding),
+                "collection_rate": round(collection_rate, 2),
+                "apartments_with_contracts": apartments_with_contracts,
+                "apartments_with_payments": apartments_with_payments
             },
             "monthly_breakdown": monthly_breakdown,
+            "yearly_summary": {
+                "total_expected": float(total_expected_year),
+                "total_actual": float(total_collected_year),
+                "average_collection_rate": round(avg_collection_rate, 2),
+                "total_apartments": len(apartments),
+                "active_contracts": apartments_with_contracts
+            },
+            # Debug info for frontend
             "debug_info": {
                 "total_apartments": len(apartments),
                 "apartments_with_contracts": apartments_with_contracts,
                 "apartments_with_payments": apartments_with_payments,
                 "year_queried": current_year,
-                "current_month": month_names[current_month - 1],
-                "current_month_payments_count": len(current_month_payments)
+                "current_month": month_names[current_month - 1]
             }
         }
 
@@ -262,13 +333,13 @@ def get_financial_overview():
 
     except Exception as e:
         current_app.logger.error(f"Error in financial overview: {e}")
-        return jsonify({"message": "Error calculating financial overview", "error": str(e)}), 500
+        return jsonify({"message": "Error in financial overview", "error": str(e)}), 500
 
 @fast_analytics_bp.route("/analytics/outstanding-payments", methods=["GET"])
 @token_required
 @role_required("admin")
 def get_outstanding_payments():
-    """Enhanced outstanding payments with contract period support and paid this month column"""
+    """FIXED: Enhanced outstanding payments with proper tenant relationships"""
     try:
         # Pagination parameters
         page = request.args.get("page", 1, type=int) - 1  # Convert to 0-based
@@ -322,15 +393,17 @@ def get_outstanding_payments():
                 end_period = date(current_year, current_month + 1, 1) - timedelta(days=1)
             period_label = f"{current_date.strftime('%B %Y')}"
 
-        # Get all apartments
-        apartments_query = db.session.query(Apartment)
+        # FIXED: Get all apartments with proper search filtering
+        apartments_query = Apartment.query
 
-        # Apply search filter
+        # Apply search filter - FIXED to not use non-existent tenant relationship
         if search_term:
             apartments_query = apartments_query.filter(
                 or_(
                     Apartment.address.ilike(f"%{search_term}%"),
-                    Apartment.tenants.any(Tenant.name.ilike(f"%{search_term}%"))
+                    Apartment.street_name.ilike(f"%{search_term}%"),
+                    Apartment.house_number.ilike(f"%{search_term}%"),
+                    Apartment.full_address.ilike(f"%{search_term}%")
                 )
             )
 
@@ -339,55 +412,57 @@ def get_outstanding_payments():
 
         for apartment in apartments:
             try:
-                # Get current contract
-                current_contract = get_current_contract_for_apartment(apartment.id)
+                # Get current active contract for the apartment
+                current_contract = get_current_contract_for_apartment(apartment.id, end_period)
 
                 if not current_contract:
                     continue  # Skip apartments without active contracts
 
-                # Calculate outstanding for this contract in the selected period
-                outstanding_amount = calculate_outstanding_for_contract(
-                    apartment,
-                    current_contract,
-                    end_period
-                )
+                # Calculate outstanding amount
+                outstanding = calculate_outstanding_for_contract(apartment, current_contract, end_period)
 
-                # Skip apartments below minimum outstanding threshold
-                if outstanding_amount < min_outstanding:
+                # Apply minimum outstanding filter
+                if outstanding < min_outstanding:
                     continue
 
-                # Get contract payments in the period
-                contract_payments = get_contract_payments(
-                    apartment.id,
-                    current_contract.id,
-                    start_period,
-                    end_period
-                )
+                # Get payments made this month for "paid this month" column
+                paid_this_month = Payment.query.filter(
+                    Payment.apartment_id == apartment.id,
+                    Payment.month == current_month,
+                    Payment.year == current_year,
+                    Payment.status.in_(["paid", "completed", "partial"])
+                ).all()
 
-                # Calculate paid this month
-                paid_this_month = sum(extract_payment_amount(p) for p in contract_payments)
+                paid_amount_this_month = sum(extract_payment_amount(p) for p in paid_this_month)
 
-                # Calculate expected amount
-                months_in_period = max(1, (end_period.year - start_period.year) * 12 + (end_period.month - start_period.month) + 1)
-                expected_amount = float(current_contract.monthly_rent) * months_in_period
+                # FIXED: Get tenant information through proper relationship
+                tenant_names = get_apartment_tenants(apartment.id)
 
-                # Get tenant details from contract
-                tenant_names = [ct.tenant.name for ct in current_contract.contract_tenants if ct.tenant] if current_contract.contract_tenants else []
-
-                apartments_data.append({
+                apartment_data = {
                     "apartment_id": apartment.id,
-                    "address": apartment.address,
+                    "address": apartment.get_short_address(),
                     "monthly_rent": float(current_contract.monthly_rent),
+                    "total_outstanding": float(outstanding),
+                    "paid_this_month": float(paid_amount_this_month),
                     "tenants": tenant_names,
-                    "tenant_count": len(tenant_names),
-                    "expected_amount": expected_amount,
-                    "paid_this_month": paid_this_month,  # NEW COLUMN
-                    "total_outstanding": outstanding_amount,
-                    "collection_rate": ((paid_this_month / expected_amount) * 100) if expected_amount > 0 else 100,
-                    "payment_count": len(contract_payments),
+                    "contract_number": current_contract.contract_number,
+                    "contract_start": current_contract.start_date.isoformat(),
+                    "contract_end": current_contract.end_date.isoformat() if current_contract.end_date else None,
                     "status": apartment.status,
-                    "last_payment_date": max([p.paymentDate for p in contract_payments if hasattr(p, 'paymentDate') and p.paymentDate], default=None)
-                })
+                    "last_payment_date": None
+                }
+
+                # Get last payment date for this apartment - FIXED field handling
+                last_payment = Payment.query.filter(
+                    Payment.apartment_id == apartment.id,
+                    Payment.status.in_(["paid", "completed", "partial"])
+                ).order_by(Payment.year.desc(), Payment.month.desc()).first()
+
+                if last_payment:
+                    if hasattr(last_payment, 'payment_date') and last_payment.payment_date:
+                        apartment_data["last_payment_date"] = last_payment.payment_date.isoformat()
+
+                apartments_data.append(apartment_data)
 
             except Exception as e:
                 current_app.logger.error(f"Error processing apartment {apartment.id}: {e}")
@@ -402,41 +477,45 @@ def get_outstanding_payments():
             apartments_data.sort(key=lambda x: x["address"])
         elif sort_by == "rent_desc":
             apartments_data.sort(key=lambda x: x["monthly_rent"], reverse=True)
-        elif sort_by == "paid_desc":  # NEW SORT OPTION
+        elif sort_by == "paid_desc":
             apartments_data.sort(key=lambda x: x["paid_this_month"], reverse=True)
-        elif sort_by == "paid_asc":   # NEW SORT OPTION
+        elif sort_by == "paid_asc":
             apartments_data.sort(key=lambda x: x["paid_this_month"])
 
-        # Calculate summary statistics
+        # Pagination
         total_count = len(apartments_data)
+        total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
+        paginated_apartments = apartments_data[offset:offset + limit]
+
+        # Calculate summary statistics
         total_outstanding = sum(apt["total_outstanding"] for apt in apartments_data)
-        total_expected = sum(apt["expected_amount"] for apt in apartments_data)
-        total_paid_this_month = sum(apt["paid_this_month"] for apt in apartments_data)  # NEW SUMMARY
+        total_expected = sum(apt["monthly_rent"] for apt in apartments_data)
+        total_paid_this_month = sum(apt["paid_this_month"] for apt in apartments_data)
         apartments_with_debt = len([apt for apt in apartments_data if apt["total_outstanding"] > 0])
 
-        # Apply pagination
-        paginated_data = apartments_data[offset:offset + limit]
-
         response = {
-            "apartments": paginated_data,
+            "apartments": paginated_apartments,
             "pagination": {
-                "current_page": page + 1,
-                "total_pages": math.ceil(total_count / limit) if total_count > 0 else 0,
+                "current_page": page + 1,  # Convert back to 1-based
+                "total_pages": total_pages,
                 "total_items": total_count,
                 "items_per_page": limit,
-                "has_next_page": (offset + limit) < total_count,
+                "has_next_page": (page + 1) < total_pages,
                 "has_prev_page": page > 0,
-                "start_index": offset + 1 if paginated_data else 0,
+                "start_index": offset + 1 if paginated_apartments else 0,
                 "end_index": min(offset + limit, total_count),
                 "page_size_options": PAGE_SIZE_OPTIONS,
             },
-            "summary": {
-                "period_label": period_label,
+            "period": {
+                "type": period_type,
+                "label": period_label,
                 "start_date": start_period.isoformat(),
-                "end_date": end_period.isoformat(),
+                "end_date": end_period.isoformat()
+            },
+            "summary": {
                 "total_outstanding": total_outstanding,
                 "total_expected": total_expected,
-                "total_paid_this_month": total_paid_this_month,  # NEW SUMMARY FIELD
+                "total_paid_this_month": total_paid_this_month,
                 "collection_rate": ((total_expected - total_outstanding) / total_expected * 100) if total_expected > 0 else 100,
                 "apartments_with_debt": apartments_with_debt,
                 "apartments_current": total_count - apartments_with_debt,
@@ -459,12 +538,13 @@ def get_outstanding_payments():
     except Exception as e:
         current_app.logger.error(f"Error in outstanding payments: {e}")
         return jsonify({"message": "Error retrieving outstanding payments", "error": str(e)}), 500
+
 # ========== NET PROFIT DETAILED ENDPOINT ==========
 @fast_analytics_bp.route("/analytics/net-profit-detailed", methods=["GET"])
 @token_required
 @role_required("admin")
 def get_net_profit_detailed():
-    """Get paginated net profit analysis for apartments"""
+    """FIXED: Get paginated net profit analysis for apartments"""
     try:
         # Pagination parameters
         page = request.args.get("page", 0, type=int)
@@ -483,15 +563,17 @@ def get_net_profit_detailed():
         min_profit = request.args.get("min_profit", type=float)
         status_filter = request.args.get("status", "").strip()
 
-        # Get apartments
+        # FIXED: Get apartments with proper search filtering
         apartments_query = Apartment.query
 
-        # Apply search filter
+        # Apply search filter - FIXED to not use non-existent tenant relationship
         if search_term:
             apartments_query = apartments_query.filter(
                 or_(
                     Apartment.address.ilike(f"%{search_term}%"),
-                    Apartment.tenants.any(Tenant.name.ilike(f"%{search_term}%"))
+                    Apartment.street_name.ilike(f"%{search_term}%"),
+                    Apartment.house_number.ilike(f"%{search_term}%"),
+                    Apartment.full_address.ilike(f"%{search_term}%")
                 )
             )
 
@@ -510,57 +592,56 @@ def get_net_profit_detailed():
                 if min_profit is not None and profit < min_profit:
                     continue
 
-                # Get current contract info
-                current_contract = get_current_contract_for_apartment(apartment.id)
-                tenant_names = []
+                # FIXED: Get tenant information through proper relationship
+                tenant_names = get_apartment_tenants(apartment.id)
 
-                if current_contract and current_contract.contract_tenants:
-                    tenant_names = [ct.tenant.name for ct in current_contract.contract_tenants if ct.tenant]
-                else:
-                    # Fallback to legacy tenants
-                    tenant_names = [tenant.name for tenant in apartment.tenants] if apartment.tenants else []
+                # Get payment information for the specified period
+                payment_filters = [Payment.apartment_id == apartment.id, Payment.year == year]
+                if month:
+                    payment_filters.append(Payment.month == month)
 
-                apartments_data.append({
+                payments = Payment.query.filter(and_(*payment_filters)).all()
+                total_collected = sum(extract_payment_amount(p) for p in payments)
+
+                apartment_data = {
                     "apartment_id": apartment.id,
-                    "address": apartment.address,
-                    "monthly_rent": float(apartment.rent) if apartment.rent else 0,
-                    "monthly_profit": profit,
-                    "tenants": tenant_names,
-                    "tenant_count": len(tenant_names),
-                    "status": apartment.status,
+                    "address": apartment.get_short_address(),
+                    "monthly_rent": float(apartment.rent or 0),
+                    "monthly_profit": float(profit),
+                    "profit_margin": (profit / float(apartment.rent) * 100) if apartment.rent and float(apartment.rent) > 0 else 0,
                     "model": apartment.model,
-                    "management_fee": float(apartment.managementFee) if apartment.managementFee else 0,
-                    "rent_cost": float(apartment.rentCost) if apartment.rentCost else 0,
-                    "contract_info": {
-                        "id": current_contract.id,
-                        "contract_number": current_contract.contract_number,
-                        "status": current_contract.status
-                    } if current_contract else None
-                })
+                    "rent_cost": float(apartment.rentCost or 0),
+                    "management_fee": float(apartment.managementFee or 0),
+                    "status": apartment.status,
+                    "tenants": tenant_names,
+                    "room_count": apartment.rooms,
+                    "collected_amount": float(total_collected),
+                }
+
+                apartments_data.append(apartment_data)
 
             except Exception as e:
                 current_app.logger.error(f"Error processing apartment {apartment.id}: {e}")
                 continue
 
-        # Sort the data
+        # Apply sorting
         if sort_by == "profit_desc":
             apartments_data.sort(key=lambda x: x["monthly_profit"], reverse=True)
         elif sort_by == "profit_asc":
             apartments_data.sort(key=lambda x: x["monthly_profit"])
         elif sort_by == "rent_desc":
             apartments_data.sort(key=lambda x: x["monthly_rent"], reverse=True)
-        elif sort_by == "rent_asc":
-            apartments_data.sort(key=lambda x: x["monthly_rent"])
-        elif sort_by == "address_asc":
+        elif sort_by == "margin_desc":
+            apartments_data.sort(key=lambda x: x["profit_margin"], reverse=True)
+        elif sort_by == "address":
             apartments_data.sort(key=lambda x: x["address"])
 
         # Pagination
         total_count = len(apartments_data)
-        total_pages = (total_count + limit - 1) // limit
-        has_next = page < total_pages - 1
-        has_prev = page > 0
-
+        total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
         paginated_apartments = apartments_data[offset:offset + limit]
+        has_next = (page + 1) < total_pages
+        has_prev = page > 0
 
         # Calculate summary statistics
         total_rent = sum(apt["monthly_rent"] for apt in apartments_data)
@@ -606,7 +687,7 @@ def get_net_profit_detailed():
 @token_required
 @role_required("admin")
 def get_apartment_outstanding_details(apartment_id):
-    """Get detailed outstanding payment information for a specific apartment with accurate data"""
+    """FIXED: Get detailed outstanding payment information for a specific apartment"""
     try:
         # Period selection parameters
         period_type = request.args.get("period_type", "current_month")
@@ -653,181 +734,126 @@ def get_apartment_outstanding_details(apartment_id):
                 end_period = date(current_year, current_month + 1, 1) - timedelta(days=1)
             period_label = f"{current_date.strftime('%B %Y')}"
 
-        # Try to get current contract first
-        current_contract = get_current_contract_for_apartment(apartment_id)
+        # Get current active contract
+        current_contract = get_current_contract_for_apartment(apartment_id, end_period)
 
-        # If no contract found, create fallback using apartment data
         if not current_contract:
-            # Use apartment rent as monthly rent
-            monthly_rent = float(apartment.rent or 0)
+            return jsonify({
+                "apartment": {
+                    "apartment_id": apartment_id,
+                    "address": apartment.get_short_address(),
+                    "status": apartment.status
+                },
+                "error": "No active contract found for this apartment",
+                "period": {
+                    "type": period_type,
+                    "label": period_label,
+                    "start_date": start_period.isoformat(),
+                    "end_date": end_period.isoformat()
+                }
+            }), 404
 
-            # Get all payments for this apartment in the period
-            payments_in_period = Payment.query.filter(
-                and_(
-                    Payment.apartment_id == apartment_id,
-                    Payment.paymentDate >= start_period,
-                    Payment.paymentDate <= end_period,
-                    Payment.status.in_(['paid', 'completed', 'partial'])
-                )
-            ).all()
+        # Calculate outstanding amount
+        outstanding = calculate_outstanding_for_contract(apartment, current_contract, end_period)
 
-        else:
-            # Use contract rent
-            monthly_rent = float(current_contract.monthly_rent)
+        # Get all payments for this contract within the period
+        contract_payments = get_contract_payments(
+            apartment_id,
+            current_contract.id,
+            current_contract.start_date,
+            end_period
+        )
 
-            # Get contract payments in the period
-            payments_in_period = get_contract_payments(
-                apartment_id,
-                current_contract.id,
-                start_period,
-                end_period
-            )
+        # Format payment details
+        payment_details = []
+        for payment in contract_payments:
+            amount = extract_payment_amount(payment)
 
-        # Calculate expected amount for the period
-        if period_type == "current_month":
-            expected_amount = monthly_rent  # Just one month
-        else:
-            months_in_period = max(1, (end_period.year - start_period.year) * 12 + (end_period.month - start_period.month) + 1)
-            expected_amount = monthly_rent * months_in_period
+            # Get payment date with proper field handling
+            payment_date = None
+            if hasattr(payment, 'payment_date') and payment.payment_date:
+                payment_date = payment.payment_date.isoformat()
 
-        # Calculate total paid in period
-        total_paid_in_period = sum(extract_payment_amount(p) for p in payments_in_period)
-        outstanding_amount = max(0, expected_amount - total_paid_in_period)
+            payment_details.append({
+                "payment_id": payment.id,
+                "amount": float(amount),
+                "payment_date": payment_date,
+                "payment_method": payment.payment_method,
+                "status": payment.status,
+                "month": payment.month,
+                "year": payment.year
+            })
 
-        # Get tenant breakdown
-        tenant_breakdown = []
+        # Sort payments by date (most recent first)
+        payment_details.sort(key=lambda x: (x["year"], x["month"]), reverse=True)
 
-        if current_contract and current_contract.contract_tenants:
-            # Use contract tenants
-            tenant_count = len(current_contract.contract_tenants)
-            rent_per_tenant = expected_amount / tenant_count if tenant_count > 0 else expected_amount
+        # Calculate months elapsed and expected amount
+        months_elapsed = 0
+        current_month_calc = current_contract.start_date.replace(day=1)
+        target_month = end_period.replace(day=1)
 
-            for ct in current_contract.contract_tenants:
-                if ct.tenant:
-                    # Get individual tenant payments (try to match by tenant_id or name)
-                    tenant_payments = []
-                    tenant_paid = 0
-
-                    for payment in payments_in_period:
-                        # Check if payment is linked to this tenant
-                        if hasattr(payment, 'tenant_id') and payment.tenant_id == ct.tenant.id:
-                            tenant_payments.append(payment)
-                            tenant_paid += extract_payment_amount(payment)
-                        elif payment.tenants:
-                            # Check in tenants JSON
-                            try:
-                                tenants_data = json.loads(payment.tenants)
-                                for tenant_data in tenants_data:
-                                    if (tenant_data.get('name', '').lower() == ct.tenant.name.lower() or
-                                        tenant_data.get('id') == ct.tenant.id):
-                                        amount_paid = float(tenant_data.get('amountPaid', 0))
-                                        if amount_paid > 0:
-                                            tenant_payments.append({
-                                                'id': payment.id,
-                                                'amount': amount_paid,
-                                                'paymentDate': payment.paymentDate,
-                                                'status': payment.status
-                                            })
-                                            tenant_paid += amount_paid
-                            except (json.JSONDecodeError, ValueError):
-                                pass
-
-                    # If no individual payments found, split total equally
-                    if tenant_paid == 0 and total_paid_in_period > 0:
-                        tenant_paid = total_paid_in_period / tenant_count
-
-                    tenant_breakdown.append({
-                        "tenant_id": ct.tenant.id,
-                        "tenant_name": ct.tenant.name,
-                        "total_paid": tenant_paid,
-                        "total_due": rent_per_tenant,
-                        "outstanding": max(0, rent_per_tenant - tenant_paid),
-                        "payment_count": len(tenant_payments),
-                        "payments": [
-                            {
-                                "id": p.id if hasattr(p, 'id') else payment.id,
-                                "amount": p.amount if hasattr(p, 'amount') else extract_payment_amount(p),
-                                "date": p.paymentDate.isoformat() if hasattr(p, 'paymentDate') and p.paymentDate else None,
-                                "status": p.status if hasattr(p, 'status') else 'paid'
-                            } for p in (tenant_payments if isinstance(tenant_payments[0], Payment) else
-                                      [p for p in payments_in_period if any(
-                                          json.loads(pay.tenants) if pay.tenants else []
-                                          for pay in [p] if pay.tenants
-                                      )])[:3]  # Limit to 3 recent payments
-                        ]
-                    })
-        else:
-            # Fallback to apartment tenants or create default tenant
-            apartment_tenants = apartment.tenants if apartment.tenants else []
-
-            if not apartment_tenants:
-                # Create default "Unknown Tenant" entry
-                tenant_breakdown.append({
-                    "tenant_id": None,
-                    "tenant_name": "Unknown Tenant",
-                    "total_paid": total_paid_in_period,
-                    "total_due": expected_amount,
-                    "outstanding": outstanding_amount,
-                    "payment_count": len(payments_in_period),
-                    "payments": [
-                        {
-                            "id": p.id,
-                            "amount": extract_payment_amount(p),
-                            "date": p.paymentDate.isoformat() if p.paymentDate else None,
-                            "status": p.status
-                        } for p in payments_in_period[-3:]  # Last 3 payments
-                    ]
-                })
+        while current_month_calc <= target_month:
+            months_elapsed += 1
+            if current_month_calc.month == 12:
+                current_month_calc = current_month_calc.replace(year=current_month_calc.year + 1, month=1)
             else:
-                # Use apartment tenants
-                tenant_count = len(apartment_tenants)
-                rent_per_tenant = expected_amount / tenant_count
-                paid_per_tenant = total_paid_in_period / tenant_count
+                current_month_calc = current_month_calc.replace(month=current_month_calc.month + 1)
 
-                for tenant in apartment_tenants:
-                    tenant_breakdown.append({
-                        "tenant_id": tenant.id,
-                        "tenant_name": tenant.name,
-                        "total_paid": paid_per_tenant,
-                        "total_due": rent_per_tenant,
-                        "outstanding": max(0, rent_per_tenant - paid_per_tenant),
-                        "payment_count": len(payments_in_period),
-                        "payments": [
-                            {
-                                "id": p.id,
-                                "amount": extract_payment_amount(p) / tenant_count,
-                                "date": p.paymentDate.isoformat() if p.paymentDate else None,
-                                "status": p.status
-                            } for p in payments_in_period[-3:]  # Last 3 payments, split equally
-                        ]
-                    })
+        expected_total = float(current_contract.monthly_rent) * months_elapsed
+        total_paid = sum(float(p["amount"]) for p in payment_details)
+
+        # FIXED: Get tenant information through proper relationship
+        tenant_names = get_apartment_tenants(apartment_id)
+
+        # Create tenant breakdown for the details dialog
+        tenant_breakdown = []
+        if tenant_names and tenant_names != ["No tenants assigned"]:
+            tenant_count = len(tenant_names)
+            rent_per_tenant = float(current_contract.monthly_rent) / tenant_count if tenant_count > 0 else 0
+            paid_per_tenant = total_paid / tenant_count if tenant_count > 0 else 0
+            outstanding_per_tenant = max(0, rent_per_tenant - paid_per_tenant)
+
+            for tenant_name in tenant_names:
+                tenant_breakdown.append({
+                    "tenant_id": None,  # We don't have direct tenant IDs in this context
+                    "tenant_name": tenant_name,
+                    "total_paid": paid_per_tenant,
+                    "total_due": rent_per_tenant,
+                    "outstanding": outstanding_per_tenant,
+                    "payment_count": len(payment_details) if paid_per_tenant > 0 else 0,
+                    "payments": payment_details if paid_per_tenant > 0 else []
+                })
 
         response = {
             "apartment": {
-                "id": apartment.id,
-                "address": apartment.address,
-                "monthly_rent": monthly_rent,
-                "status": apartment.status
+                "apartment_id": apartment_id,
+                "address": apartment.get_short_address(),
+                "status": apartment.status,
+                "tenants": tenant_names
             },
+            "contract": {
+                "contract_id": current_contract.id,
+                "contract_number": current_contract.contract_number,
+                "start_date": current_contract.start_date.isoformat(),
+                "end_date": current_contract.end_date.isoformat() if current_contract.end_date else None,
+                "monthly_rent": float(current_contract.monthly_rent),
+                "status": current_contract.status
+            },
+            "summary": {
+                "months_elapsed": months_elapsed,
+                "expected_amount": float(expected_total),
+                "total_paid": float(total_paid),
+                "total_outstanding": float(outstanding),
+                "collection_rate": (total_paid / expected_total * 100) if expected_total > 0 else 100,
+                "payment_count": len(payment_details)
+            },
+            "tenant_breakdown": tenant_breakdown,
+            "payments": payment_details,
             "period": {
                 "type": period_type,
                 "label": period_label,
                 "start_date": start_period.isoformat(),
                 "end_date": end_period.isoformat()
-            },
-            "summary": {
-                "expected_amount": expected_amount,
-                "total_paid": total_paid_in_period,
-                "total_outstanding": outstanding_amount,
-                "collection_rate": ((total_paid_in_period / expected_amount) * 100) if expected_amount > 0 else 100,
-                "payment_count": len(payments_in_period)
-            },
-            "tenant_breakdown": tenant_breakdown,
-            "debug_info": {
-                "has_contract": current_contract is not None,
-                "contract_id": current_contract.id if current_contract else None,
-                "payments_found": len(payments_in_period),
-                "tenant_count": len(tenant_breakdown)
             }
         }
 
@@ -835,7 +861,4 @@ def get_apartment_outstanding_details(apartment_id):
 
     except Exception as e:
         current_app.logger.error(f"Error getting apartment outstanding details: {e}")
-        import traceback
-        traceback.print_exc()
         return jsonify({"message": "Error retrieving apartment details", "error": str(e)}), 500
-

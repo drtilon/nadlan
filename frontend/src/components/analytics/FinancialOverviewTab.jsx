@@ -72,6 +72,8 @@ const MetricCard = ({ title, value, icon, color, subtitle, isLoading }) => (
 );
 
 function FinancialOverviewTab({ loading, financialData, selectedYear }) {
+  console.log('FinancialOverviewTab received data:', financialData); // Debug log
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
@@ -90,15 +92,18 @@ function FinancialOverviewTab({ loading, financialData, selectedYear }) {
     );
   }
 
+  // FIXED: Handle both API response structures
+  const currentMonth = financialData.current_month || {};
+  const monthlyOverview = financialData.monthly_overview || financialData.monthly_breakdown || [];
+  const yearlySummary = financialData.yearly_summary || {};
+  const debugInfo = financialData.debug_info || {};
+
   // Check if all values are zero to show debug info
   const allZeros = (
-    (financialData.current_month?.collected || 0) === 0 &&
-    (financialData.current_month?.net_profit || 0) === 0 &&
-    (financialData.current_month?.outstanding || 0) === 0
+    (currentMonth.collected || currentMonth.actual_revenue || 0) === 0 &&
+    (currentMonth.net_profit || 0) === 0 &&
+    (currentMonth.outstanding || 0) === 0
   );
-
-  // Debug information
-  const debugInfo = financialData.debug_info;
 
   return (
     <Box sx={{ width: '100%' }}>
@@ -131,7 +136,7 @@ function FinancialOverviewTab({ loading, financialData, selectedYear }) {
               color={debugInfo.apartments_with_payments > 0 ? "success" : "error"}
             />
             <Chip
-              label={`Year: ${debugInfo.year_queried}`}
+              label={`Year: ${debugInfo.year_queried || selectedYear}`}
               size="small"
               variant="outlined"
             />
@@ -157,7 +162,7 @@ function FinancialOverviewTab({ loading, financialData, selectedYear }) {
         <Grid item xs={12} md={4}>
           <MetricCard
             title="Current Month Collected"
-            value={financialData.current_month?.collected || 0}
+            value={currentMonth.collected || currentMonth.actual_revenue || 0}
             icon={<AccountBalanceIcon />}
             color={COLORS.success}
             subtitle="From active contracts only"
@@ -168,18 +173,18 @@ function FinancialOverviewTab({ loading, financialData, selectedYear }) {
         <Grid item xs={12} md={4}>
           <MetricCard
             title="Net Profit This Month"
-            value={financialData.current_month?.net_profit || 0}
+            value={currentMonth.net_profit || 0}
             icon={<TrendingUpIcon />}
             color={COLORS.primary}
-            subtitle="Expected monthly profit from management and rental model"
+            subtitle="Expected monthly profit"
             isLoading={loading}
           />
         </Grid>
 
         <Grid item xs={12} md={4}>
           <MetricCard
-            title="Current Outstanding Till This Month"
-            value={financialData.current_month?.outstanding || 0}
+            title="Current Outstanding"
+            value={currentMonth.outstanding || 0}
             icon={<WarningIcon />}
             color={COLORS.error}
             subtitle="Across all active contracts"
@@ -194,21 +199,21 @@ function FinancialOverviewTab({ loading, financialData, selectedYear }) {
           <Typography variant="h6" sx={{ fontWeight: 600 }}>
             Monthly Collection Trends ({selectedYear})
           </Typography>
-          {financialData.monthly_breakdown && (
+          {monthlyOverview && monthlyOverview.length > 0 && (
             <Typography variant="body2" color="textSecondary">
               Total Year: {formatCurrency(
-                financialData.monthly_breakdown.reduce((sum, month) => sum + (month.collected || 0), 0)
+                monthlyOverview.reduce((sum, month) => sum + (month.collected || month.actual_revenue || 0), 0)
               )}
             </Typography>
           )}
         </Box>
 
-        {financialData.monthly_breakdown && financialData.monthly_breakdown.length > 0 ? (
+        {monthlyOverview && monthlyOverview.length > 0 ? (
           <ResponsiveContainer width="100%" height={350}>
-            <LineChart data={financialData.monthly_breakdown}>
+            <LineChart data={monthlyOverview}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis
-                dataKey="month"
+                dataKey="month_name"
                 tick={{ fontSize: 12 }}
                 angle={-45}
                 textAnchor="end"
@@ -237,6 +242,16 @@ function FinancialOverviewTab({ loading, financialData, selectedYear }) {
                 dot={{ fill: COLORS.success, strokeWidth: 2, r: 6 }}
                 activeDot={{ r: 8, stroke: COLORS.success, strokeWidth: 2 }}
               />
+              {/* Handle both API response formats for revenue */}
+              <Line
+                type="monotone"
+                dataKey="actual_revenue"
+                stroke={COLORS.success}
+                strokeWidth={3}
+                name="Actual Revenue"
+                dot={{ fill: COLORS.success, strokeWidth: 2, r: 6 }}
+                activeDot={{ r: 8, stroke: COLORS.success, strokeWidth: 2 }}
+              />
               <Line
                 type="monotone"
                 dataKey="net_profit"
@@ -245,6 +260,24 @@ function FinancialOverviewTab({ loading, financialData, selectedYear }) {
                 strokeDasharray="5 5"
                 name="Expected Profit"
                 dot={{ fill: COLORS.primary, strokeWidth: 2, r: 4 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="expected"
+                stroke={COLORS.warning}
+                strokeWidth={2}
+                strokeDasharray="3 3"
+                name="Expected Revenue"
+                dot={{ fill: COLORS.warning, strokeWidth: 2, r: 4 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="expected_revenue"
+                stroke={COLORS.warning}
+                strokeWidth={2}
+                strokeDasharray="3 3"
+                name="Expected Revenue"
+                dot={{ fill: COLORS.warning, strokeWidth: 2, r: 4 }}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -262,8 +295,15 @@ function FinancialOverviewTab({ loading, financialData, selectedYear }) {
         <Card sx={{ p: 2, mt: 3, backgroundColor: '#f8f9fa', borderRadius: 2 }}>
           <Typography variant="body2" color="textSecondary" sx={{ textAlign: 'center' }}>
             <strong>Contract Period System:</strong> This dashboard only counts payments that belong to active contract periods.
-            Ensure your apartments have active contracts (like "APT3-2025-08") for accurate financial tracking.
+            Ensure your apartments have active contracts for accurate financial tracking.
           </Typography>
+          {yearlySummary && (
+            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', gap: 2, flexWrap: 'wrap' }}>
+              <Chip label={`Year Total: ${formatCurrency(yearlySummary.total_actual || yearlySummary.total_collected || 0)}`} size="small" />
+              <Chip label={`Collection Rate: ${(yearlySummary.average_collection_rate || 0).toFixed(1)}%`} size="small" />
+              <Chip label={`Active Contracts: ${yearlySummary.active_contracts || yearlySummary.total_apartments || 0}`} size="small" />
+            </Box>
+          )}
         </Card>
       )}
     </Box>

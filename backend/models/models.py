@@ -647,3 +647,76 @@ class ContractTemplate(db.Model):
     def __repr__(self):
         default_str = " (DEFAULT)" if self.is_default else ""
         return f"<ContractTemplate {self.id}: {self.name}{default_str}>"
+
+class UnassignedPayment(db.Model):
+    """Temporary storage for CSV payments that haven't been assigned to tenants yet"""
+    __tablename__ = "unassigned_payments"
+    __table_args__ = {"extend_existing": True}
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Original CSV data
+    name_from_csv = db.Column(db.String(255), nullable=False)
+    amount = db.Column(db.Numeric(10, 2), nullable=False)
+    payment_date = db.Column(db.Date, nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    csv_line = db.Column(db.Integer, nullable=True)  # Line number from CSV for reference
+
+    # Matching info
+    matched_tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id"), nullable=True)
+    matched_apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=True)
+    similarity_score = db.Column(db.Float, nullable=True)
+
+    # Status
+    status = db.Column(db.String(20), default="unassigned")  # unassigned, matched, assigned, rejected
+
+    # Processing info
+    processed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    processed_by = db.Column(db.String(100), nullable=True)
+    notes = db.Column(db.Text, nullable=True)
+
+    # Additional CSV fields that might be useful
+    reference = db.Column(db.String(500), nullable=True)  # Transaction reference from CSV
+    sender = db.Column(db.String(255), nullable=True)     # Alternative to name_from_csv
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    tenant = db.relationship("Tenant", backref="unassigned_payments", lazy=True)
+    apartment = db.relationship("Apartment", backref="unassigned_payments", lazy=True)
+
+    def to_dict(self):
+        """Convert to dictionary for JSON serialization"""
+        result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+
+        # Convert date/datetime objects
+        if result.get("payment_date"):
+            result["payment_date"] = result["payment_date"].isoformat()
+        if result.get("processed_at"):
+            result["processed_at"] = result["processed_at"].isoformat()
+        if result.get("created_at"):
+            result["created_at"] = result["created_at"].isoformat()
+        if result.get("updated_at"):
+            result["updated_at"] = result["updated_at"].isoformat()
+
+        # Convert Decimal to float
+        if result.get("amount"):
+            result["amount"] = float(result["amount"])
+        if result.get("similarity_score"):
+            result["similarity_score"] = float(result["similarity_score"])
+
+        # Add tenant info if matched
+        if self.tenant:
+            result["tenant_name"] = self.tenant.name
+            result["tenant_email"] = self.tenant.email
+
+        # Add apartment info if matched
+        if self.apartment:
+            result["apartment_address"] = self.apartment.get_short_address()
+
+        return result
+
+    def __repr__(self):
+        return f"<UnassignedPayment {self.id}: {self.name_from_csv} - ${self.amount} ({self.status})>"

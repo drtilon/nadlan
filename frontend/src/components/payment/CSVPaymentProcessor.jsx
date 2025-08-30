@@ -1,215 +1,286 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  Button,
-  LinearProgress,
-  Alert,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  Chip,
-  Grid,
-  CircularProgress,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TablePagination,
-  TextField,
-  MenuItem,
-  Select,
-  FormControl,
-  InputLabel,
-  Autocomplete,
-  Stack,
-  Divider,
-  IconButton,
-  Tooltip,
-} from '@mui/material';
+import React, { useState, useEffect, useRef } from 'react';
 
-// Icons
-import UploadFileIcon from '@mui/icons-material/UploadFile';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
-import PaymentIcon from '@mui/icons-material/Payment';
-import EditIcon from '@mui/icons-material/Edit';
-import DeleteIcon from '@mui/icons-material/Delete';
-import PauseIcon from '@mui/icons-material/Pause';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import StopIcon from '@mui/icons-material/Stop';
-import AssignmentIcon from '@mui/icons-material/Assignment';
-import SaveIcon from '@mui/icons-material/Save';
-import CancelIcon from '@mui/icons-material/Cancel';
-import PersonAddIcon from '@mui/icons-material/PersonAdd';
-
-// IMPORT THE LONG TIMEOUT API
-import { createLongTimeoutApi } from '../../utils/api';
-
-const CSVPaymentProcessor = ({ showNotification }) => {
-  // State
-  const [file, setFile] = useState(null);
+const CSVPaymentProcessor = () => {
+  const [currentTab, setCurrentTab] = useState(0);
   const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState('');
-  const [results, setResults] = useState(null);
   const [transactions, setTransactions] = useState([]);
-  const [grokStatus, setGrokStatus] = useState({ configured: false, checking: true });
-
-  // Pagination state
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
   const [filteredTransactions, setFilteredTransactions] = useState([]);
-  const [filterStatus, setFilterStatus] = useState('all'); // 'all', 'matched', 'unmatched'
+  const [grokStatus, setGrokStatus] = useState({
+    checking: true,
+    fullyOperational: false,
+    api_working: false
+  });
+  const [previousUploads, setPreviousUploads] = useState({
+    loading: false,
+    unassigned: [],
+    matched: [],
+    summary: {
+      unassigned: { count: 0, total_amount: 0 },
+      matched: { count: 0, total_amount: 0 },
+      assigned: { count: 0, total_amount: 0 },
+      rejected: { count: 0, total_amount: 0 }
+    }
+  });
 
-  // Manual assignment state
+  // Enhanced assignment dialog state
   const [assignmentDialog, setAssignmentDialog] = useState({
     open: false,
     transaction: null,
     selectedTenant: null,
     selectedApartment: null,
     customAmount: '',
+    customDate: '',
     notes: '',
-    paymentDate: '',
+    paymentMethod: 'bank_transfer'
   });
 
-  // Data for dropdowns
-  const [tenants, setTenants] = useState([]);
-  const [apartments, setApartments] = useState([]);
+  // Search states
+  const [tenantSearchQuery, setTenantSearchQuery] = useState('');
+  const [tenantSearchResults, setTenantSearchResults] = useState([]);
+  const [apartmentSearchQuery, setApartmentSearchQuery] = useState('');
+  const [apartmentSearchResults, setApartmentSearchResults] = useState([]);
+  const [isSearchingTenants, setIsSearchingTenants] = useState(false);
+  const [isSearchingApartments, setIsSearchingApartments] = useState(false);
 
-  // Chunked processing state
-  const [processingDetails, setProcessingDetails] = useState({
-    tempFileId: null,
-    totalChunks: 0,
-    processedChunks: 0,
-    currentChunk: 0,
-    totalTransactions: 0,
-    chunkSize: 0,
-    paused: false,
-    stopped: false,
-    originalTransactions: [],
-    isChunkedMode: false
-  });
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  const [showProgressDialog, setShowProgressDialog] = useState(false);
-  const [processingStartTime, setProcessingStartTime] = useState(null);
+  // Create refs
+  const fileInputRef = useRef(null);
+  const tenantSearchTimeoutRef = useRef(null);
+  const apartmentSearchTimeoutRef = useRef(null);
 
-  // Load data on component mount
+  // Initialize
   useEffect(() => {
     checkGrokStatus();
-    fetchTenants();
-    fetchApartments();
   }, []);
 
-  // Update filtered transactions when transactions or filter changes
   useEffect(() => {
-    let filtered = transactions;
+    if (currentTab === 1) {
+      loadPreviousUploads();
+    }
+  }, [currentTab]);
 
-    switch (filterStatus) {
-      case 'matched':
-        filtered = transactions.filter(t => t.confidence > 0.8);
-        break;
-      case 'unmatched':
-        filtered = transactions.filter(t => t.confidence <= 0.8);
-        break;
-      default:
-        filtered = transactions;
+  // Search functions
+  const searchTenants = async (query) => {
+    if (!query || query.length < 2) {
+      setTenantSearchResults([]);
+      return;
     }
 
-    setFilteredTransactions(filtered);
-    setPage(0); // Reset to first page when filter changes
-  }, [transactions, filterStatus]);
-
-  const fetchTenants = async () => {
+    setIsSearchingTenants(true);
     try {
-      const response = await fetch('/api/csv-payments/tenants', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/csv-payments/tenants/search?query=${encodeURIComponent(query)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
+
       if (response.ok) {
-        const data = await response.json();
-        setTenants(data);
+        const results = await response.json();
+        setTenantSearchResults(results);
       }
     } catch (error) {
-      console.error('Error fetching tenants:', error);
+      console.error('Error searching tenants:', error);
+    } finally {
+      setIsSearchingTenants(false);
     }
   };
 
-  const fetchApartments = async () => {
+  const searchApartments = async (query) => {
+    if (!query || query.length < 2) {
+      setApartmentSearchResults([]);
+      return;
+    }
+
+    setIsSearchingApartments(true);
     try {
-      const response = await fetch('/api/csv-payments/apartments', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      const token = localStorage.getItem('token');
+      const response = await fetch(`/api/csv-payments/apartments/search?query=${encodeURIComponent(query)}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
       });
+
       if (response.ok) {
-        const data = await response.json();
-        setApartments(data);
+        const results = await response.json();
+        setApartmentSearchResults(results);
       }
     } catch (error) {
-      console.error('Error fetching apartments:', error);
+      console.error('Error searching apartments:', error);
+    } finally {
+      setIsSearchingApartments(false);
     }
   };
 
+  // Debounced search handlers
+  const handleTenantSearch = (query) => {
+    setTenantSearchQuery(query);
+
+    if (tenantSearchTimeoutRef.current) {
+      clearTimeout(tenantSearchTimeoutRef.current);
+    }
+
+    tenantSearchTimeoutRef.current = setTimeout(() => {
+      searchTenants(query);
+    }, 300);
+  };
+
+  const handleApartmentSearch = (query) => {
+    setApartmentSearchQuery(query);
+
+    if (apartmentSearchTimeoutRef.current) {
+      clearTimeout(apartmentSearchTimeoutRef.current);
+    }
+
+    apartmentSearchTimeoutRef.current = setTimeout(() => {
+      searchApartments(query);
+    }, 300);
+  };
+
+  // Existing functions
   const checkGrokStatus = async () => {
     try {
+      setGrokStatus(prev => ({ ...prev, checking: true }));
+      const token = localStorage.getItem('token');
       const response = await fetch('/api/csv-payments/grok-status', {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setGrokStatus({
-          configured: data.configured,
-          api_working: data.api_working,
-          fullyOperational: data.configured && data.api_working,
-          checking: false
-        });
-      } else {
-        setGrokStatus({ configured: false, checking: false, fullyOperational: false });
+      if (response.status === 401) {
+        console.error('Authentication required. Please log in.');
+        return;
       }
+
+      const data = await response.json();
+      setGrokStatus({
+        checking: false,
+        fullyOperational: data.fullyOperational || false,
+        api_working: data.api_working || false
+      });
     } catch (error) {
-      console.error('Error checking Grok status:', error);
-      setGrokStatus({ configured: false, checking: false, fullyOperational: false });
+      console.error('Failed to check Grok status:', error);
+      setGrokStatus({
+        checking: false,
+        fullyOperational: false,
+        api_working: false
+      });
     }
   };
 
-  const handleFileSelect = (event) => {
-    const selectedFile = event.target.files[0];
-    if (selectedFile) {
-      const allowedTypes = ['text/csv', 'text/plain', 'application/csv'];
-      const fileExtension = selectedFile.name.split('.').pop().toLowerCase();
+  const handleFileSelect = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
 
-      if (!allowedTypes.includes(selectedFile.type) && !['csv', 'txt'].includes(fileExtension)) {
-        showNotification('Please select a CSV or TXT file', 'error');
-        return;
-      }
-
-      if (selectedFile.size > 50 * 1024 * 1024) {
-        showNotification('File too large. Maximum size is 50MB', 'error');
-        return;
-      }
-
-      setFile(selectedFile);
-      setResults(null);
-      setTransactions([]);
-      setPage(0);
-      setFilterStatus('all');
-      setProcessingDetails({
-        tempFileId: null,
-        totalChunks: 0,
-        processedChunks: 0,
-        currentChunk: 0,
-        totalTransactions: 0,
-        chunkSize: 0,
-        paused: false,
-        stopped: false,
-        originalTransactions: [],
-        isChunkedMode: false
-      });
+    if (!file.name.toLowerCase().endsWith('.csv') && !file.name.toLowerCase().endsWith('.txt')) {
+      alert('Please select a CSV or TXT file.');
+      return;
     }
+
+    if (file.size > 50 * 1024 * 1024) {
+      alert('File size must be less than 50MB.');
+      return;
+    }
+
+    setProcessing(true);
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('Authentication required. Please log in.');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/csv-payments/process-csv-simple', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      const data = await response.json();
+
+      if (response.status === 401) {
+        alert('Authentication failed. Please log in again.');
+        return;
+      }
+
+      if (data.error) {
+        alert(`Error processing file: ${data.error}`);
+        return;
+      }
+
+      setTransactions(data.transactions || []);
+      setFilteredTransactions(data.transactions || []);
+
+      alert(`Successfully processed ${data.transactions?.length || 0} transactions. Auto-matched: ${data.auto_matched || 0}`);
+
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Failed to upload and process the file. Please try again.');
+    } finally {
+      setProcessing(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleUploadClick = () => {
+    if (processing) return;
+    fileInputRef.current?.click();
+  };
+
+  const loadPreviousUploads = async () => {
+    setPreviousUploads(prev => ({ ...prev, loading: true }));
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('Authentication required');
+        setPreviousUploads(prev => ({ ...prev, loading: false }));
+        return;
+      }
+
+      const response = await fetch('/api/csv-payments/previous-uploads', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.status === 401) {
+        console.error('Authentication failed');
+        setPreviousUploads(prev => ({ ...prev, loading: false }));
+        return;
+      }
+
+      const data = await response.json();
+
+      setPreviousUploads({
+        loading: false,
+        unassigned: data.unassigned || [],
+        matched: data.matched || [],
+        summary: data.summary || {
+          unassigned: { count: 0, total_amount: 0 },
+          matched: { count: 0, total_amount: 0 },
+          assigned: { count: 0, total_amount: 0 },
+          rejected: { count: 0, total_amount: 0 }
+        }
+      });
+    } catch (error) {
+      console.error('Failed to load previous uploads:', error);
+      setPreviousUploads(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleTabChange = (event, newValue) => {
+    setCurrentTab(newValue);
+    setPage(0);
   };
 
   const handlePageChange = (event, newPage) => {
@@ -221,1058 +292,1030 @@ const CSVPaymentProcessor = ({ showNotification }) => {
     setPage(0);
   };
 
-  const handleFilterChange = (event) => {
-    setFilterStatus(event.target.value);
-  };
-
-  const openAssignmentDialog = (transaction) => {
-    const transactionDate = transaction.date || new Date().toISOString().split('T')[0];
-
-    setAssignmentDialog({
-      open: true,
-      transaction,
-      selectedTenant: null,
-      selectedApartment: null,
-      customAmount: transaction.amount?.toString() || '',
-      notes: transaction.reference || '',
-      paymentDate: transactionDate,
-    });
-  };
-
-  const closeAssignmentDialog = () => {
-    setAssignmentDialog({
-      open: false,
-      transaction: null,
-      selectedTenant: null,
-      selectedApartment: null,
-      customAmount: '',
-      notes: '',
-      paymentDate: '',
-    });
-  };
-
-  const handleManualAssignment = async () => {
-    const { transaction, selectedTenant, selectedApartment, customAmount, notes, paymentDate } = assignmentDialog;
-
-    if (!selectedTenant || !selectedApartment || !customAmount || !paymentDate) {
-      showNotification('Please fill in all required fields', 'error');
-      return;
-    }
-
+  const handleAutoAssignMatched = async () => {
     try {
-      const response = await fetch('/api/csv-payments/manual-assign-payment', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          transaction_data: {
-            csv_line: transaction.csv_line,
-            sender: transaction.sender,
-            original_amount: transaction.amount,
-            date: transaction.date,
-            reference: transaction.reference
-          },
-          assignment_data: {
-            tenant_id: selectedTenant.id,
-            apartment_id: selectedApartment.id,
-            amount: parseFloat(customAmount),
-            payment_date: paymentDate,
-            notes: notes,
-            assigned_manually: true
-          }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-
-      // Update the transaction in the local state
-      setTransactions(prev => prev.map(t =>
-        t.csv_line === transaction.csv_line ? {
-          ...t,
-          suggested_tenant: selectedTenant.name,
-          suggested_apartment: selectedApartment.address || selectedApartment.name,
-          confidence: 1.0,
-          amount: parseFloat(customAmount),
-          manually_assigned: true
-        } : t
-      ));
-
-      showNotification(
-        `Payment of €${customAmount} assigned to ${selectedTenant.name} at ${selectedApartment.address || selectedApartment.name}`,
-        'success'
-      );
-
-      closeAssignmentDialog();
-
-    } catch (error) {
-      console.error('Error assigning payment:', error);
-      showNotification('Error assigning payment. Please try again.', 'error');
-    }
-  };
-
-  const processFile = async () => {
-    if (!file) {
-      showNotification('Please select a file first', 'error');
-      return;
-    }
-
-    if (!grokStatus.fullyOperational) {
-      showNotification('Grok AI is not fully operational', 'error');
-      return;
-    }
-
-    setProcessing(true);
-    setProgress(10);
-    setStatus('Uploading file...');
-    setProcessingStartTime(Date.now());
-
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      setProgress(30);
-      setStatus('Detecting CSV columns...');
-
-      // CREATE API INSTANCE WITH LONGER TIMEOUT
-      const longTimeoutApi = createLongTimeoutApi();
-
-      // Try the simple endpoint first with longer timeout
-      const response = await longTimeoutApi.post('/csv-payments/process-csv-simple', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data'
-        },
-        timeout: 600000 // 10 minutes
-      });
-
-      const data = response.data;
-
-      // Check if it suggests chunked processing
-      if (data.suggestion === 'use_chunked_processing') {
-        showNotification(
-          `Large file detected (${data.line_count} lines). Switching to chunked processing for better performance.`,
-          'info'
-        );
-
-        // Start chunked processing
-        await startChunkedProcessing();
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('Authentication required. Please log in.');
         return;
       }
 
-      // Handle normal processing results
-      setProgress(100);
-      setStatus('Complete!');
-      setResults(data);
-      setTransactions(data.manual_review_transactions || []);
-
-      const totalCount = data.summary?.manual_review_count || 0;
-      const totalAmount = data.summary?.manual_review_amount || 0;
-
-      showNotification(
-        `Found ${totalCount} transactions totaling €${totalAmount.toFixed(2)}`,
-        'success'
-      );
-
-    } catch (error) {
-      console.error('Error processing CSV:', error);
-
-      // Better error handling for timeout
-      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
-        showNotification('Processing is taking longer than expected. Try using chunked processing for large files.', 'warning');
-      } else if (error.response && error.response.status === 504) {
-        showNotification('Server timeout. Large file detected - switching to chunked processing automatically.', 'info');
-        // Automatically try chunked processing
-        try {
-          await startChunkedProcessing();
-          return;
-        } catch (chunkedError) {
-          showNotification('Both processing methods failed. Please try a smaller file.', 'error');
-        }
-      } else {
-        showNotification('Processing failed. Please try again.', 'error');
-      }
-      setProgress(0);
-      setStatus('');
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  const startChunkedProcessing = async () => {
-    try {
-      setShowProgressDialog(true);
-      setProcessingDetails(prev => ({ ...prev, isChunkedMode: true }));
-
-      const formData = new FormData();
-      formData.append('file', file);
-
-      setProgress(20);
-      setStatus('Analyzing CSV structure for chunked processing...');
-
-      // USE LONGER TIMEOUT API FOR CHUNKED PROCESSING TOO
-      const longTimeoutApi = createLongTimeoutApi();
-
-      const response = await longTimeoutApi.post('/csv-payments/process-csv-chunked', formData, {
+      const response = await fetch('/api/csv-payments/auto-assign-matched', {
+        method: 'POST',
         headers: {
-          'Content-Type': 'multipart/form-data'
-        },
-        timeout: 300000 // 5 minutes for initial analysis
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
       });
 
-      const data = response.data;
-
-      if (data.processing_started) {
-        setProcessingDetails(prev => ({
-          ...prev,
-          tempFileId: data.temp_file_id,
-          totalChunks: data.total_chunks,
-          totalTransactions: data.total_transactions,
-          chunkSize: data.chunk_size,
-          paused: false,
-          stopped: false,
-          currentChunk: 0
-        }));
-
-        setProgress(30);
-        setStatus(`Found ${data.total_transactions} transactions. Starting AI analysis...`);
-
-        // Start processing chunks
-        processNextChunk(0, data.total_chunks, data.temp_file_id);
+      if (response.status === 401) {
+        alert('Authentication failed. Please log in again.');
+        return;
       }
 
+      const data = await response.json();
+
+      if (data.success) {
+        alert(`Successfully assigned ${data.assigned_count} payments.`);
+        loadPreviousUploads();
+      } else {
+        alert(`Error: ${data.error}`);
+      }
     } catch (error) {
-      console.error('Error starting chunked processing:', error);
-      showNotification('Failed to start chunked processing. Please try again.', 'error');
-      setProcessing(false);
-      setShowProgressDialog(false);
-      setProgress(0);
-      setStatus('');
+      console.error('Failed to auto-assign matched payments:', error);
+      alert('Failed to auto-assign payments. Please try again.');
     }
   };
 
-  const processNextChunk = async (chunkNumber, totalChunks, tempFileId) => {
-    if (processingDetails.paused || processingDetails.stopped || chunkNumber >= totalChunks) {
+  // Enhanced assignment handler
+  const handleAssignTransaction = (transaction) => {
+    const transactionDate = transaction.date || transaction.payment_date || new Date().toISOString().split('T')[0];
+
+    setAssignmentDialog({
+      open: true,
+      transaction: transaction,
+      selectedTenant: null,
+      selectedApartment: null,
+      customAmount: transaction.amount?.toString() || '',
+      customDate: transactionDate,
+      notes: transaction.reference || transaction.description || '',
+      paymentMethod: 'bank_transfer'
+    });
+
+    // Clear previous search results
+    setTenantSearchResults([]);
+    setApartmentSearchResults([]);
+    setTenantSearchQuery('');
+    setApartmentSearchQuery('');
+  };
+
+  const handleRejectPreviousPayment = async (payment) => {
+    if (!window.confirm('Are you sure you want to reject this payment?')) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('Authentication required. Please log in.');
+        return;
+      }
+
+      const response = await fetch(`/api/csv-payments/reject/${payment.id}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.status === 401) {
+        alert('Authentication failed. Please log in again.');
+        return;
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        loadPreviousUploads();
+      } else {
+        alert(`Error: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('Failed to reject payment:', error);
+      alert('Failed to reject payment. Please try again.');
+    }
+  };
+
+  // Enhanced assignment submission
+  const handleAssignmentSubmit = async () => {
+    const { transaction, selectedTenant, selectedApartment, customAmount, customDate, notes, paymentMethod } = assignmentDialog;
+
+    if (!selectedTenant || !selectedApartment) {
+      alert('Please select both tenant and apartment');
+      return;
+    }
+
+    if (!customAmount || parseFloat(customAmount) <= 0) {
+      alert('Please enter a valid amount');
+      return;
+    }
+
+    if (!customDate) {
+      alert('Please select a payment date');
       return;
     }
 
     try {
-      setStatus(`Processing chunk ${chunkNumber + 1} of ${totalChunks}...`);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('Authentication required. Please log in.');
+        return;
+      }
 
-      // USE STANDARD FETCH WITH LONGER TIMEOUT FOR CHUNK PROCESSING
-      const response = await fetch(`/api/csv-payments/process-chunk/${tempFileId}/${chunkNumber}`, {
+      const endpoint = `/api/csv-payments/assign/${transaction.id}`;
+      const requestBody = {
+        tenant_id: selectedTenant.id,
+        apartment_id: selectedApartment.id,
+        amount: parseFloat(customAmount),
+        payment_date: customDate,
+        notes: notes,
+        payment_method: paymentMethod
+      };
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        // Note: fetch doesn't have timeout, but chunks should be faster
-        signal: AbortSignal.timeout(120000) // 2 minutes per chunk
+        body: JSON.stringify(requestBody)
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      if (response.status === 401) {
+        alert('Authentication failed. Please log in again.');
+        return;
       }
 
-      const chunkData = await response.json();
+      const data = await response.json();
 
-      // Update progress
-      const newProgress = 30 + (60 * (chunkNumber + 1) / totalChunks);
-      setProgress(newProgress);
-
-      // Update processing details
-      setProcessingDetails(prev => ({
-        ...prev,
-        processedChunks: chunkData.chunk_processed,
-        currentChunk: chunkNumber + 1
-      }));
-
-      // Add chunk results to transactions
-      setTransactions(prev => [...prev, ...chunkData.chunk_results]);
-
-      showNotification(
-        `Chunk ${chunkData.chunk_processed}/${totalChunks} complete: ${chunkData.rent_payments_found} payments found`,
-        'info'
-      );
-
-      // Continue with next chunk or finish
-      if (chunkData.processing_complete) {
-        finishChunkedProcessing(tempFileId);
-      } else {
-        // Process next chunk with a small delay
-        setTimeout(() => {
-          if (!processingDetails.paused && !processingDetails.stopped) {
-            processNextChunk(chunkNumber + 1, totalChunks, tempFileId);
-          }
-        }, 500);
-      }
-
-    } catch (error) {
-      console.error('Error processing chunk:', error);
-      showNotification(`Error processing chunk ${chunkNumber + 1}: ${error.message}`, 'error');
-
-      // Continue with next chunk despite error
-      if (chunkNumber + 1 < totalChunks) {
-        setTimeout(() => {
-          if (!processingDetails.paused && !processingDetails.stopped) {
-            processNextChunk(chunkNumber + 1, totalChunks, tempFileId);
-          }
-        }, 1000);
-      } else {
-        finishChunkedProcessing(tempFileId);
-      }
-    }
-  };
-
-  const finishChunkedProcessing = async (tempFileId) => {
-    try {
-      setStatus('Finalizing results...');
-      setProgress(90);
-
-      // Get final results
-      const response = await fetch(`/api/csv-payments/get-results/${tempFileId}`, {
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-      });
-
-      if (response.ok) {
-        const finalData = await response.json();
-
-        setResults({
-          summary: {
-            ...finalData.summary,
-            file_size_mb: Math.round(file.size / (1024 * 1024) * 100) / 100,
-            processing_method: "chunked"
-          }
+      if (data.success) {
+        alert(`Payment assigned successfully to ${selectedTenant.name}!`);
+        setAssignmentDialog({
+          open: false,
+          transaction: null,
+          selectedTenant: null,
+          selectedApartment: null,
+          customAmount: '',
+          customDate: '',
+          notes: '',
+          paymentMethod: 'bank_transfer'
         });
 
-        setTransactions(finalData.rent_payments);
-
-        showNotification(
-          `Processing complete! Found ${finalData.summary.total_transactions_found} rent payments totaling €${finalData.summary.total_amount.toFixed(2)}`,
-          'success'
-        );
+        loadPreviousUploads();
+      } else {
+        alert(`Error: ${data.error || 'Assignment failed'}`);
       }
-
-      setProgress(100);
-      setStatus('Processing complete!');
-
     } catch (error) {
-      console.error('Error finalizing results:', error);
-      showNotification('Error finalizing results', 'error');
-    } finally {
-      setProcessing(false);
-      setTimeout(() => {
-        setShowProgressDialog(false);
-      }, 2000);
+      console.error('Failed to assign payment:', error);
+      alert('Failed to assign payment. Please try again.');
     }
   };
 
-  const pauseProcessing = () => {
-    setProcessingDetails(prev => ({ ...prev, paused: true }));
-    setStatus('Processing paused');
-  };
+  // Auto-select apartment when tenant is selected
+  const handleTenantSelect = (tenant) => {
+    setAssignmentDialog(prev => ({
+      ...prev,
+      selectedTenant: tenant,
+      selectedApartment: tenant.current_apartment ? {
+        id: tenant.current_apartment.id,
+        address: tenant.current_apartment.address
+      } : null
+    }));
 
-  const resumeProcessing = () => {
-    setProcessingDetails(prev => ({ ...prev, paused: false }));
-    setStatus('Resuming processing...');
-    // Continue processing from current chunk
-    const { currentChunk, totalChunks, tempFileId } = processingDetails;
-    if (currentChunk < totalChunks) {
-      processNextChunk(currentChunk, totalChunks, tempFileId);
+    setTenantSearchQuery(tenant.name);
+    setTenantSearchResults([]);
+
+    // If tenant has current apartment, auto-fill apartment search
+    if (tenant.current_apartment) {
+      setApartmentSearchQuery(tenant.current_apartment.address);
+      setApartmentSearchResults([]);
     }
   };
 
-  const stopProcessing = () => {
-    setProcessingDetails(prev => ({ ...prev, stopped: true }));
-    setProcessing(false);
-    setShowProgressDialog(false);
-    setProgress(0);
-    setStatus('Processing stopped');
-    showNotification('Processing stopped by user', 'warning');
+  const handleApartmentSelect = (apt) => {
+    setAssignmentDialog(prev => ({
+      ...prev,
+      selectedApartment: apt
+    }));
+
+    setApartmentSearchQuery(apt.address);
+    setApartmentSearchResults([]);
   };
 
-  const deleteTransaction = async (transaction) => {
-    try {
-      const response = await fetch('/api/csv-payments/delete-transaction', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          amount: transaction.amount,
-          date: transaction.date,
-          sender: transaction.sender,
-          reference: transaction.reference,
-          csv_line: transaction.csv_line
-        })
-      });
+  // Calculate displayed items for pagination
+  const displayedTransactions = currentTab === 0 ?
+    filteredTransactions.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage) :
+    [];
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+  const displayedPreviousPayments = currentTab === 1 ?
+    [...previousUploads.unassigned, ...previousUploads.matched].slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage) :
+    [];
 
-      setTransactions(prev => prev.filter(t =>
-        t.csv_line !== transaction.csv_line
-      ));
-
-      showNotification('Transaction deleted', 'success');
-    } catch (error) {
-      console.error('Error deleting transaction:', error);
-      showNotification('Error deleting transaction', 'error');
-    }
-  };
-
-  // Calculate pagination
-  const displayedTransactions = filteredTransactions.slice(
-    page * rowsPerPage,
-    page * rowsPerPage + rowsPerPage
-  );
+  const totalItems = currentTab === 0 ? filteredTransactions.length :
+    (previousUploads.unassigned.length + previousUploads.matched.length);
 
   return (
-    <Box sx={{ maxWidth: 1200, mx: 'auto', p: 3 }}>
+    <div style={{ maxWidth: 1400, margin: '0 auto', padding: 24, backgroundColor: '#f8fafc', minHeight: '100vh' }}>
       {/* Header */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <PaymentIcon sx={{ fontSize: 40, color: 'primary.main' }} />
-          CSV Payment Processor
-          <Chip
-            label={grokStatus.checking ? 'Checking...' : grokStatus.fullyOperational ? 'AI Ready' : 'AI Issues'}
-            color={grokStatus.api_working ? 'success' : 'warning'}
-            variant="outlined"
-            size="small"
-          />
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Upload CSV files to find potential tenant payments using AI column detection.
-          {processingDetails.isChunkedMode && " Large files processed in chunks with real-time progress."}
-        </Typography>
-      </Box>
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12 }}>
+          <h1 style={{ fontSize: '2.5rem', margin: 0, color: '#1e293b', fontWeight: '600' }}>Payment Processor</h1>
+          <span style={{
+            padding: '6px 16px',
+            borderRadius: 20,
+            fontSize: '0.875rem',
+            fontWeight: '500',
+            backgroundColor: grokStatus.api_working ? '#10b981' : '#f59e0b',
+            color: 'white',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+          }}>
+            {grokStatus.checking ? 'Checking...' : grokStatus.fullyOperational ? 'AI Ready' : 'AI Issues'}
+          </span>
+        </div>
+        <p style={{ color: '#64748b', margin: 0, fontSize: '1.1rem' }}>
+          Upload and process CSV files to identify potential tenant payments automatically.
+        </p>
+      </div>
 
-      {/* Upload Section */}
-      <Card sx={{ mb: 4 }}>
-        <CardContent>
-          <Grid container spacing={3}>
-            <Grid item xs={12} md={6}>
-              <Box sx={{ textAlign: 'center', py: 3, border: '2px dashed #ddd', borderRadius: 2 }}>
-                <UploadFileIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                <Typography variant="h6" gutterBottom>Upload CSV File</Typography>
-                <Typography variant="body2" color="text.secondary" paragraph>
-                  Bank statement CSV with transaction data (up to 50MB)
-                </Typography>
+      {/* Professional Tabs */}
+      <div style={{ backgroundColor: 'white', borderRadius: 12, boxShadow: '0 4px 6px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
+        <div style={{ borderBottom: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'flex', gap: 0 }}>
+            <button
+              style={{
+                padding: '16px 32px',
+                border: 'none',
+                background: currentTab === 0 ? '#3b82f6' : 'transparent',
+                color: currentTab === 0 ? 'white' : '#64748b',
+                cursor: 'pointer',
+                fontSize: '1rem',
+                fontWeight: '500',
+                transition: 'all 0.2s ease',
+                borderBottom: currentTab === 0 ? '3px solid #2563eb' : '3px solid transparent'
+              }}
+              onClick={() => handleTabChange(null, 0)}
+            >
+              Upload & Process
+            </button>
+            <button
+              style={{
+                padding: '16px 32px',
+                border: 'none',
+                background: currentTab === 1 ? '#3b82f6' : 'transparent',
+                color: currentTab === 1 ? 'white' : '#64748b',
+                cursor: 'pointer',
+                fontSize: '1rem',
+                fontWeight: '500',
+                transition: 'all 0.2s ease',
+                borderBottom: currentTab === 1 ? '3px solid #2563eb' : '3px solid transparent',
+                position: 'relative'
+              }}
+              onClick={() => handleTabChange(null, 1)}
+            >
+              Pending Assignments
+              {(previousUploads.summary.unassigned?.count + previousUploads.summary.matched?.count > 0) && (
+                <span style={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 8,
+                  background: '#dc2626',
+                  color: 'white',
+                  borderRadius: '50%',
+                  minWidth: 20,
+                  height: 20,
+                  fontSize: '0.75rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 'bold'
+                }}>
+                  {Math.min(99, previousUploads.summary.unassigned?.count + previousUploads.summary.matched?.count)}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        <div style={{ padding: 32 }}>
+          {/* Upload Tab */}
+          {currentTab === 0 && (
+            <div>
+              {/* Upload Section */}
+              <div style={{
+                backgroundColor: '#f8fafc',
+                borderRadius: 12,
+                padding: 32,
+                marginBottom: 32,
+                border: '2px dashed #cbd5e1',
+                textAlign: 'center'
+              }}>
+                <div style={{ fontSize: '4rem', marginBottom: 24 }}>📁</div>
+                <h3 style={{ marginBottom: 12, color: '#1e293b', fontSize: '1.5rem', fontWeight: '600' }}>Upload CSV File</h3>
+                <p style={{ color: '#64748b', marginBottom: 24, fontSize: '1.1rem' }}>
+                  Bank statement or transaction CSV file (up to 50MB)
+                </p>
 
                 <input
-                  accept=".csv,.txt"
-                  style={{ display: 'none' }}
-                  id="csv-upload"
+                  ref={fileInputRef}
                   type="file"
+                  accept=".csv,.txt"
                   onChange={handleFileSelect}
+                  disabled={processing}
+                  style={{ display: 'none' }}
                 />
-                <label htmlFor="csv-upload">
-                  <Button
-                    variant="outlined"
-                    component="span"
-                    startIcon={<UploadFileIcon />}
-                    disabled={processing}
-                  >
-                    Select File
-                  </Button>
-                </label>
 
-                {file && (
-                  <Box sx={{ mt: 2 }}>
-                    <Chip
-                      label={`${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`}
-                      color="primary"
-                      variant="outlined"
-                    />
-                  </Box>
-                )}
-              </Box>
-            </Grid>
-
-            <Grid item xs={12} md={6}>
-              <Typography variant="h6" gutterBottom>Process File</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                AI will analyze the CSV and automatically choose the best processing method based on file size
-              </Typography>
-
-              <Button
-                variant="contained"
-                startIcon={processing ? <CircularProgress size={20} /> : <SmartToyIcon />}
-                onClick={processFile}
-                disabled={!file || processing || !grokStatus.fullyOperational}
-                fullWidth
-                size="large"
-              >
-                {processing ? 'Processing...' : 'Process with AI'}
-              </Button>
-
-              {!grokStatus.fullyOperational && (
-                <Alert severity="warning" sx={{ mt: 2 }}>
-                  AI is not fully operational. Please check configuration.
-                </Alert>
-              )}
-
-              {/* Progress for simple processing */}
-              {processing && !processingDetails.isChunkedMode && (
-                <Box sx={{ mt: 3 }}>
-                  <Typography variant="body2" gutterBottom>{status}</Typography>
-                  <LinearProgress variant="determinate" value={progress} />
-                  <Typography variant="caption" color="text.secondary">
-                    {progress.toFixed(1)}% complete
-                  </Typography>
-                </Box>
-              )}
-
-              {/* Quick Stats for chunked processing */}
-              {processingDetails.totalTransactions > 0 && processingDetails.isChunkedMode && (
-                <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.50', borderRadius: 1 }}>
-                  <Typography variant="caption" display="block">
-                    Total Transactions: {processingDetails.totalTransactions}
-                  </Typography>
-                  <Typography variant="caption" display="block">
-                    Chunks: {processingDetails.totalChunks} Ã— {processingDetails.chunkSize}
-                  </Typography>
-                  <Typography variant="caption" display="block">
-                    Progress: {processingDetails.processedChunks}/{processingDetails.totalChunks}
-                  </Typography>
-                </Box>
-              )}
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-
-      {/* Processing Progress Dialog (for chunked processing) */}
-      <Dialog open={showProgressDialog} maxWidth="md" fullWidth>
-        <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <SmartToyIcon color="primary" />
-            Processing Large CSV File
-          </Box>
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ mb: 3 }}>
-            <Typography variant="body2" gutterBottom>{status}</Typography>
-            <LinearProgress variant="determinate" value={progress} sx={{ mb: 1 }} />
-            <Typography variant="caption" color="text.secondary">
-              {progress.toFixed(1)}% complete
-            </Typography>
-          </Box>
-
-          {processingDetails.totalChunks > 0 && (
-            <Grid container spacing={2} sx={{ mb: 3 }}>
-              <Grid item xs={3}>
-                <Card variant="outlined">
-                  <CardContent sx={{ textAlign: 'center', py: 2 }}>
-                    <Typography variant="h6">{processingDetails.processedChunks}</Typography>
-                    <Typography variant="caption">Chunks Done</Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={3}>
-                <Card variant="outlined">
-                  <CardContent sx={{ textAlign: 'center', py: 2 }}>
-                    <Typography variant="h6">{processingDetails.totalChunks}</Typography>
-                    <Typography variant="caption">Total Chunks</Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={3}>
-                <Card variant="outlined">
-                  <CardContent sx={{ textAlign: 'center', py: 2 }}>
-                    <Typography variant="h6">{transactions.length}</Typography>
-                    <Typography variant="caption">Payments Found</Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={3}>
-                <Card variant="outlined">
-                  <CardContent sx={{ textAlign: 'center', py: 2 }}>
-                    <Typography variant="h6">
-                      €{transactions.reduce((sum, t) => sum + (t.amount || 0), 0).toFixed(0)}
-                    </Typography>
-                    <Typography variant="caption">Total Amount</Typography>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
-          )}
-
-          {/* Real-time transaction preview */}
-          {transactions.length > 0 && (
-            <Box>
-              <Typography variant="subtitle2" gutterBottom>
-                Latest Payments Found ({transactions.slice(-5).length} of {transactions.length}):
-              </Typography>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Amount</TableCell>
-                    <TableCell>Sender</TableCell>
-                    <TableCell>Match</TableCell>
-                    <TableCell>Line</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {transactions.slice(-5).map((transaction, index) => (
-                    <TableRow key={index}>
-                      <TableCell>€{transaction.amount?.toFixed(2)}</TableCell>
-                      <TableCell>{transaction.sender?.substring(0, 20)}...</TableCell>
-                      <TableCell>
-                        {transaction.suggested_tenant ? (
-                          <Chip label={transaction.suggested_tenant} size="small" color="success" />
-                        ) : (
-                          <Chip label="No match" size="small" variant="outlined" />
-                        )}
-                      </TableCell>
-                      <TableCell>{transaction.csv_line}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          {processing && !processingDetails.paused && (
-            <Button
-              startIcon={<PauseIcon />}
-              onClick={pauseProcessing}
-              color="warning"
-            >
-              Pause
-            </Button>
-          )}
-          {processing && processingDetails.paused && (
-            <Button
-              startIcon={<PlayArrowIcon />}
-              onClick={resumeProcessing}
-              color="primary"
-            >
-              Resume
-            </Button>
-          )}
-          <Button
-            startIcon={<StopIcon />}
-            onClick={stopProcessing}
-            color="error"
-          >
-            Stop
-          </Button>
-          <Button onClick={() => setShowProgressDialog(false)}>
-            Minimize
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Manual Assignment Dialog */}
-      <Dialog open={assignmentDialog.open} maxWidth="md" fullWidth>
-        <DialogTitle>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <PersonAddIcon color="primary" />
-            Manually Assign Payment
-          </Box>
-        </DialogTitle>
-        <DialogContent>
-          <Box sx={{ mt: 2 }}>
-            {/* Transaction Details */}
-            <Card variant="outlined" sx={{ mb: 3 }}>
-              <CardContent>
-                <Typography variant="h6" gutterBottom>Transaction Details</Typography>
-                <Grid container spacing={2}>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" color="text.secondary">Original Sender:</Typography>
-                    <Typography variant="body1">{assignmentDialog.transaction?.sender}</Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" color="text.secondary">Original Amount:</Typography>
-                    <Typography variant="body1">€{assignmentDialog.transaction?.amount?.toFixed(2)}</Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" color="text.secondary">Date:</Typography>
-                    <Typography variant="body1">{assignmentDialog.transaction?.date}</Typography>
-                  </Grid>
-                  <Grid item xs={6}>
-                    <Typography variant="body2" color="text.secondary">CSV Line:</Typography>
-                    <Typography variant="body1">{assignmentDialog.transaction?.csv_line}</Typography>
-                  </Grid>
-                  <Grid item xs={12}>
-                    <Typography variant="body2" color="text.secondary">Reference:</Typography>
-                    <Typography variant="body1">{assignmentDialog.transaction?.reference || 'N/A'}</Typography>
-                  </Grid>
-                </Grid>
-              </CardContent>
-            </Card>
-
-            <Divider sx={{ mb: 3 }} />
-
-            {/* Assignment Form */}
-            <Typography variant="h6" gutterBottom>Payment Assignment</Typography>
-
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <Autocomplete
-                  options={tenants}
-                  getOptionLabel={(option) => option.name || ''}
-                  value={assignmentDialog.selectedTenant}
-                  onChange={(event, newValue) => {
-                    setAssignmentDialog(prev => ({ ...prev, selectedTenant: newValue }));
+                <button
+                  onClick={handleUploadClick}
+                  disabled={processing}
+                  style={{
+                    padding: '16px 32px',
+                    backgroundColor: processing ? '#9ca3af' : '#3b82f6',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 8,
+                    cursor: processing ? 'not-allowed' : 'pointer',
+                    fontSize: '1.1rem',
+                    fontWeight: '500',
+                    transition: 'background-color 0.2s',
+                    boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
                   }}
-                  renderInput={(params) => (
-                    <TextField {...params} label="Select Tenant *" fullWidth />
-                  )}
-                  renderOption={(props, option) => (
-                    <li {...props}>
-                      <Box>
-                        <Typography variant="body2">{option.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {option.email || 'No email'} - {option.apartment_address || 'No apartment'}
-                        </Typography>
-                      </Box>
-                    </li>
-                  )}
-                />
-              </Grid>
+                >
+                  {processing ? 'Processing...' : 'Choose File'}
+                </button>
+              </div>
 
-              <Grid item xs={12} md={6}>
-                <Autocomplete
-                  options={apartments}
-                  getOptionLabel={(option) => option.address || option.name || ''}
-                  value={assignmentDialog.selectedApartment}
-                  onChange={(event, newValue) => {
-                    setAssignmentDialog(prev => ({ ...prev, selectedApartment: newValue }));
-                  }}
-                  renderInput={(params) => (
-                    <TextField {...params} label="Select Apartment *" fullWidth />
-                  )}
-                  renderOption={(props, option) => (
-                    <li {...props}>
-                      <Box>
-                        <Typography variant="body2">{option.address || option.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          €{option.rent || 'N/A'}/month - {option.status}
-                        </Typography>
-                      </Box>
-                    </li>
-                  )}
-                />
-              </Grid>
+              {/* Results Section */}
+              {transactions.length > 0 && (
+                <div style={{
+                  backgroundColor: 'white',
+                  borderRadius: 12,
+                  padding: 24,
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                  border: '1px solid #e2e8f0'
+                }}>
+                  <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ color: '#1e293b', fontSize: '1.25rem', fontWeight: '600' }}>Processed Transactions ({transactions.length})</h3>
+                    <div style={{ color: '#64748b', fontSize: '0.875rem' }}>
+                      Showing {page * rowsPerPage + 1}-{Math.min((page + 1) * rowsPerPage, totalItems)} of {totalItems}
+                    </div>
+                  </div>
 
-              <Grid item xs={12} md={6}>
-                <TextField
-                  label="Payment Amount *"
-                  type="number"
-                  inputProps={{ step: "0.01", min: "0" }}
-                  value={assignmentDialog.customAmount}
-                  onChange={(e) => setAssignmentDialog(prev => ({
-                    ...prev,
-                    customAmount: e.target.value
-                  }))}
-                  fullWidth
-                  helperText="Adjust if different from original amount"
-                />
-              </Grid>
-
-              <Grid item xs={12} md={6}>
-                <TextField
-                  label="Payment Date *"
-                  type="date"
-                  value={assignmentDialog.paymentDate}
-                  onChange={(e) => setAssignmentDialog(prev => ({
-                    ...prev,
-                    paymentDate: e.target.value
-                  }))}
-                  fullWidth
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-
-              <Grid item xs={12}>
-                <TextField
-                  label="Additional Notes"
-                  multiline
-                  rows={3}
-                  value={assignmentDialog.notes}
-                  onChange={(e) => setAssignmentDialog(prev => ({
-                    ...prev,
-                    notes: e.target.value
-                  }))}
-                  fullWidth
-                  placeholder="Any additional notes about this payment..."
-                />
-              </Grid>
-            </Grid>
-
-            {/* Assignment Preview */}
-            {assignmentDialog.selectedTenant && assignmentDialog.selectedApartment && assignmentDialog.customAmount && (
-              <Box sx={{ mt: 3, p: 2, bgcolor: 'success.50', borderRadius: 1, border: '1px solid', borderColor: 'success.200' }}>
-                <Typography variant="h6" color="success.main" gutterBottom>Assignment Preview</Typography>
-                <Typography variant="body2">
-                  <strong>€{assignmentDialog.customAmount}</strong> payment from <strong>{assignmentDialog.transaction?.sender}</strong>
-                  {' '}will be assigned to <strong>{assignmentDialog.selectedTenant.name}</strong>
-                  {' '}for apartment <strong>{assignmentDialog.selectedApartment.address || assignmentDialog.selectedApartment.name}</strong>
-                  {' '}on <strong>{assignmentDialog.paymentDate}</strong>
-                </Typography>
-              </Box>
-            )}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button
-            onClick={closeAssignmentDialog}
-            startIcon={<CancelIcon />}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={handleManualAssignment}
-            variant="contained"
-            startIcon={<SaveIcon />}
-            disabled={!assignmentDialog.selectedTenant || !assignmentDialog.selectedApartment || !assignmentDialog.customAmount || !assignmentDialog.paymentDate}
-          >
-            Assign Payment
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Results */}
-      {results && (
-        <Box>
-          {/* Summary Cards */}
-          <Grid container spacing={3} sx={{ mb: 4 }}>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6" color="primary.main">
-                    {transactions.length}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Rent Payments Found
-                  </Typography>
-                  <Typography variant="caption" color="primary.main">
-                    €{transactions.reduce((sum, t) => sum + (t.amount || 0), 0).toFixed(2)}
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6" color="success.main">
-                    {transactions.filter(t => t.confidence > 0.8).length}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Auto-Matched
-                  </Typography>
-                  <Typography variant="caption" color="success.main">
-                    {transactions.length > 0 ? Math.round(transactions.filter(t => t.confidence > 0.8).length / transactions.length * 100) : 0}% matched
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6" color="warning.main">
-                    {transactions.filter(t => t.confidence <= 0.8 && !t.manually_assigned).length}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Need Manual Review
-                  </Typography>
-                  <Typography variant="caption" color="warning.main">
-                    Requires assignment
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <Card>
-                <CardContent>
-                  <Typography variant="h6">
-                    {results.summary?.processing_time_seconds || 0}s
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Processing Time
-                  </Typography>
-                  <Typography variant="caption">
-                    {results.summary?.file_size_mb || 0}MB â€¢ {results.summary?.processing_method || 'standard'}
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-
-          {/* Transactions Table */}
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                <Typography variant="h6">
-                  Found Transactions
-                </Typography>
-
-                {/* Filter Controls */}
-                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                  <FormControl size="small" sx={{ minWidth: 120 }}>
-                    <InputLabel>Filter</InputLabel>
-                    <Select
-                      value={filterStatus}
-                      label="Filter"
-                      onChange={handleFilterChange}
-                    >
-                      <MenuItem value="all">All ({transactions.length})</MenuItem>
-                      <MenuItem value="matched">Auto-Matched ({transactions.filter(t => t.confidence > 0.8).length})</MenuItem>
-                      <MenuItem value="unmatched">Unmatched ({transactions.filter(t => t.confidence <= 0.8).length})</MenuItem>
-                    </Select>
-                  </FormControl>
-                </Box>
-              </Box>
-
-              {transactions.length === 0 ? (
-                <Alert severity="info">No rent payments found</Alert>
-              ) : (
-                <>
-                  <TableContainer component={Paper} variant="outlined">
-                    <Table>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Date</TableCell>
-                          <TableCell>Amount</TableCell>
-                          <TableCell>Sender</TableCell>
-                          <TableCell>Reference</TableCell>
-                          <TableCell>Assignment Status</TableCell>
-                          <TableCell>CSV Line</TableCell>
-                          <TableCell align="center">Actions</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {displayedTransactions.map((transaction, index) => (
-                          <TableRow key={`${transaction.csv_line}-${index}`}>
-                            <TableCell>
-                              <Typography variant="body2">
-                                {transaction.date}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2" fontWeight="bold">
-                                €{transaction.amount?.toFixed(2)}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2">
-                                {transaction.sender?.substring(0, 25)}
-                                {transaction.sender?.length > 25 && '...'}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="caption" color="text.secondary">
-                                {transaction.reference?.substring(0, 30)}
-                                {transaction.reference?.length > 30 && '...'}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              {transaction.manually_assigned ? (
-                                <Stack direction="column" spacing={0.5}>
-                                  <Chip
-                                    label="Manually Assigned"
-                                    color="info"
-                                    size="small"
-                                  />
-                                  <Typography variant="caption">
-                                    {transaction.suggested_tenant}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    {transaction.suggested_apartment}
-                                  </Typography>
-                                </Stack>
-                              ) : transaction.suggested_tenant ? (
-                                <Stack direction="column" spacing={0.5}>
-                                  <Chip
-                                    label="Auto-Matched"
-                                    color="success"
-                                    size="small"
-                                  />
-                                  <Typography variant="caption">
-                                    {transaction.suggested_tenant}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    {transaction.suggested_apartment}
-                                  </Typography>
-                                </Stack>
-                              ) : (
-                                <Stack direction="column" spacing={0.5}>
-                                  <Chip
-                                    label="Needs Assignment"
-                                    color="warning"
-                                    size="small"
-                                  />
-                                  <Typography variant="caption" color="text.secondary">
-                                    Click "Assign" to match
-                                  </Typography>
-                                </Stack>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Chip
-                                label={`Line ${transaction.csv_line}`}
-                                size="small"
-                                variant="outlined"
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Stack direction="row" spacing={1} justifyContent="center">
-                                <Tooltip title={transaction.manually_assigned ? "Edit Assignment" : "Assign Payment"}>
-                                  <IconButton
-                                    size="small"
-                                    color="primary"
-                                    onClick={() => openAssignmentDialog(transaction)}
-                                  >
-                                    <AssignmentIcon />
-                                  </IconButton>
-                                </Tooltip>
-
-                                <Tooltip title="Delete Transaction">
-                                  <IconButton
-                                    size="small"
-                                    color="error"
-                                    onClick={() => deleteTransaction(transaction)}
-                                  >
-                                    <DeleteIcon />
-                                  </IconButton>
-                                </Tooltip>
-                              </Stack>
-                            </TableCell>
-                          </TableRow>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ backgroundColor: '#f1f5f9' }}>
+                          <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#475569' }}>Date</th>
+                          <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#475569' }}>Amount</th>
+                          <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#475569' }}>Sender</th>
+                          <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#475569' }}>Reference</th>
+                          <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#475569' }}>Status</th>
+                          <th style={{ padding: 12, textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#475569' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {displayedTransactions.map((transaction) => (
+                          <tr key={transaction.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: 12 }}>
+                              {transaction.date ? new Date(transaction.date).toLocaleDateString() : 'N/A'}
+                            </td>
+                            <td style={{ padding: 12, fontWeight: 'bold', color: '#059669' }}>
+                              €{parseFloat(transaction.amount).toFixed(2)}
+                            </td>
+                            <td style={{ padding: 12 }}>{transaction.sender}</td>
+                            <td style={{ padding: 12, fontSize: '0.875rem', color: '#64748b' }}>
+                              {(transaction.reference || '').substring(0, 50)}
+                              {transaction.reference && transaction.reference.length > 50 && '...'}
+                            </td>
+                            <td style={{ padding: 12 }}>
+                              <span style={{
+                                padding: '4px 12px',
+                                borderRadius: 16,
+                                fontSize: '0.75rem',
+                                fontWeight: '500',
+                                backgroundColor: transaction.manually_assigned ? '#d1fae5' : '#fef3c7',
+                                color: transaction.manually_assigned ? '#065f46' : '#92400e'
+                              }}>
+                                {transaction.manually_assigned ? 'Auto-Matched' : 'Needs Review'}
+                              </span>
+                            </td>
+                            <td style={{ padding: 12, textAlign: 'center' }}>
+                              <button
+                                onClick={() => handleAssignTransaction(transaction)}
+                                style={{
+                                  padding: '8px 16px',
+                                  backgroundColor: '#3b82f6',
+                                  color: 'white',
+                                  border: 'none',
+                                  borderRadius: 6,
+                                  cursor: 'pointer',
+                                  fontSize: '0.875rem',
+                                  fontWeight: '500',
+                                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                                }}
+                              >
+                                Assign
+                              </button>
+                            </td>
+                          </tr>
                         ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-
-                  {/* Pagination */}
-                  <TablePagination
-                    rowsPerPageOptions={[5, 10, 25, 50]}
-                    component="div"
-                    count={filteredTransactions.length}
-                    rowsPerPage={rowsPerPage}
-                    page={page}
-                    onPageChange={handlePageChange}
-                    onRowsPerPageChange={handleRowsPerPageChange}
-                    labelRowsPerPage="Transactions per page:"
-                    showFirstButton
-                    showLastButton
-                  />
-                </>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               )}
-            </CardContent>
-          </Card>
-        </Box>
+            </div>
+          )}
+
+          {/* Previous Uploads Tab */}
+          {currentTab === 1 && (
+            <div>
+              {/* Summary Cards */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                gap: 24,
+                marginBottom: 32
+              }}>
+                <div style={{
+                  backgroundColor: 'white',
+                  borderRadius: 12,
+                  padding: 24,
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                  borderLeft: '4px solid #f59e0b'
+                }}>
+                  <div style={{ color: '#d97706', fontSize: '1.25rem', fontWeight: '600' }}>Unassigned</div>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', margin: '8px 0', color: '#1e293b' }}>
+                    {previousUploads.summary.unassigned?.count || 0}
+                  </div>
+                  <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                    €{(previousUploads.summary.unassigned?.total_amount || 0).toFixed(2)}
+                  </div>
+                </div>
+                <div style={{
+                  backgroundColor: 'white',
+                  borderRadius: 12,
+                  padding: 24,
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                  borderLeft: '4px solid #10b981'
+                }}>
+                  <div style={{ color: '#059669', fontSize: '1.25rem', fontWeight: '600' }}>Auto-Matched</div>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', margin: '8px 0', color: '#1e293b' }}>
+                    {previousUploads.summary.matched?.count || 0}
+                  </div>
+                  <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                    €{(previousUploads.summary.matched?.total_amount || 0).toFixed(2)}
+                  </div>
+                </div>
+                <div style={{
+                  backgroundColor: 'white',
+                  borderRadius: 12,
+                  padding: 24,
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                  borderLeft: '4px solid #3b82f6'
+                }}>
+                  <div style={{ color: '#2563eb', fontSize: '1.25rem', fontWeight: '600' }}>Assigned</div>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', margin: '8px 0', color: '#1e293b' }}>
+                    {previousUploads.summary.assigned?.count || 0}
+                  </div>
+                  <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                    €{(previousUploads.summary.assigned?.total_amount || 0).toFixed(2)}
+                  </div>
+                </div>
+                <div style={{
+                  backgroundColor: 'white',
+                  borderRadius: 12,
+                  padding: 24,
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                  borderLeft: '4px solid #dc2626'
+                }}>
+                  <div style={{ color: '#dc2626', fontSize: '1.25rem', fontWeight: '600' }}>Rejected</div>
+                  <div style={{ fontSize: '2.5rem', fontWeight: 'bold', margin: '8px 0', color: '#1e293b' }}>
+                    {previousUploads.summary.rejected?.count || 0}
+                  </div>
+                  <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                    €{(previousUploads.summary.rejected?.total_amount || 0).toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Control Buttons */}
+              <div style={{ marginBottom: 32 }}>
+                <div style={{ display: 'flex', gap: 16 }}>
+                  <button
+                    onClick={handleAutoAssignMatched}
+                    disabled={!previousUploads.summary.matched?.count}
+                    style={{
+                      padding: '12px 24px',
+                      backgroundColor: (!previousUploads.summary.matched?.count) ? '#e5e7eb' : '#10b981',
+                      color: (!previousUploads.summary.matched?.count) ? '#9ca3af' : 'white',
+                      border: 'none',
+                      borderRadius: 8,
+                      cursor: (!previousUploads.summary.matched?.count) ? 'not-allowed' : 'pointer',
+                      fontWeight: '500',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                    }}
+                  >
+                    Auto-Assign Matched ({previousUploads.summary.matched?.count || 0})
+                  </button>
+                  <button
+                    onClick={loadPreviousUploads}
+                    disabled={previousUploads.loading}
+                    style={{
+                      padding: '12px 24px',
+                      backgroundColor: 'white',
+                      color: '#3b82f6',
+                      border: '1px solid #3b82f6',
+                      borderRadius: 8,
+                      cursor: previousUploads.loading ? 'not-allowed' : 'pointer',
+                      fontWeight: '500',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                    }}
+                  >
+                    {previousUploads.loading ? 'Refreshing...' : 'Refresh'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Previous Payments Table */}
+              {previousUploads.loading ? (
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  padding: 80,
+                  backgroundColor: 'white',
+                  borderRadius: 12
+                }}>
+                  <div style={{ fontSize: '1.1rem', color: '#64748b' }}>Loading payments...</div>
+                </div>
+              ) : totalItems === 0 ? (
+                <div style={{
+                  padding: 48,
+                  backgroundColor: '#f0f9ff',
+                  border: '1px solid #0ea5e9',
+                  borderRadius: 12,
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '3rem', marginBottom: 16 }}>📭</div>
+                  <h3 style={{ color: '#0c4a6e', marginBottom: 8 }}>No payments to assign</h3>
+                  <p style={{ color: '#0369a1' }}>Upload a CSV file to get started with payment processing.</p>
+                </div>
+              ) : (
+                <div style={{
+                  backgroundColor: 'white',
+                  borderRadius: 12,
+                  padding: 24,
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
+                  border: '1px solid #e2e8f0'
+                }}>
+                  <h3 style={{ marginBottom: 24, color: '#1e293b', fontSize: '1.25rem', fontWeight: '600' }}>
+                    Payments Needing Assignment ({totalItems})
+                  </h3>
+
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ backgroundColor: '#f1f5f9' }}>
+                          <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#475569' }}>Date</th>
+                          <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#475569' }}>Amount</th>
+                          <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#475569' }}>Sender</th>
+                          <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#475569' }}>Reference</th>
+                          <th style={{ padding: 12, textAlign: 'left', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#475569' }}>Status</th>
+                          <th style={{ padding: 12, textAlign: 'center', borderBottom: '2px solid #e2e8f0', fontWeight: '600', color: '#475569' }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {displayedPreviousPayments.map((payment) => (
+                          <tr key={payment.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: 12 }}>
+                              {payment.payment_date ? new Date(payment.payment_date).toLocaleDateString() : 'N/A'}
+                            </td>
+                            <td style={{ padding: 12, fontWeight: 'bold', color: '#059669' }}>
+                              €{parseFloat(payment.amount).toFixed(2)}
+                            </td>
+                            <td style={{ padding: 12 }}>{payment.name_from_csv}</td>
+                            <td style={{ padding: 12, fontSize: '0.875rem', color: '#64748b' }}>
+                              {(payment.description || payment.reference || '').substring(0, 40)}
+                              {(payment.description || payment.reference || '').length > 40 && '...'}
+                            </td>
+                            <td style={{ padding: 12 }}>
+                              <span style={{
+                                padding: '4px 12px',
+                                borderRadius: 16,
+                                fontSize: '0.75rem',
+                                fontWeight: '500',
+                                backgroundColor: payment.status === 'matched' ? '#d1fae5' : '#fef3c7',
+                                color: payment.status === 'matched' ? '#065f46' : '#92400e'
+                              }}>
+                                {payment.status === 'matched' ? 'Auto-Matched' : 'Unassigned'}
+                              </span>
+                            </td>
+                            <td style={{ padding: 12, textAlign: 'center' }}>
+                              <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+                                <button
+                                  onClick={() => handleAssignTransaction({ ...payment, isPreviousUpload: true })}
+                                  style={{
+                                    padding: '6px 12px',
+                                    backgroundColor: '#3b82f6',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: 6,
+                                    cursor: 'pointer',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '500'
+                                  }}
+                                  title="Assign Payment"
+                                >
+                                  Assign
+                                </button>
+                                <button
+                                  onClick={() => handleRejectPreviousPayment(payment)}
+                                  style={{
+                                    padding: '6px 12px',
+                                    backgroundColor: '#dc2626',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: 6,
+                                    cursor: 'pointer',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '500'
+                                  }}
+                                  title="Reject Payment"
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Enhanced Professional Assignment Dialog */}
+      {assignmentDialog.open && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.6)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: 24
+        }}>
+          <div style={{
+            backgroundColor: 'white',
+            borderRadius: 16,
+            padding: 32,
+            maxWidth: 900,
+            width: '100%',
+            maxHeight: '90vh',
+            overflow: 'auto',
+            boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04)'
+          }}>
+            <h2 style={{ marginBottom: 24, color: '#1e293b', fontSize: '1.75rem', fontWeight: '600' }}>
+              Assign Payment to Tenant
+            </h2>
+
+            {/* Payment Details Card */}
+            <div style={{ marginBottom: 32, padding: 24, backgroundColor: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+              <h3 style={{ color: '#3b82f6', marginBottom: 16, fontSize: '1.25rem', fontWeight: '600' }}>Payment Details</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
+                <div>
+                  <strong style={{ color: '#475569' }}>Original Sender:</strong><br />
+                  <span style={{ color: '#1e293b' }}>{assignmentDialog.transaction?.sender || assignmentDialog.transaction?.name_from_csv}</span>
+                </div>
+                <div>
+                  <strong style={{ color: '#475569' }}>Original Amount:</strong><br />
+                  <span style={{ color: '#059669', fontSize: '1.25rem', fontWeight: 'bold' }}>€{assignmentDialog.transaction?.amount?.toFixed(2)}</span>
+                </div>
+                <div>
+                  <strong style={{ color: '#475569' }}>Original Date:</strong><br />
+                  <span style={{ color: '#1e293b' }}>{assignmentDialog.transaction?.date || assignmentDialog.transaction?.payment_date || 'N/A'}</span>
+                </div>
+                <div>
+                  <strong style={{ color: '#475569' }}>Reference:</strong><br />
+                  <span style={{ color: '#64748b', fontSize: '0.875rem' }}>
+                    {(assignmentDialog.transaction?.reference || assignmentDialog.transaction?.description || 'N/A').substring(0, 50)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Enhanced Assignment Form */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24, marginBottom: 32 }}>
+              {/* Tenant Search */}
+              <div>
+                <label style={{ display: 'block', marginBottom: 8, fontWeight: '500', color: '#374151' }}>
+                  Search & Select Tenant *
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    value={tenantSearchQuery}
+                    onChange={(e) => handleTenantSearch(e.target.value)}
+                    placeholder="Type tenant name to search..."
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: 8,
+                      fontSize: '1rem',
+                      backgroundColor: 'white'
+                    }}
+                  />
+
+                  {/* Tenant Search Results */}
+                  {(tenantSearchResults.length > 0 || isSearchingTenants) && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      right: 0,
+                      backgroundColor: 'white',
+                      border: '1px solid #d1d5db',
+                      borderRadius: 8,
+                      boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+                      maxHeight: 300,
+                      overflowY: 'auto',
+                      zIndex: 1001
+                    }}>
+                      {isSearchingTenants ? (
+                        <div style={{ padding: 12, textAlign: 'center', color: '#64748b' }}>
+                          Searching tenants...
+                        </div>
+                      ) : (
+                        tenantSearchResults.map((tenant) => (
+                          <div
+                            key={tenant.id}
+                            onClick={() => handleTenantSelect(tenant)}
+                            style={{
+                              padding: 12,
+                              borderBottom: '1px solid #f1f5f9',
+                              cursor: 'pointer',
+                              backgroundColor: assignmentDialog.selectedTenant?.id === tenant.id ? '#eff6ff' : 'white'
+                            }}
+                            onMouseEnter={(e) => e.target.style.backgroundColor = '#f8fafc'}
+                            onMouseLeave={(e) => e.target.style.backgroundColor = assignmentDialog.selectedTenant?.id === tenant.id ? '#eff6ff' : 'white'}
+                          >
+                            <div style={{ fontWeight: '500', color: '#1e293b' }}>{tenant.name}</div>
+                            {tenant.current_apartment && (
+                              <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                                Current: {tenant.current_apartment.address} (€{tenant.current_apartment.monthly_rent}/month)
+                              </div>
+                            )}
+                            {tenant.email && (
+                              <div style={{ fontSize: '0.75rem', color: '#9ca3af' }}>{tenant.email}</div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Selected Tenant Display */}
+                {assignmentDialog.selectedTenant && (
+                  <div style={{
+                    marginTop: 8,
+                    padding: 12,
+                    backgroundColor: '#eff6ff',
+                    borderRadius: 8,
+                    border: '1px solid #3b82f6'
+                  }}>
+                    <div style={{ fontWeight: '500', color: '#1e40af' }}>
+                      Selected: {assignmentDialog.selectedTenant.name}
+                    </div>
+                    {assignmentDialog.selectedTenant.current_apartment && (
+                      <div style={{ fontSize: '0.875rem', color: '#1e40af' }}>
+                        Current apartment: {assignmentDialog.selectedTenant.current_apartment.address}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Apartment Search */}
+              <div>
+                <label style={{ display: 'block', marginBottom: 8, fontWeight: '500', color: '#374151' }}>
+                  Search & Select Apartment *
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="text"
+                    value={apartmentSearchQuery}
+                    onChange={(e) => handleApartmentSearch(e.target.value)}
+                    placeholder="Type apartment address to search..."
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: 8,
+                      fontSize: '1rem',
+                      backgroundColor: 'white'
+                    }}
+                  />
+
+                  {/* Apartment Search Results */}
+                  {(apartmentSearchResults.length > 0 || isSearchingApartments) && (
+                    <div style={{
+                      position: 'absolute',
+                      top: '100%',
+                      left: 0,
+                      right: 0,
+                      backgroundColor: 'white',
+                      border: '1px solid #d1d5db',
+                      borderRadius: 8,
+                      boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)',
+                      maxHeight: 300,
+                      overflowY: 'auto',
+                      zIndex: 1001
+                    }}>
+                      {isSearchingApartments ? (
+                        <div style={{ padding: 12, textAlign: 'center', color: '#64748b' }}>
+                          Searching apartments...
+                        </div>
+                      ) : (
+                        apartmentSearchResults.map((apt) => (
+                          <div
+                            key={apt.id}
+                            onClick={() => handleApartmentSelect(apt)}
+                            style={{
+                              padding: 12,
+                              borderBottom: '1px solid #f1f5f9',
+                              cursor: 'pointer',
+                              backgroundColor: assignmentDialog.selectedApartment?.id === apt.id ? '#eff6ff' : 'white'
+                            }}
+                            onMouseEnter={(e) => e.target.style.backgroundColor = '#f8fafc'}
+                            onMouseLeave={(e) => e.target.style.backgroundColor = assignmentDialog.selectedApartment?.id === apt.id ? '#eff6ff' : 'white'}
+                          >
+                            <div style={{ fontWeight: '500', color: '#1e293b' }}>{apt.address}</div>
+                            <div style={{ fontSize: '0.875rem', color: '#64748b' }}>
+                              €{apt.rent}/month • {apt.rooms} rooms • {apt.status}
+                            </div>
+                            {apt.current_tenants && apt.current_tenants.length > 0 && (
+                              <div style={{ fontSize: '0.75rem', color: '#9ca3af', marginTop: 4 }}>
+                                Current: {apt.current_tenants.map(t => t.name).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Selected Apartment Display */}
+                {assignmentDialog.selectedApartment && (
+                  <div style={{
+                    marginTop: 8,
+                    padding: 12,
+                    backgroundColor: '#eff6ff',
+                    borderRadius: 8,
+                    border: '1px solid #3b82f6'
+                  }}>
+                    <div style={{ fontWeight: '500', color: '#1e40af' }}>
+                      Selected: {assignmentDialog.selectedApartment.address}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Custom Amount */}
+              <div>
+                <label style={{ display: 'block', marginBottom: 8, fontWeight: '500', color: '#374151' }}>
+                  Amount *
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={assignmentDialog.customAmount}
+                  onChange={(e) => setAssignmentDialog(prev => ({ ...prev, customAmount: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 8,
+                    fontSize: '1rem',
+                    backgroundColor: 'white'
+                  }}
+                  placeholder="Enter payment amount"
+                />
+              </div>
+
+              {/* Custom Date */}
+              <div>
+                <label style={{ display: 'block', marginBottom: 8, fontWeight: '500', color: '#374151' }}>
+                  Payment Date *
+                </label>
+                <input
+                  type="date"
+                  value={assignmentDialog.customDate}
+                  onChange={(e) => setAssignmentDialog(prev => ({ ...prev, customDate: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 8,
+                    fontSize: '1rem',
+                    backgroundColor: 'white'
+                  }}
+                />
+              </div>
+
+              {/* Payment Method */}
+              <div>
+                <label style={{ display: 'block', marginBottom: 8, fontWeight: '500', color: '#374151' }}>
+                  Payment Method
+                </label>
+                <select
+                  value={assignmentDialog.paymentMethod}
+                  onChange={(e) => setAssignmentDialog(prev => ({ ...prev, paymentMethod: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 8,
+                    fontSize: '1rem',
+                    backgroundColor: 'white'
+                  }}
+                >
+                  <option value="bank_transfer">Bank Transfer</option>
+                  <option value="cash">Cash</option>
+                  <option value="card">Card</option>
+                  <option value="online">Online Payment</option>
+                </select>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label style={{ display: 'block', marginBottom: 8, fontWeight: '500', color: '#374151' }}>
+                  Notes (Optional)
+                </label>
+                <textarea
+                  value={assignmentDialog.notes}
+                  onChange={(e) => setAssignmentDialog(prev => ({ ...prev, notes: e.target.value }))}
+                  rows={3}
+                  style={{
+                    width: '100%',
+                    padding: '12px',
+                    border: '1px solid #d1d5db',
+                    borderRadius: 8,
+                    fontSize: '1rem',
+                    backgroundColor: 'white',
+                    resize: 'vertical'
+                  }}
+                  placeholder="Add any additional notes..."
+                />
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: 16, justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setAssignmentDialog({
+                  open: false,
+                  transaction: null,
+                  selectedTenant: null,
+                  selectedApartment: null,
+                  customAmount: '',
+                  customDate: '',
+                  notes: '',
+                  paymentMethod: 'bank_transfer'
+                })}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: '#f3f4f6',
+                  color: '#374151',
+                  border: 'none',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  fontWeight: '500'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAssignmentSubmit}
+                disabled={!assignmentDialog.selectedTenant || !assignmentDialog.selectedApartment || !assignmentDialog.customAmount || !assignmentDialog.customDate}
+                style={{
+                  padding: '12px 24px',
+                  backgroundColor: (!assignmentDialog.selectedTenant || !assignmentDialog.selectedApartment || !assignmentDialog.customAmount || !assignmentDialog.customDate) ? '#e5e7eb' : '#3b82f6',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 8,
+                  cursor: (!assignmentDialog.selectedTenant || !assignmentDialog.selectedApartment || !assignmentDialog.customAmount || !assignmentDialog.customDate) ? 'not-allowed' : 'pointer',
+                  fontWeight: '500',
+                  boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+                }}
+              >
+                Assign Payment
+              </button>
+            </div>
+          </div>
+        </div>
       )}
-    </Box>
+    </div>
   );
 };
 

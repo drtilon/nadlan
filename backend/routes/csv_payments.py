@@ -1,20 +1,20 @@
 import os
 import json
-import tempfile
-import time
-import re
 import sys
 import logging
+import re
 from datetime import datetime
 from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
 from .auth import token_required, role_required
-from models.models import Tenant, Apartment, Payment
+from models.models import Tenant, Apartment, Payment, UnassignedPayment, ContractTenant, ContractPeriod
 from extentions import db
 from openai import OpenAI
 from activity_logger import ActivityLogger
+# Removed fuzzywuzzy - using exact matching instead
+from sqlalchemy import func
 
-# Set up logging for immediate output
+# Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - CSV_PROCESSOR - %(levelname)s - %(message)s',
@@ -34,101 +34,258 @@ def get_grok_client():
 # Define blueprint
 csv_payments_bp = Blueprint('csv_payments', __name__, url_prefix='/api/csv-payments')
 
-# Configuration
-ALLOWED_EXTENSIONS = {'csv', 'txt'}
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
-CHUNK_SIZE = 100
-
 def debug_print(message):
     """Print with immediate flush for Docker/Flask development"""
     print(message, flush=True)
     sys.stdout.flush()
     logger.info(message)
 
-
-
 def allowed_file(filename):
     """Check if file extension is allowed"""
+    ALLOWED_EXTENSIONS = {'csv', 'txt'}
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def create_temp_results_file():
-    """Create a temporary file to store processing results"""
-    temp_file = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.json')
-    initial_data = {
-        "processed_chunks": 0,
-        "total_chunks": 0,
-        "rent_payments": [],
-        "processing_complete": False,
-        "error": None,
-        "original_transactions": [],
-        "csv_structure": {},
-        "start_time": time.time()
-    }
-    json.dump(initial_data, temp_file)
-    temp_file.close()
-    debug_print(f"Created temp file: {temp_file.name}")
-    return temp_file.name
-
-def update_temp_results_file(temp_file_path, chunk_results, chunk_number, total_chunks, complete=False, error=None):
-    """Update the temporary results file with new chunk results"""
+def create_unassigned_payments_table():
+    """Create the unassigned_payments table if it doesn't exist"""
     try:
-        # Read existing data
-        with open(temp_file_path, 'r') as f:
-            data = json.load(f)
-
-        # Update data
-        data["processed_chunks"] = chunk_number
-        data["total_chunks"] = total_chunks
-        data["rent_payments"].extend(chunk_results)
-        data["processing_complete"] = complete
-        if error:
-            data["error"] = str(error)
-
-        # Write back
-        with open(temp_file_path, 'w') as f:
-            json.dump(data, f)
-
-        debug_print(f"Updated temp file: chunk {chunk_number}/{total_chunks}, {len(chunk_results)} new payments")
-        return True
+        db.create_all()
+        debug_print("Ensured unassigned_payments table exists")
     except Exception as e:
-        debug_print(f"Error updating temp file: {e}")
-        return False
+        debug_print(f"Error creating tables: {e}")
 
-def read_temp_results_file(temp_file_path):
-    """Read the current state from temporary results file"""
+def exact_match_tenant_name(csv_name):
+    """Find exact matching tenant by name (case-insensitive)"""
+    if not csv_name:
+        return None, 0
+
     try:
-        with open(temp_file_path, 'r') as f:
-            return json.load(f)
+        # Clean the CSV name (remove extra spaces, normalize)
+        clean_csv_name = csv_name.strip().lower()
+
+        tenants = Tenant.query.all()
+
+        for tenant in tenants:
+            clean_tenant_name = tenant.name.strip().lower()
+
+            # Exact match (case-insensitive)
+            if clean_csv_name == clean_tenant_name:
+                debug_print(f"Exact match found: '{csv_name}' -> '{tenant.name}'")
+                return tenant, 1.0  # Perfect match score
+
+        debug_print(f"No exact match found for: '{csv_name}'")
+        return None, 0
+
     except Exception as e:
-        debug_print(f"Error reading temp file: {e}")
+        debug_print(f"Error in exact matching: {e}")
+        return None, 0
+
+def get_current_apartment_for_tenant(tenant_id):
+    """Get the current apartment ID for a tenant through ContractTenant relationship"""
+    try:
+        from datetime import date
+        today = date.today()
+
+        # Find active contract assignments for this tenant
+        active_contract = db.session.query(ContractTenant).join(ContractPeriod).filter(
+            ContractTenant.tenant_id == tenant_id,
+            ContractTenant.move_out_date.is_(None),  # No move-out date means still active
+            ContractPeriod.status == 'active'
+        ).first()
+
+        if active_contract and active_contract.contract_period:
+            return active_contract.contract_period.apartment_id
+
         return None
 
-def store_original_transactions(temp_file_path, transactions, csv_structure):
-    """Store the original transactions and structure in temp file"""
-    try:
-        with open(temp_file_path, 'r') as f:
-            data = json.load(f)
-
-        data["original_transactions"] = transactions
-        data["csv_structure"] = csv_structure
-
-        with open(temp_file_path, 'w') as f:
-            json.dump(data, f)
-
-        debug_print(f"Stored {len(transactions)} transactions in temp file")
-        return True
     except Exception as e:
-        debug_print(f"Error storing transactions: {e}")
-        return False
+        debug_print(f"Error getting apartment for tenant {tenant_id}: {e}")
+        return None
+
+def process_csv_content(file_content):
+    """Process CSV content using AI to identify columns and extract payment data"""
+    try:
+        client = get_grok_client()
+        if not client:
+            return {"error": "Grok AI not configured"}
+
+        # Get first 10 lines for column detection
+        lines = file_content.strip().split('\n')
+        sample_lines = '\n'.join(lines[:10])
+
+        debug_print("Sending to AI for column detection...")
+        debug_print("Sample data:")
+        debug_print(sample_lines)
+
+        # AI prompt for column identification
+        prompt = f"""Analyze this CSV data and identify the structure. Here are the first 10 lines:
+
+{sample_lines}
+
+I need you to identify:
+1. Date column (payment/transaction date)
+2. Name column (person or business name who SENT the payment)
+3. Amount column (money amount)
+4. Reference column (additional details, memo, or reference)
+5. Which row number contains the actual data (not headers or account info)
+
+Return ONLY a JSON object with this exact structure:
+{{
+    "date_column": column_index_number,
+    "name_column": column_index_number,
+    "amount_column": column_index_number,
+    "reference_column": column_index_number,
+    "data_start_row": row_number_where_data_begins,
+    "delimiter": "," or ";" or "|" or "\\t"
+}}
+
+Use 0-based indexing. If a column doesn't exist, use -1."""
+
+        completion = client.chat.completions.create(
+            model="grok-3-mini",
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30
+        )
+
+        ai_response = completion.choices[0].message.content.strip()
+        debug_print(f"AI column detection response: {ai_response}")
+
+        # Clean AI response
+        if ai_response.startswith('```'):
+            ai_response = re.sub(r'```[json]*\n?', '', ai_response)
+            ai_response = ai_response.replace('```', '').strip()
+
+        try:
+            column_info = json.loads(ai_response)
+        except json.JSONDecodeError as e:
+            debug_print(f"Failed to parse AI response: {e}")
+            return {"error": "AI response could not be parsed"}
+
+        # Validate required columns
+        if (column_info.get("date_column", -1) == -1 or
+            column_info.get("name_column", -1) == -1 or
+            column_info.get("amount_column", -1) == -1):
+            return {"error": "Could not identify required columns (date, name, amount)"}
+
+        # Extract column indices
+        date_col = column_info["date_column"]
+        name_col = column_info["name_column"]
+        amount_col = column_info["amount_column"]
+        reference_col = column_info.get("reference_column", -1)
+        data_start_row = column_info.get("data_start_row", 1)
+        delimiter = column_info.get("delimiter", ",")
+
+        if delimiter == "\\t":
+            delimiter = "\t"
+
+        debug_print(f"Column mapping: date={date_col}, name={name_col}, amount={amount_col}, ref={reference_col}")
+        debug_print(f"Data starts at row {data_start_row}, delimiter='{delimiter}'")
+
+        # Process the actual data
+        data_lines = lines[data_start_row:]
+        payments = []
+
+        for i, line in enumerate(data_lines):
+            try:
+                if delimiter == "\t":
+                    columns = line.split('\t')
+                else:
+                    columns = line.split(delimiter)
+
+                # Clean columns
+                columns = [col.strip().strip('"') for col in columns]
+
+                if len(columns) <= max(date_col, name_col, amount_col):
+                    continue
+
+                # Extract data
+                date_str = columns[date_col] if date_col < len(columns) else ""
+                name_str = columns[name_col] if name_col < len(columns) else ""
+                amount_str = columns[amount_col] if amount_col < len(columns) else ""
+                reference_str = columns[reference_col] if reference_col != -1 and reference_col < len(columns) else ""
+
+                # Parse amount
+                if not amount_str:
+                    continue
+
+                # Clean amount string for parsing
+                clean_amount = re.sub(r'[€$£¥\s]', '', amount_str)
+
+                # Handle different number formats
+                if ',' in clean_amount and '.' in clean_amount:
+                    # Both comma and dot - determine decimal separator
+                    if clean_amount.rindex(',') > clean_amount.rindex('.'):
+                        # European format: 1.234.567,89
+                        clean_amount = clean_amount.replace('.', '').replace(',', '.')
+                    else:
+                        # US format: 1,234,567.89
+                        clean_amount = clean_amount.replace(',', '')
+                elif ',' in clean_amount:
+                    # Only comma - could be decimal or thousands
+                    if clean_amount.count(',') == 1 and len(clean_amount.split(',')[1]) <= 2:
+                        clean_amount = clean_amount.replace(',', '.')
+                    else:
+                        clean_amount = clean_amount.replace(',', '')
+
+                # Remove any remaining non-numeric chars except decimal and minus
+                clean_amount = re.sub(r'[^\d.-]', '', clean_amount)
+
+                try:
+                    amount = float(clean_amount)
+                except ValueError:
+                    debug_print(f"Could not parse amount: '{amount_str}' -> '{clean_amount}'")
+                    continue
+
+                # Only process positive amounts (incoming payments) - FILTER OUT NEGATIVE
+                if amount > 0:
+                    # Parse date
+                    payment_date = None
+                    if date_str:
+                        # Try different date formats
+                        date_formats = ['%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%d.%m.%Y', '%d-%m-%Y', '%Y/%m/%d']
+                        for fmt in date_formats:
+                            try:
+                                payment_date = datetime.strptime(date_str, fmt).date()
+                                break
+                            except ValueError:
+                                continue
+
+                    payments.append({
+                        "name": name_str,
+                        "amount": amount,
+                        "date": payment_date,
+                        "description": reference_str,
+                        "row_number": data_start_row + i + 1
+                    })
+
+                    debug_print(f"Added payment: {name_str} - €{amount}")
+                else:
+                    debug_print(f"Skipped negative amount: {name_str} - €{amount}")
+
+            except Exception as e:
+                debug_print(f"Error processing line {i}: {e}")
+                continue
+
+        debug_print(f"Successfully processed {len(payments)} positive transactions (filtered out negative amounts)")
+
+        return {"payments": payments}
+
+    except Exception as e:
+        debug_print(f"Error in process_csv_content: {e}")
+        return {"error": str(e)}
 
 @csv_payments_bp.route("/grok-status", methods=["GET"])
 @token_required
 def check_grok_status():
-    """Check if Grok AI is configured and working"""
+    """Check if Grok AI is configured and working - compatible with your component"""
     try:
         client = get_grok_client()
         if not client:
-            return jsonify({"configured": False, "message": "Grok API key not configured"}), 200
+            return jsonify({
+                "configured": False,
+                "api_working": False,
+                "fullyOperational": False,
+                "message": "Grok API key not configured"
+            }), 200
 
         # Test with a simple query
         try:
@@ -145,363 +302,366 @@ def check_grok_status():
         return jsonify({
             "configured": True,
             "api_working": api_working,
+            "fullyOperational": api_working,
         }), 200
     except Exception as e:
         debug_print(f"Grok status check error: {e}")
         return jsonify({"configured": False, "message": str(e)}), 500
 
-@csv_payments_bp.route("/process-csv-simple", methods=["POST"])
+@csv_payments_bp.route('/process-csv-simple', methods=['POST'])
 @token_required
-@role_required("admin")
 def process_csv_simple():
     """
-    Modified version that uses AI only once for CSV structure detection,
-    then returns all positive transactions to frontend
+    Process CSV file and return transactions for manual assignment
+    Compatible with your existing React component
     """
     try:
-        debug_print("Starting CSV processing...")
-
-        client = get_grok_client()
-        if not client:
-            debug_print("Grok AI not configured")
-            return jsonify({"message": "Grok AI not configured"}), 500
+        # Ensure unassigned payments table exists
+        create_unassigned_payments_table()
 
         if 'file' not in request.files:
-            debug_print("No file provided in request")
-            return jsonify({"message": "No file provided"}), 400
+            return jsonify({'error': 'No file provided'}), 400
 
         file = request.files['file']
-        if not file:
-            debug_print("No file selected")
-            return jsonify({"message": "No file selected"}), 400
 
-        debug_print(f"Processing file: {file.filename}")
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
 
-        # Read file
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'File type not allowed. Please upload CSV or TXT files.'}), 400
+
+        # Read file content
         try:
-            csv_content = file.read().decode('utf-8')
-            debug_print("File decoded as UTF-8")
-        except:
-            file.seek(0)
-            csv_content = file.read().decode('latin-1')
-            debug_print("File decoded as latin-1")
-
-        # Count lines for information
-        line_count = len(csv_content.strip().split('\n'))
-        debug_print(f"CSV has {line_count} lines")
-
-        # Process with single AI call
-        return process_csv_structure_only(csv_content, client)
-
-    except Exception as e:
-        debug_print(f"ERROR in process_csv_simple: {e}")
-        return jsonify({"message": str(e)}), 500
-
-def process_csv_structure_only(csv_content, client):
-    """
-    Process CSV using AI only for structure detection,
-    then return all positive transactions without AI analysis
-    """
-    try:
-        # Get first 10 lines for column detection
-        lines = csv_content.strip().split('\n')
-        first_10_lines = '\n'.join(lines[:10])
-
-        debug_print("=" * 50)
-        debug_print("DETECTING CSV STRUCTURE (SINGLE AI CALL)...")
-        debug_print(first_10_lines)
-        debug_print("=" * 50)
-
-        # SINGLE AI CALL - Only for structure detection
-        prompt = f"""Look at these first 10 lines of a CSV file and tell me:
-1. Which row number (0-based) contains the actual data (not headers or account info)
-2. Which column numbers contain:
-   - Date
-   - Name/Description (person or company name)
-   - Amount (money amount)
-   - Extra notes/reference (optional, use -1 if none)
-
-First 10 lines:
-{first_10_lines}
-
-Return ONLY a JSON array: [data_start_row, date_column, name_column, amount_column, notes_column]
-Use 0-based indexing.
-
-Example: [4, 0, 2, 4, 5] means data starts at row 4, date in column 0, name in column 2, etc."""
-
-        debug_print("Sending structure detection prompt to AI...")
-
-        completion = client.chat.completions.create(
-            model="grok-3-mini",
-            messages=[{"role": "user", "content": prompt}],
-            timeout=120
-        )
-
-        ai_response = completion.choices[0].message.content.strip()
-        debug_print(f"AI structure response: {ai_response}")
-
-        # Clean and parse response
-        if ai_response.startswith('```'):
-            ai_response = re.sub(r'```[json]*\n?', '', ai_response).strip()
-
-        result = json.loads(ai_response)
-
-        if len(result) < 4:
-            debug_print("AI response incomplete")
-            return jsonify({"message": "AI response incomplete"}), 400
-
-        data_start_row = result[0]
-        date_col = result[1]
-        name_col = result[2]
-        amount_col = result[3]
-        notes_col = result[4] if len(result) > 4 else -1
-
-        csv_structure = {
-            "data_start_row": data_start_row,
-            "date_col": date_col,
-            "name_col": name_col,
-            "amount_col": amount_col,
-            "notes_col": notes_col
-        }
-
-        debug_print(f"CSV STRUCTURE DETECTED:")
-        debug_print(f"DATA STARTS AT ROW: {data_start_row}")
-        debug_print(f"DATE COLUMN: {date_col}")
-        debug_print(f"NAME COLUMN: {name_col}")
-        debug_print(f"AMOUNT COLUMN: {amount_col}")
-        debug_print(f"NOTES COLUMN: {notes_col}")
-
-        if data_start_row == -1 or date_col == -1 or name_col == -1 or amount_col == -1:
-            debug_print("Could not detect required columns")
-            return jsonify({"message": "Could not detect required columns in CSV"}), 400
-
-        # Parse all data and filter positive amounts - NO MORE AI CALLS
-        all_lines = csv_content.strip().split('\n')
-        data_lines = all_lines[data_start_row:]
-
-        debug_print(f"Total lines in CSV: {len(all_lines)}")
-        debug_print(f"Data lines to process: {len(data_lines)}")
-
-        positive_transactions = []
-
-        # Detect delimiter by checking the first data line
-        if data_lines:
-            delimiters = [',', ';', '\t', '|']
-            best_delimiter = ','
-            max_columns = 0
-
-            for delimiter in delimiters:
-                columns = data_lines[0].split(delimiter)
-                if len(columns) > max_columns:
-                    max_columns = len(columns)
-                    best_delimiter = delimiter
-
-            debug_print(f"Detected delimiter: '{best_delimiter}' (found {max_columns} columns)")
-
-        # Parse all transactions and return positive ones
-        for line_index, line in enumerate(data_lines):
+            file_content = file.read().decode('utf-8')
+        except UnicodeDecodeError:
             try:
-                columns = line.split(best_delimiter)
-                columns = [col.strip().strip('"') for col in columns]
+                file_content = file.read().decode('latin-1')
+            except:
+                return jsonify({'error': 'Could not decode file. Please ensure it is a valid CSV file.'}), 400
 
-                if len(columns) <= amount_col:
-                    debug_print(f"Line {line_index}: Not enough columns ({len(columns)} <= {amount_col})")
-                    continue
+        # Process CSV content
+        result = process_csv_content(file_content)
 
-                amount_str = columns[amount_col].strip()
-                debug_print(f"Line {line_index}: Raw amount string: '{amount_str}'")
+        if "error" in result:
+            return jsonify(result), 400
 
-                # Handle different number formats
-                clean_amount = amount_str
+        # Store unassigned payments and attempt automatic matching
+        manual_review_transactions = []
+        auto_matched = 0
 
-                # Remove currency symbols and spaces
-                clean_amount = re.sub(r'[€$£¥\s]', '', clean_amount)
+        for i, payment_data in enumerate(result["payments"]):
+            # Try to find exact matching tenant
+            matched_tenant, similarity_score = exact_match_tenant_name(payment_data["name"])
 
-                # Handle European vs US number formats
-                if ',' in clean_amount and '.' in clean_amount:
-                    # Both comma and dot present - determine which is decimal separator
-                    comma_pos = clean_amount.rindex(',')
-                    dot_pos = clean_amount.rindex('.')
+            matched_apartment_id = None
+            status = "unassigned"
 
-                    if comma_pos > dot_pos:
-                        # European format: 1.234.567,89 (dot=thousands, comma=decimal)
-                        clean_amount = clean_amount.replace('.', '').replace(',', '.')
-                    else:
-                        # US format: 1,234,567.89 (comma=thousands, dot=decimal)
-                        clean_amount = clean_amount.replace(',', '')
-                elif ',' in clean_amount:
-                    # Only comma present
-                    if clean_amount.count(',') == 1 and len(clean_amount.split(',')[1]) <= 2:
-                        # Likely decimal separator: 123,45
-                        clean_amount = clean_amount.replace(',', '.')
-                    else:
-                        # Likely thousands separator: 1,234 or 12,345
-                        clean_amount = clean_amount.replace(',', '')
-                elif '.' in clean_amount:
-                    # Only dot present - could be thousands or decimal separator
-                    dot_parts = clean_amount.split('.')
-                    if len(dot_parts) == 2:
-                        # One dot - check if it's thousands or decimal
-                        if len(dot_parts[1]) == 3 and dot_parts[1].isdigit():
-                            # Likely thousands separator: 1.600 = 1600
-                            clean_amount = clean_amount.replace('.', '')
-                        # else: assume decimal separator: 123.45 stays as is
-                    else:
-                        # Multiple dots - thousands separators: 1.234.567
-                        clean_amount = clean_amount.replace('.', '')
+            if matched_tenant and similarity_score == 1.0:  # Only exact matches
+                matched_apartment_id = get_current_apartment_for_tenant(matched_tenant.id)
+                if matched_apartment_id:
+                    status = "matched"
+                    auto_matched += 1
+                    debug_print(f"Auto-matched: {payment_data['name']} -> {matched_tenant.name}")
 
-                # Remove any remaining non-numeric characters except decimal point and minus
-                clean_amount = re.sub(r'[^\d.-]', '', clean_amount)
+            # Create unassigned payment record
+            unassigned_payment = UnassignedPayment(
+                name_from_csv=payment_data["name"][:255],  # Truncate to fit VARCHAR(255)
+                amount=payment_data["amount"],
+                payment_date=payment_data["date"],
+                description=payment_data["description"][:1000] if payment_data["description"] else None,  # Truncate long descriptions
+                csv_line=payment_data.get("row_number", i + 1),
+                matched_tenant_id=matched_tenant.id if matched_tenant else None,
+                matched_apartment_id=matched_apartment_id,
+                similarity_score=similarity_score,
+                status=status,
+                sender=payment_data["name"][:255],  # Truncate to fit VARCHAR(255)
+                reference=payment_data["description"][:500] if payment_data["description"] else None  # Truncate to fit VARCHAR(500)
+            )
 
-                if not clean_amount or clean_amount == '.' or clean_amount == '-':
-                    debug_print(f"Line {line_index}: Empty or invalid amount after cleaning")
-                    continue
+            db.session.add(unassigned_payment)
+            db.session.flush()  # Get the ID
 
-                try:
-                    amount = float(clean_amount)
-                    debug_print(f"Line {line_index}: Parsed amount: {amount}")
-                except ValueError as ve:
-                    debug_print(f"Line {line_index}: Failed to parse amount '{clean_amount}': {ve}")
-                    continue
+            # Convert to format expected by your React component
+            transaction = {
+                "id": unassigned_payment.id,
+                "date": payment_data["date"].isoformat() if payment_data["date"] else None,
+                "amount": float(payment_data["amount"]),
+                "sender": payment_data["name"],
+                "reference": payment_data["description"] or "",
+                "csv_line": payment_data.get("row_number", i + 1),
+                "manually_assigned": status == "matched",
+                "assigned_tenant_id": matched_tenant.id if matched_tenant else None,
+                "assigned_apartment_id": matched_apartment_id,
+                "confidence": similarity_score if matched_tenant else 0,
+                "matched_tenant_name": matched_tenant.name if matched_tenant else None
+            }
 
-                # Only include positive amounts (incoming transactions)
-                if amount > 0:
-                    date_value = columns[date_col].strip() if date_col < len(columns) else ""
-                    name_value = columns[name_col].strip() if name_col < len(columns) else ""
-                    notes_value = columns[notes_col].strip() if notes_col != -1 and notes_col < len(columns) else ""
+            manual_review_transactions.append(transaction)
 
-                    transaction = {
-                        "date": date_value,
-                        "sender": name_value,
-                        "amount": amount,
-                        "reference": notes_value,
-                        "csv_line": data_start_row + line_index,
-                        "data_index": line_index,
-                        "full_row": columns
-                    }
+        try:
+            db.session.commit()
+            debug_print(f"Successfully stored {len(manual_review_transactions)} transactions")
+        except Exception as e:
+            db.session.rollback()
+            debug_print(f"Database error: {e}")
+            return jsonify({'error': 'Failed to store transactions in database'}), 500
 
-                    positive_transactions.append(transaction)
-                    debug_print(f"Line {line_index}: Added positive transaction: {name_value} - €{amount}")
-
-            except Exception as e:
-                debug_print(f"Error parsing line {line_index}: {e}")
-                continue
-
-        debug_print(f"FOUND {len(positive_transactions)} POSITIVE TRANSACTIONS")
-
-        if len(positive_transactions) == 0:
-            return jsonify({
-                "message": "No positive amounts found - all transactions appear to be outgoing",
-                "summary": {
-                    "file_size_mb": round(len(csv_content) / (1024 * 1024), 2),
-                    "total_positive_transactions": 0,
-                    "auto_inserted_count": 0,
-                    "auto_inserted_amount": 0.0,
-                    "manual_review_count": 0,
-                    "manual_review_amount": 0.0,
-                    "api_calls_made": 1,
-                    "processing_method": "structure_only"
-                },
-                "auto_inserted_payments": [],
-                "manual_review_transactions": [],
-                "auto_insert_errors": []
-            }), 200
-
-        # Calculate total amount
-        total_amount = sum(t['amount'] for t in positive_transactions)
-
-        debug_print(f"Total amount of positive transactions: €{total_amount}")
-
-        # Return all positive transactions for frontend to handle
         return jsonify({
-            "message": f"Found {len(positive_transactions)} positive transactions",
-            "summary": {
-                "file_size_mb": round(len(csv_content) / (1024 * 1024), 2),
-                "total_positive_transactions": len(positive_transactions),
-                "auto_inserted_count": 0,
-                "auto_inserted_amount": 0.0,
-                "manual_review_count": len(positive_transactions),
-                "manual_review_amount": total_amount,
-                "api_calls_made": 1,  # Only one AI call for structure detection
-                "processing_method": "structure_only"
-            },
-            "csv_structure": csv_structure,
-            "auto_inserted_payments": [],
-            "manual_review_transactions": positive_transactions,  # All positive transactions
-            "auto_insert_errors": []
+            "transactions": manual_review_transactions,
+            "auto_matched": auto_matched,
+            "total_processed": len(manual_review_transactions),
+            "message": f"Processed {len(manual_review_transactions)} transactions, {auto_matched} auto-matched"
         }), 200
 
     except Exception as e:
-        debug_print(f"ERROR in structure-only processing: {e}")
-        return jsonify({"message": str(e)}), 500
+        db.session.rollback()
+        debug_print(f"Error in process_csv_simple: {e}")
+        return jsonify({'error': str(e)}), 500
 
-# Keep the old chunked processing for backward compatibility if needed
-@csv_payments_bp.route("/process-csv-chunked", methods=["POST"])
+@csv_payments_bp.route('/previous-uploads', methods=['GET'])
 @token_required
-@role_required("admin")
-def process_csv_chunked():
-    """Start chunked processing for large files (legacy - now uses structure-only approach)"""
+def get_previous_uploads():
+    """Get summary and details of previous CSV uploads"""
     try:
-        debug_print("Chunked processing endpoint called - redirecting to structure-only processing...")
+        # Get summary counts
+        summary = db.session.query(
+            UnassignedPayment.status,
+            func.count(UnassignedPayment.id).label('count'),
+            func.sum(UnassignedPayment.amount).label('total_amount')
+        ).group_by(UnassignedPayment.status).all()
 
-        client = get_grok_client()
-        if not client:
-            return jsonify({"message": "Grok AI not configured"}), 500
+        summary_dict = {}
+        for status, count, total_amount in summary:
+            summary_dict[status] = {
+                "count": count,
+                "total_amount": float(total_amount) if total_amount else 0.0
+            }
 
-        if 'file' not in request.files:
-            return jsonify({"message": "No file provided"}), 400
+        # Get unassigned and matched payments
+        unassigned_payments = UnassignedPayment.query.filter_by(status='unassigned').all()
+        matched_payments = UnassignedPayment.query.filter_by(status='matched').all()
 
-        file = request.files['file']
-        if not file:
-            return jsonify({"message": "No file selected"}), 400
+        def format_payment(payment):
+            return {
+                "id": payment.id,
+                "name_from_csv": payment.name_from_csv,
+                "amount": float(payment.amount),
+                "payment_date": payment.payment_date.isoformat() if payment.payment_date else None,
+                "description": payment.description,
+                "csv_line": payment.csv_line,
+                "status": payment.status,
+                "similarity_score": payment.similarity_score,
+                "matched_tenant_id": payment.matched_tenant_id,
+                "matched_apartment_id": payment.matched_apartment_id,
+                "created_at": payment.created_at.isoformat() if hasattr(payment, 'created_at') and payment.created_at else None
+            }
 
-        debug_print(f"Processing large file: {file.filename}")
-
-        # Read file
-        try:
-            csv_content = file.read().decode('utf-8')
-        except:
-            file.seek(0)
-            csv_content = file.read().decode('latin-1')
-
-        # Use the same structure-only processing
-        return process_csv_structure_only(csv_content, client)
+        return jsonify({
+            "summary": summary_dict,
+            "unassigned": [format_payment(p) for p in unassigned_payments],
+            "matched": [format_payment(p) for p in matched_payments]
+        }), 200
 
     except Exception as e:
-        debug_print(f"ERROR in chunked processing: {e}")
-        return jsonify({"message": str(e)}), 500
+        debug_print(f"Error getting previous uploads: {e}")
+        return jsonify({'error': str(e)}), 500
 
-@csv_payments_bp.route("/process-chunk/<temp_file_id>/<int:chunk_number>", methods=["POST"])
+@csv_payments_bp.route('/auto-assign-matched', methods=['POST'])
 @token_required
-@role_required("admin")
-def process_chunk(temp_file_id, chunk_number):
-    """Legacy endpoint - no longer needed with structure-only approach"""
-    return jsonify({
-        "message": "Chunk processing is no longer needed. All transactions are processed immediately.",
-        "chunk_processed": chunk_number + 1,
-        "rent_payments_found": 0,
-        "chunk_results": [],
-        "processing_complete": True
-    }), 200
+def auto_assign_matched():
+    """Auto-assign all matched payments to create Payment records"""
+    try:
+        matched_payments = UnassignedPayment.query.filter_by(status='matched').all()
+        assigned_count = 0
 
-@csv_payments_bp.route("/get-results/<temp_file_id>", methods=["GET"])
-@token_required
-def get_processing_results(temp_file_id):
-    """Legacy endpoint for getting processing results"""
-    return jsonify({
-        "message": "Results are now returned immediately from the main processing endpoint",
-        "summary": {
-            "total_transactions_found": 0,
-            "total_amount": 0.0,
-            "processing_complete": True
-        },
-        "rent_payments": [],
-        "processing_complete": True
-    }), 200
+        for payment in matched_payments:
+            if payment.matched_tenant_id and payment.matched_apartment_id:
+                # Get tenant info
+                tenant = Tenant.query.get(payment.matched_tenant_id)
+                if not tenant:
+                    continue
 
-@csv_payments_bp.route("/manual-assign-payment", methods=["POST"])
+                # Create payment record
+                tenant_data = [{
+                    "id": tenant.id,
+                    "name": tenant.name,
+                    "amountPaid": float(payment.amount),
+                    "amountDue": float(payment.amount),
+                    "paid": True
+                }]
+
+                # Create unique month identifier
+                month_identifier = f"csv_{payment.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+                new_payment = Payment(
+                    apartment_id=payment.matched_apartment_id,
+                    month=month_identifier,
+                    year=payment.payment_date.year if payment.payment_date else datetime.now().year,
+                    status='paid',
+                    tenants=json.dumps(tenant_data),
+                    internet=0.0,
+                    electricity=0.0,
+                    other=0.0,
+                    extraPayments="{}",
+                    paymentDate=payment.payment_date or datetime.now().date(),
+                    paymentMethod='bank_transfer',
+                    notes=f"Auto-assigned CSV payment from {payment.name_from_csv}",
+                    updated_at=datetime.utcnow()
+                )
+
+                db.session.add(new_payment)
+
+                # Update unassigned payment status
+                payment.status = 'assigned'
+                assigned_count += 1
+
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "assigned_count": assigned_count,
+            "message": f"Successfully auto-assigned {assigned_count} payments"
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        debug_print(f"Error in auto-assign: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@csv_payments_bp.route('/assign/<int:payment_id>', methods=['POST'])
 @token_required
-@role_required("admin")
+def assign_previous_payment(payment_id):
+    """Assign a previous upload payment to a tenant and apartment with full details"""
+    try:
+        data = request.get_json()
+        tenant_id = data.get('tenant_id')
+        apartment_id = data.get('apartment_id')
+        custom_amount = data.get('amount')  # Allow custom amount
+        custom_date = data.get('payment_date')  # Allow custom date
+        notes = data.get('notes', '')
+        payment_method = data.get('payment_method', 'bank_transfer')
+
+        if not tenant_id or not apartment_id:
+            return jsonify({"success": False, "error": "Missing tenant_id or apartment_id"}), 400
+
+        # Get the unassigned payment
+        payment = UnassignedPayment.query.get(payment_id)
+        if not payment:
+            return jsonify({"success": False, "error": "Payment not found"}), 404
+
+        # Validate tenant and apartment exist
+        tenant = Tenant.query.get(tenant_id)
+        apartment = Apartment.query.get(apartment_id)
+
+        if not tenant or not apartment:
+            return jsonify({"success": False, "error": "Tenant or apartment not found"}), 404
+
+        # Use custom amount if provided, otherwise use original amount
+        final_amount = float(custom_amount) if custom_amount else float(payment.amount)
+
+        # Use custom date if provided, otherwise use original date
+        if custom_date:
+            try:
+                final_date = datetime.strptime(custom_date, '%Y-%m-%d').date()
+            except ValueError:
+                final_date = payment.payment_date or datetime.now().date()
+        else:
+            final_date = payment.payment_date or datetime.now().date()
+
+        # Find current contract for this tenant and apartment
+        current_contract = db.session.query(ContractPeriod).join(ContractTenant).filter(
+            ContractTenant.tenant_id == tenant_id,
+            ContractPeriod.apartment_id == apartment_id,
+            ContractTenant.move_out_date.is_(None),
+            ContractPeriod.status == 'active'
+        ).first()
+
+        # Create payment record using correct Payment model structure
+        tenant_data = [{
+            "id": tenant.id,
+            "name": tenant.name,
+            "amountPaid": final_amount,
+            "amountDue": final_amount,
+            "paid": True
+        }]
+
+        # Create unique month identifier
+        month_identifier = f"csv_{payment.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        # Create Payment with correct fields (no 'tenants' parameter in constructor)
+        new_payment = Payment(
+            apartment_id=apartment_id,
+            month=final_date.month,
+            year=final_date.year,
+            amount=final_amount,
+            payment_date=final_date,
+            payment_method=payment_method,
+            payment_type='rent',
+            internet=0.0,
+            electricity=0.0,
+            other=0.0,
+            status='paid',
+            notes=notes or f"CSV import: {payment.name_from_csv}",
+            contract_period_id=current_contract.id if current_contract else None
+        )
+
+        # Set tenants JSON field after creation
+        new_payment.tenants = json.dumps(tenant_data)
+        new_payment.extraPayments = "{}"
+
+        db.session.add(new_payment)
+
+        # Update unassigned payment status
+        payment.status = 'assigned'
+        payment.matched_tenant_id = tenant_id
+        payment.matched_apartment_id = apartment_id
+
+        db.session.commit()
+
+        debug_print(f"Successfully assigned payment {payment_id} to {tenant.name} in apartment {apartment_id}")
+
+        return jsonify({
+            "success": True,
+            "message": f"Payment assigned to {tenant.name}",
+            "payment_id": new_payment.id,
+            "amount": final_amount,
+            "date": final_date.isoformat()
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        debug_print(f"Error assigning payment {payment_id}: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@csv_payments_bp.route('/reject/<int:payment_id>', methods=['POST'])
+@token_required
+def reject_previous_payment(payment_id):
+    """Reject a previous upload payment - alternative endpoint naming"""
+    return reject_payment(payment_id)
+
+@csv_payments_bp.route('/previous-uploads/<int:payment_id>/reject', methods=['POST'])
+@token_required
+def reject_payment(payment_id):
+    """Reject an unassigned payment"""
+    try:
+        payment = UnassignedPayment.query.get(payment_id)
+        if not payment:
+            return jsonify({"success": False, "error": "Payment not found"}), 404
+
+        payment.status = 'rejected'
+        db.session.commit()
+
+        debug_print(f"Payment {payment_id} rejected")
+
+        return jsonify({"success": True, "message": "Payment rejected"}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        debug_print(f"Error rejecting payment: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@csv_payments_bp.route('/manual-assign-payment', methods=['POST'])
+@token_required
 def manual_assign_payment():
     """Manually assign a CSV transaction to a tenant and apartment"""
     try:
@@ -598,54 +758,114 @@ def manual_assign_payment():
         debug_print(f"ERROR in manual assignment: {e}")
         return jsonify({"message": str(e)}), 500
 
-@csv_payments_bp.route("/test", methods=["GET"])
-def test_endpoint():
-    """Test endpoint to verify blueprint is working"""
-    return jsonify({"message": "CSV Payments API is working!", "timestamp": datetime.now().isoformat()}), 200
-
-@csv_payments_bp.route("/tenants", methods=["GET"])
+@csv_payments_bp.route("/tenants/search", methods=["GET"])
 @token_required
-def get_tenants():
-    """Get all tenants for assignment dropdown"""
+def search_tenants():
+    """Search tenants with their current apartment info"""
     try:
-        tenants = Tenant.query.all()
-        tenant_list = []
+        query = request.args.get('query', '').strip()
+        limit = min(int(request.args.get('limit', 20)), 50)  # Max 50 results
+
+        if not query or len(query) < 2:
+            return jsonify([]), 200
+
+        # Search tenants by name (case-insensitive, partial match)
+        tenants = db.session.query(Tenant).filter(
+            Tenant.name.ilike(f'%{query}%')
+        ).limit(limit).all()
+
+        results = []
         for tenant in tenants:
-            tenant_data = {
+            # Find current apartment through active contract
+            current_contract = db.session.query(ContractTenant, ContractPeriod, Apartment).join(
+                ContractPeriod, ContractTenant.contract_period_id == ContractPeriod.id
+            ).join(
+                Apartment, ContractPeriod.apartment_id == Apartment.id
+            ).filter(
+                ContractTenant.tenant_id == tenant.id,
+                ContractTenant.move_out_date.is_(None),
+                ContractPeriod.status == 'active'
+            ).first()
+
+            apartment_info = None
+            if current_contract:
+                contract_tenant, contract_period, apartment = current_contract
+                apartment_info = {
+                    "id": apartment.id,
+                    "address": apartment.get_short_address(),
+                    "contract_number": contract_period.contract_number,
+                    "monthly_rent": float(contract_period.monthly_rent) if contract_period.monthly_rent else 0
+                }
+
+            results.append({
                 "id": tenant.id,
                 "name": tenant.name,
                 "email": tenant.email,
                 "phone": tenant.phone,
-                "apartment_id": tenant.apartment_id,
-                "apartment_address": tenant.apartment.address if tenant.apartment else "No apartment"
-            }
-            tenant_list.append(tenant_data)
+                "current_apartment": apartment_info
+            })
 
-        debug_print(f"Retrieved {len(tenant_list)} tenants")
-        return jsonify(tenant_list), 200
+        debug_print(f"Found {len(results)} tenants matching '{query}'")
+        return jsonify(results), 200
+
     except Exception as e:
-        debug_print(f"Error getting tenants: {e}")
-        return jsonify({"message": str(e)}), 500
+        debug_print(f"Error searching tenants: {e}")
+        return jsonify({"error": str(e)}), 500
 
-@csv_payments_bp.route("/apartments", methods=["GET"])
+@csv_payments_bp.route("/apartments/search", methods=["GET"])
 @token_required
-def get_apartments():
-    """Get all apartments for assignment dropdown"""
+def search_apartments():
+    """Search apartments with current tenant info"""
     try:
-        apartments = Apartment.query.all()
-        apartment_list = []
-        for apartment in apartments:
-            apartment_data = {
-                "id": apartment.id,
-                "address": apartment.address,
-                "rent": apartment.rent,
-                "rooms": apartment.rooms,
-                "status": apartment.status
-            }
-            apartment_list.append(apartment_data)
+        query = request.args.get('query', '').strip()
+        limit = min(int(request.args.get('limit', 20)), 50)  # Max 50 results
 
-        debug_print(f"Retrieved {len(apartment_list)} apartments")
-        return jsonify(apartment_list), 200
+        if not query or len(query) < 2:
+            return jsonify([]), 200
+
+        # Search apartments by address (case-insensitive, partial match)
+        apartments = Apartment.query.filter(
+            Apartment.address.ilike(f'%{query}%')
+        ).limit(limit).all()
+
+        results = []
+        for apartment in apartments:
+            # Get current tenants
+            current_tenants = db.session.query(Tenant, ContractTenant, ContractPeriod).join(
+                ContractTenant, Tenant.id == ContractTenant.tenant_id
+            ).join(
+                ContractPeriod, ContractTenant.contract_period_id == ContractPeriod.id
+            ).filter(
+                ContractPeriod.apartment_id == apartment.id,
+                ContractTenant.move_out_date.is_(None),
+                ContractPeriod.status == 'active'
+            ).all()
+
+            tenant_info = []
+            for tenant, contract_tenant, contract_period in current_tenants:
+                tenant_info.append({
+                    "id": tenant.id,
+                    "name": tenant.name,
+                    "is_primary": contract_tenant.is_primary
+                })
+
+            results.append({
+                "id": apartment.id,
+                "address": apartment.get_short_address(),
+                "rent": float(apartment.rent) if apartment.rent else 0,
+                "rooms": apartment.rooms,
+                "status": apartment.status,
+                "current_tenants": tenant_info
+            })
+
+        debug_print(f"Found {len(results)} apartments matching '{query}'")
+        return jsonify(results), 200
+
     except Exception as e:
-        debug_print(f"Error getting apartments: {e}")
-        return jsonify({"message": str(e)}), 500
+        debug_print(f"Error searching apartments: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@csv_payments_bp.route("/test", methods=["GET"])
+def test_endpoint():
+    """Test endpoint to verify blueprint is working"""
+    return jsonify({"message": "CSV Payments API is working!", "timestamp": datetime.now().isoformat()}), 200

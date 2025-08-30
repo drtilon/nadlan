@@ -6,7 +6,6 @@ services:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "80:80"
-      # Remove port 443 since we don't use HTTPS
     restart: unless-stopped
 
   backend:
@@ -15,6 +14,11 @@ services:
       - FLASK_ENV=production
 
   frontend:
-    restart: unless-stopped
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile  # Force production Dockerfile
+    volumes: []  # Remove development volume mounts
     environment:
       - NODE_ENV=production
+    restart: unless-stopped
+    ports: ["3001:80"]  # Nginx serves on port 80 inside container

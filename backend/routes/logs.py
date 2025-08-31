@@ -34,24 +34,29 @@ def add_to_recent_logs(log_entry):
 def safe_get_timestamp(log_entry):
     """
     Safely extract timestamp from log entry for sorting.
-    Always returns a datetime object for consistent comparison.
+    Always returns a tuple (datetime, original_value) to ensure consistent sorting.
     """
+    if not isinstance(log_entry, dict):
+        return (datetime.min, None)
+
     timestamp = log_entry.get("timestamp", "")
 
+    # Return early for empty/None timestamps
     if not timestamp:
-        return datetime.min
+        return (datetime.min, None)
 
     try:
         # If it's already a datetime object
         if isinstance(timestamp, datetime):
-            return timestamp
+            return (timestamp, timestamp)
 
         # If it's a Unix timestamp (integer or float)
         elif isinstance(timestamp, (int, float)):
             # Handle timestamps that might be in milliseconds
             if timestamp > 1e10:  # Likely milliseconds
                 timestamp = timestamp / 1000
-            return datetime.fromtimestamp(timestamp)
+            dt = datetime.fromtimestamp(timestamp)
+            return (dt, timestamp)
 
         # If it's a string
         elif isinstance(timestamp, str):
@@ -59,44 +64,62 @@ def safe_get_timestamp(log_entry):
 
             # Handle empty strings
             if not timestamp:
-                return datetime.min
+                return (datetime.min, timestamp)
+
+            # Try to parse as a number first (Unix timestamp as string)
+            try:
+                ts_num = float(timestamp)
+                if ts_num > 1e10:  # Likely milliseconds
+                    ts_num = ts_num / 1000
+                dt = datetime.fromtimestamp(ts_num)
+                return (dt, timestamp)
+            except (ValueError, OSError):
+                pass
 
             # Handle various string timestamp formats
             if 'T' in timestamp:
                 # ISO format with T separator
-                # Handle timezone info
-                if timestamp.endswith('Z'):
-                    timestamp = timestamp.replace('Z', '+00:00')
-                return datetime.fromisoformat(timestamp.replace('Z', ''))
+                try:
+                    if timestamp.endswith('Z'):
+                        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    else:
+                        dt = datetime.fromisoformat(timestamp)
+                    return (dt, timestamp)
+                except ValueError:
+                    pass
             elif ' ' in timestamp and ',' in timestamp:
                 # Format like "2025-08-31 10:49:14,123"
-                return datetime.strptime(timestamp.split(' ')[0] + ' ' + timestamp.split(' ')[1].split(',')[0], "%Y-%m-%d %H:%M:%S")
+                try:
+                    dt = datetime.strptime(timestamp.split(',')[0], "%Y-%m-%d %H:%M:%S")
+                    return (dt, timestamp)
+                except ValueError:
+                    pass
             elif ' ' in timestamp:
                 # Format like "2025-08-31 10:49:14"
-                return datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+                try:
+                    dt = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+                    return (dt, timestamp)
+                except ValueError:
+                    pass
             elif '-' in timestamp and ':' in timestamp:
                 # Try parsing as ISO format without T
-                return datetime.fromisoformat(timestamp)
-            else:
-                # Try to parse as a number string (Unix timestamp)
                 try:
-                    ts_num = float(timestamp)
-                    if ts_num > 1e10:  # Likely milliseconds
-                        ts_num = ts_num / 1000
-                    return datetime.fromtimestamp(ts_num)
+                    dt = datetime.fromisoformat(timestamp)
+                    return (dt, timestamp)
                 except ValueError:
                     pass
 
-                # Last resort: try ISO format
-                return datetime.fromisoformat(timestamp)
+            # If all parsing attempts fail, return min date
+            current_app.logger.warning(f"Could not parse timestamp string: '{timestamp}'")
+            return (datetime.min, timestamp)
 
         else:
             current_app.logger.warning(f"Unknown timestamp type: {type(timestamp)} - {timestamp}")
-            return datetime.min
+            return (datetime.min, timestamp)
 
-    except (ValueError, TypeError, OSError) as e:
-        current_app.logger.warning(f"Could not parse timestamp '{timestamp}' (type: {type(timestamp)}): {e}")
-        return datetime.min
+    except Exception as e:
+        current_app.logger.error(f"Unexpected error parsing timestamp '{timestamp}' (type: {type(timestamp)}): {e}")
+        return (datetime.min, timestamp)
 
 @logs_bp.route("/logs", methods=["GET"])
 @token_required
@@ -151,11 +174,31 @@ def get_logs():
 
         # Sort logs by timestamp (newest first) - using safe timestamp extraction
         try:
-            filtered_logs.sort(key=safe_get_timestamp, reverse=True)
+            # Use a custom sort key that extracts just the datetime part
+            filtered_logs.sort(key=lambda log: safe_get_timestamp(log)[0], reverse=True)
         except Exception as e:
             current_app.logger.error(f"Error sorting logs: {e}")
-            # If sorting fails, at least return the unsorted logs
-            pass
+            # If sorting still fails, try a more defensive approach
+            try:
+                # Sort only logs that have valid timestamps
+                valid_logs = []
+                invalid_logs = []
+
+                for log in filtered_logs:
+                    dt, _ = safe_get_timestamp(log)
+                    if dt != datetime.min:
+                        valid_logs.append((dt, log))
+                    else:
+                        invalid_logs.append(log)
+
+                # Sort valid logs and combine with invalid ones at the end
+                valid_logs.sort(key=lambda x: x[0], reverse=True)
+                filtered_logs = [log for _, log in valid_logs] + invalid_logs
+
+            except Exception as e2:
+                current_app.logger.error(f"Fallback sorting also failed: {e2}")
+                # If even fallback fails, just return unsorted logs
+                pass
 
         # Calculate pagination
         total_count = len(filtered_logs)
@@ -228,7 +271,7 @@ def apply_filters(logs_data, level, entity_type, user_id, action, search, hours)
             filtered_logs = [
                 log for log in filtered_logs
                 if "timestamp" in log
-                and safe_get_timestamp(log) >= hours_ago
+                and safe_get_timestamp(log)[0] >= hours_ago
             ]
         except (ValueError, TypeError):
             # If hours parameter is invalid, ignore it
@@ -378,11 +421,31 @@ def search_logs():
 
         # Sort by timestamp (newest first) - using safe timestamp extraction
         try:
-            results.sort(key=safe_get_timestamp, reverse=True)
+            # Use a custom sort key that extracts just the datetime part
+            results.sort(key=lambda log: safe_get_timestamp(log)[0], reverse=True)
         except Exception as e:
             current_app.logger.error(f"Error sorting search results: {e}")
-            # If sorting fails, at least return the unsorted results
-            pass
+            # If sorting still fails, try a more defensive approach
+            try:
+                # Sort only logs that have valid timestamps
+                valid_logs = []
+                invalid_logs = []
+
+                for log in results:
+                    dt, _ = safe_get_timestamp(log)
+                    if dt != datetime.min:
+                        valid_logs.append((dt, log))
+                    else:
+                        invalid_logs.append(log)
+
+                # Sort valid logs and combine with invalid ones at the end
+                valid_logs.sort(key=lambda x: x[0], reverse=True)
+                results = [log for _, log in valid_logs] + invalid_logs
+
+            except Exception as e2:
+                current_app.logger.error(f"Fallback sorting also failed: {e2}")
+                # If even fallback fails, just return unsorted results
+                pass
 
         # Calculate pagination
         total_count = len(results)
@@ -512,11 +575,31 @@ def get_entity_logs(entity_type, entity_id):
 
         # Sort by timestamp (newest first) - using safe timestamp extraction
         try:
-            entity_logs.sort(key=safe_get_timestamp, reverse=True)
+            # Use a custom sort key that extracts just the datetime part
+            entity_logs.sort(key=lambda log: safe_get_timestamp(log)[0], reverse=True)
         except Exception as e:
             current_app.logger.error(f"Error sorting entity logs: {e}")
-            # If sorting fails, at least return the unsorted logs
-            pass
+            # If sorting still fails, try a more defensive approach
+            try:
+                # Sort only logs that have valid timestamps
+                valid_logs = []
+                invalid_logs = []
+
+                for log in entity_logs:
+                    dt, _ = safe_get_timestamp(log)
+                    if dt != datetime.min:
+                        valid_logs.append((dt, log))
+                    else:
+                        invalid_logs.append(log)
+
+                # Sort valid logs and combine with invalid ones at the end
+                valid_logs.sort(key=lambda x: x[0], reverse=True)
+                entity_logs = [log for _, log in valid_logs] + invalid_logs
+
+            except Exception as e2:
+                current_app.logger.error(f"Fallback sorting also failed: {e2}")
+                # If even fallback fails, just return unsorted logs
+                pass
 
         # Calculate pagination
         total_count = len(entity_logs)

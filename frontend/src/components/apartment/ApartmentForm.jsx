@@ -23,14 +23,16 @@ import TenantSelector from '../tenant/TenantSelector';
 import TenantForm from '../tenant/EnhancedTenantForm';
 
 // Import API and utilities
-import api from '../../utils/api';
+import api, { isAdmin as checkIsAdmin } from '../../utils/api';
 
 const ApartmentForm = ({
   initialData = null,
   onSuccess,
   showNotification,
-  isAdmin = false
+  isAdmin: isAdminProp = null // Allow prop override
 }) => {
+  // FIXED: Determine admin status properly
+  const isAdmin = isAdminProp !== null ? isAdminProp : checkIsAdmin();
   const isEdit = !!initialData;
 
   // Form state
@@ -361,12 +363,15 @@ const ApartmentForm = ({
         {isEdit ? 'Edit Apartment' : 'Add New Apartment'}
       </Typography>
 
-      {/* FIXED: Display admin status for debugging */}
-      {isAdmin && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Admin Mode: You can edit all fields including management fees and rent costs
-        </Alert>
-      )}
+      {/* DEBUGGING: Show admin status */}
+      <Alert
+        severity={isAdmin ? "info" : "warning"}
+        sx={{ mb: 2 }}
+      >
+        <strong>DEBUG:</strong> Admin Status: {isAdmin ? 'TRUE (Admin features enabled)' : 'FALSE (Regular user mode)'}
+        <br />
+        If you are an admin but seeing FALSE, check how isAdmin prop is being passed to this component.
+      </Alert>
 
       <form onSubmit={handleSubmit}>
         {/* Apartment Details Form */}

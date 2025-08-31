@@ -24,7 +24,7 @@ import {
 } from '@mui/icons-material';
 
 // Import API for landlord fetching
-import api from '../../utils/api';
+import api, { isAdmin as checkIsAdmin } from '../../utils/api';
 
 // Constants
 const APARTMENT_STATUS = {
@@ -58,10 +58,14 @@ function ApartmentDetailsForm({
   isEdit,
   handleDelete,
   showNotification,
-  isAdmin,
+  isAdmin: isAdminProp,
   addedTenantIds,
   tenantSelection
 }) {
+  // FIXED: Determine admin status properly
+  const isAdmin = isAdminProp !== undefined ? isAdminProp : checkIsAdmin();
+
+  console.log('ApartmentDetailsForm - isAdmin:', isAdmin, 'isAdminProp:', isAdminProp);
 
   const [landlords, setLandlords] = useState([]);
   const [loadingLandlords, setLoadingLandlords] = useState(false);

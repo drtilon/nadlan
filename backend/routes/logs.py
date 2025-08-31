@@ -1,4 +1,4 @@
-# routes/logs.py - Updated with pagination support
+# routes/logs.py - Updated with pagination support and sorting fix
 import os
 import json
 from datetime import datetime, timedelta
@@ -30,6 +30,45 @@ def add_to_recent_logs(log_entry):
     recent_logs.append(log_entry)
     if len(recent_logs) > MAX_RECENT_LOGS:
         recent_logs.pop(0)  # Remove oldest log
+
+def safe_get_timestamp(log_entry):
+    """
+    Safely extract timestamp from log entry for sorting.
+    Handles both string and integer timestamps, returning a datetime object.
+    """
+    timestamp = log_entry.get("timestamp", "")
+
+    if not timestamp:
+        return datetime.min
+
+    try:
+        # If it's already a string in ISO format
+        if isinstance(timestamp, str):
+            # Handle various timestamp formats
+            if 'T' in timestamp:
+                # ISO format with T separator
+                return datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            elif ' ' in timestamp:
+                # Format like "2025-08-31 10:49:14"
+                return datetime.strptime(timestamp.split(',')[0], "%Y-%m-%d %H:%M:%S")
+            else:
+                # Try parsing as ISO format
+                return datetime.fromisoformat(timestamp)
+
+        # If it's a Unix timestamp (integer or float)
+        elif isinstance(timestamp, (int, float)):
+            return datetime.fromtimestamp(timestamp)
+
+        # If it's already a datetime object
+        elif isinstance(timestamp, datetime):
+            return timestamp
+
+        else:
+            return datetime.min
+
+    except (ValueError, TypeError, OSError) as e:
+        current_app.logger.warning(f"Could not parse timestamp '{timestamp}': {e}")
+        return datetime.min
 
 @logs_bp.route("/logs", methods=["GET"])
 @token_required
@@ -82,18 +121,18 @@ def get_logs():
             logs_data, level, entity_type, user_id, action, search, hours
         )
 
-        # Sort logs by timestamp (newest first)
-        filtered_logs.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        # Sort logs by timestamp (newest first) - using safe timestamp extraction
+        filtered_logs.sort(key=safe_get_timestamp, reverse=True)
 
         # Calculate pagination
         total_count = len(filtered_logs)
         total_pages = math.ceil(total_count / limit) if total_count > 0 else 0
-        
+
         # Apply pagination
         paginated_logs = filtered_logs[offset:offset + limit]
 
         # Collect metadata for filters
-        metadata = collect_metadata(logs_data if log_type == 'all' else 
+        metadata = collect_metadata(logs_data if log_type == 'all' else
                                   [log for log in logs_data if log.get('log_type') == log_type])
 
         response_data = {
@@ -120,28 +159,28 @@ def apply_filters(logs_data, level, entity_type, user_id, action, search, hours)
     # Level filter
     if level and level != 'all':
         filtered_logs = [
-            log for log in filtered_logs 
+            log for log in filtered_logs
             if log.get("level", "").lower() == level
         ]
 
     # Entity type filter
     if entity_type and entity_type != 'all':
         filtered_logs = [
-            log for log in filtered_logs 
+            log for log in filtered_logs
             if log.get("entity_type", "").lower() == entity_type.lower()
         ]
-        
+
     # User ID filter
     if user_id and user_id != 'all':
         filtered_logs = [
-            log for log in filtered_logs 
+            log for log in filtered_logs
             if (log.get("user", {}) and str(log["user"].get("id", "")) == str(user_id))
         ]
-        
+
     # Action filter
     if action and action != 'all':
         filtered_logs = [
-            log for log in filtered_logs 
+            log for log in filtered_logs
             if log.get("action", "").lower() == action.lower()
         ]
 
@@ -156,7 +195,7 @@ def apply_filters(logs_data, level, entity_type, user_id, action, search, hours)
             filtered_logs = [
                 log for log in filtered_logs
                 if "timestamp" in log
-                and datetime.fromisoformat(log["timestamp"].replace('Z', '+00:00')) >= hours_ago
+                and safe_get_timestamp(log) >= hours_ago
             ]
         except (ValueError, TypeError):
             # If hours parameter is invalid, ignore it
@@ -168,33 +207,33 @@ def apply_search_filter(logs_data, search_query):
     """Apply search filter to logs"""
     if not search_query:
         return logs_data
-    
+
     search_lower = search_query.lower()
     results = []
-    
+
     for log in logs_data:
         # Search in different log fields
         should_include = False
-        
+
         # Basic text search in message
         if "message" in log and search_lower in (log.get("message") or "").lower():
             should_include = True
-            
-        # Search in logger/entity_type  
+
+        # Search in logger/entity_type
         if "logger" in log and search_lower in (log.get("logger") or "").lower():
             should_include = True
-            
+
         if "entity_type" in log and search_lower in (log.get("entity_type") or "").lower():
             should_include = True
-            
+
         # Search in level
         if "level" in log and search_lower in (log.get("level") or "").lower():
             should_include = True
-        
+
         # Search in action
         if "action" in log and search_lower in (log.get("action") or "").lower():
             should_include = True
-            
+
         # Search in user info
         if "user" in log and log.get("user"):
             user = log.get("user", {})
@@ -204,13 +243,13 @@ def apply_search_filter(logs_data, search_query):
                 search_lower in (user.get("role") or "").lower()
             ):
                 should_include = True
-                
+
         # Search in details object
         if "details" in log and log.get("details"):
             details_str = json.dumps(log.get("details", {}))
             if search_lower in details_str.lower():
                 should_include = True
-                
+
         if should_include:
             results.append(log)
 
@@ -220,13 +259,13 @@ def collect_metadata(logs_data):
     """Collect metadata about available filter options"""
     entity_types = set()
     action_types = set()
-    
+
     for log in logs_data:
         if log.get("entity_type"):
             entity_types.add(log["entity_type"])
         if log.get("action"):
             action_types.add(log["action"])
-    
+
     return {
         "entityTypes": sorted(list(entity_types)),
         "actionTypes": sorted(list(action_types))
@@ -239,11 +278,11 @@ def clear_logs():
     """Clears all application logs."""
     try:
         log_type = request.args.get("type", "all")
-        
+
         if log_type in ['all', 'app']:
             with open(APP_LOG_FILE, "w") as f:
                 f.write("")
-                
+
         if log_type in ['all', 'activity']:
             with open(ACTIVITY_LOG_FILE, "w") as f:
                 f.write("")
@@ -270,7 +309,7 @@ def search_logs():
         log_type = request.args.get("type", "all")
         page = request.args.get("page", 0, type=int)
         limit = request.args.get("limit", 25, type=int)
-        
+
         if not query:
             return jsonify({"logs": [], "total": 0, "page": page, "limit": limit}), 200
 
@@ -281,13 +320,13 @@ def search_logs():
 
         # Collect appropriate logs
         logs_data = []
-        
+
         if log_type in ['all', 'app']:
             app_logs = collect_logs_from_file(APP_LOG_FILE)
             for log in app_logs:
                 log['log_type'] = 'app'
                 logs_data.append(log)
-                
+
         if log_type in ['all', 'activity']:
             activity_logs = collect_activity_logs_from_file(ACTIVITY_LOG_FILE)
             for log in activity_logs:
@@ -304,13 +343,13 @@ def search_logs():
         # Perform search
         results = apply_search_filter(logs_data, query)
 
-        # Sort by timestamp (newest first)
-        results.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        # Sort by timestamp (newest first) - using safe timestamp extraction
+        results.sort(key=safe_get_timestamp, reverse=True)
 
         # Calculate pagination
         total_count = len(results)
         total_pages = math.ceil(total_count / limit) if total_count > 0 else 0
-        
+
         # Apply pagination
         paginated_results = results[offset:offset + limit]
 
@@ -341,37 +380,37 @@ def get_log_stats():
         # Get all logs for statistics (without pagination)
         app_logs = collect_logs_from_file(APP_LOG_FILE)
         activity_logs = collect_activity_logs_from_file(ACTIVITY_LOG_FILE)
-        
+
         # Count by log type
         total_app_logs = len(app_logs)
         total_activity_logs = len(activity_logs)
-        
+
         # Initialize stats containers
         level_distribution = {}
         action_distribution = {}
         user_activity = {}
         entity_distribution = {}
-        
+
         # Process app logs
         for log in app_logs:
             level = log.get("level", "unknown").lower()
             level_distribution[level] = level_distribution.get(level, 0) + 1
-        
+
         # Process activity logs
         for log in activity_logs:
             # Action stats
             action = log.get("action", "unknown")
             action_distribution[action] = action_distribution.get(action, 0) + 1
-            
+
             # Entity stats
             entity = log.get("entity_type", "unknown")
             entity_distribution[entity] = entity_distribution.get(entity, 0) + 1
-            
+
             # User stats
             user = log.get("user", {})
             user_id = user.get("id") if user else "unknown"
             username = user.get("username") if user else "unknown"
-            
+
             if user_id not in user_activity:
                 user_activity[user_id] = {
                     "user_id": user_id,
@@ -380,17 +419,17 @@ def get_log_stats():
                     "actions": {},
                     "total_actions": 0
                 }
-            
+
             user_activity[user_id]["actions"][action] = user_activity[user_id]["actions"].get(action, 0) + 1
             user_activity[user_id]["total_actions"] += 1
-            
+
         # Sort user activity by most active
         sorted_users = sorted(
             list(user_activity.values()),
             key=lambda x: x["total_actions"],
             reverse=True
         )
-        
+
         return jsonify({
             "total_logs": {
                 "app": total_app_logs,
@@ -402,7 +441,7 @@ def get_log_stats():
             "entity_distribution": entity_distribution,
             "user_activity": sorted_users[:10]  # Top 10 most active users
         }), 200
-        
+
     except Exception as e:
         current_app.logger.error(f"Error generating log statistics: {e}")
         return jsonify({"message": "Error generating log statistics", "error": str(e)}), 500
@@ -418,31 +457,31 @@ def get_entity_logs(entity_type, entity_id):
         # Pagination parameters
         page = request.args.get("page", 0, type=int)
         limit = request.args.get("limit", 25, type=int)
-        
+
         # Validate pagination
         page = max(0, page)
         limit = min(max(1, limit), 1000)
         offset = page * limit
-        
+
         # Get activity logs
         activity_logs = collect_activity_logs_from_file(ACTIVITY_LOG_FILE)
-        
+
         # Filter logs for the specific entity
         entity_logs = [
             log for log in activity_logs
             if log.get("entity_type") == entity_type and str(log.get("entity_id")) == str(entity_id)
         ]
-        
-        # Sort by timestamp (newest first)
-        entity_logs.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
-        
+
+        # Sort by timestamp (newest first) - using safe timestamp extraction
+        entity_logs.sort(key=safe_get_timestamp, reverse=True)
+
         # Calculate pagination
         total_count = len(entity_logs)
         total_pages = math.ceil(total_count / limit) if total_count > 0 else 0
-        
+
         # Apply pagination
         paginated_logs = entity_logs[offset:offset + limit]
-        
+
         return jsonify({
             "entity_type": entity_type,
             "entity_id": entity_id,
@@ -454,7 +493,7 @@ def get_entity_logs(entity_type, entity_id):
             "hasNext": page < total_pages - 1,
             "hasPrev": page > 0
         }), 200
-        
+
     except Exception as e:
         current_app.logger.error(f"Error retrieving entity logs: {e}")
         return jsonify({"message": "Error retrieving entity logs", "error": str(e)}), 500
@@ -571,20 +610,20 @@ def collect_activity_logs_from_file(file_path) -> List[Dict[str, Any]]:
                         json_start = line.find('USER ACTIVITY:') + 14
                         if json_start < 14:  # Not found
                             json_start = line.find('USER ACTIVITY ERROR:') + 20
-                            
+
                         if json_start > 0:  # Found the marker
                             json_str = line[json_start:].strip()
                             activity_data = json.loads(json_str)
-                            
+
                             # Add log identifier
                             activity_data["id"] = f"activity_{i}"
-                            
+
                             # Add standard log fields for compatibility
                             if "level" not in activity_data:
                                 activity_data["level"] = "ERROR" if "ERROR" in line else "INFO"
-                                
+
                             logs_data.append(activity_data)
-                        
+
             except Exception as e:
                 # Skip lines that can't be parsed
                 current_app.logger.error(f"Error parsing activity log line: {e}")

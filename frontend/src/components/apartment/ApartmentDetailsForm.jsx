@@ -456,25 +456,6 @@ function ApartmentDetailsForm({
           />
         </Grid>
       </Grid>
-
-      {/* FIXED: Delete Button - Now visible for admins in edit mode */}
-      {isEdit && isAdmin && handleDelete && (
-        <Box sx={{ mt: 3, mb: 2 }}>
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            Admin Actions
-          </Alert>
-          <Button
-            variant="outlined"
-            color="error"
-            startIcon={<DeleteIcon />}
-            onClick={handleDelete}
-            disabled={isSubmitting}
-            size="large"
-          >
-            Delete Apartment
-          </Button>
-        </Box>
-      )}
     </Box>
   );
 }

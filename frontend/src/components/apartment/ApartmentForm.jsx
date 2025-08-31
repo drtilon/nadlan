@@ -23,7 +23,7 @@ import TenantSelector from '../tenant/TenantSelector';
 import TenantForm from '../tenant/EnhancedTenantForm';
 
 // Import API and utilities
-import api, { isAdmin as checkIsAdmin } from '../../utils/api';
+import api, { isAdmin as checkIsAdmin, getUserData } from '../../utils/api';
 
 const ApartmentForm = ({
   initialData = null,
@@ -33,6 +33,14 @@ const ApartmentForm = ({
 }) => {
   // FIXED: Determine admin status properly
   const isAdmin = isAdminProp !== null ? isAdminProp : checkIsAdmin();
+
+  // DEBUG: Log the user data and admin status
+  const userData = getUserData();
+  console.log('🔍 ApartmentForm DEBUG:');
+  console.log('- userData:', userData);
+  console.log('- isAdmin result:', isAdmin);
+  console.log('- user role from userData:', userData?.role);
+  console.log('- isAdminProp:', isAdminProp);
   const isEdit = !!initialData;
 
   // Form state
@@ -415,6 +423,20 @@ const ApartmentForm = ({
 
         {/* Action Buttons */}
         <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 3 }}>
+          {/* FIXED: Delete button next to Update button for admins */}
+          {isEdit && isAdmin && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteIcon />}
+              onClick={handleDelete}
+              disabled={isSubmitting}
+              size="large"
+            >
+              Delete Apartment
+            </Button>
+          )}
+
           <Button
             type="submit"
             variant="contained"

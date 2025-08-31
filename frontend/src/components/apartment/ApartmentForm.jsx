@@ -43,7 +43,7 @@ const ApartmentForm = ({
     city: '',
     state: '',
     zip_code: '',
-    country: '',
+    country: 'Israel',
     rooms: 1,
     size: '',
     rent: '',
@@ -52,10 +52,10 @@ const ApartmentForm = ({
     genderPreference: 'mixed',
     status: 'vacant',
     notes: '',
-    landlord_id: '', // FIXED: Ensure this is always included
+    landlord_id: '',
     moveInDate: '',
     moveOutDate: '',
-    // Admin fields
+    // FIXED: Admin fields with proper defaults
     model: 'rental',
     managementFee: 0,
     rentCost: 0
@@ -71,7 +71,7 @@ const ApartmentForm = ({
   const [loading, setLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // FIXED: Initialize form data properly
+  // FIXED: Initialize form data properly including admin fields
   useEffect(() => {
     if (isEdit && initialData) {
       console.log('Initializing form with data:', initialData);
@@ -85,7 +85,7 @@ const ApartmentForm = ({
         city: initialData.city || '',
         state: initialData.state || '',
         zip_code: initialData.zip_code || '',
-        country: initialData.country || '',
+        country: initialData.country || 'Israel',
         rooms: initialData.bedrooms || initialData.rooms || 1,
         size: initialData.area || initialData.size || '',
         rent: initialData.rent || '',
@@ -94,63 +94,52 @@ const ApartmentForm = ({
         genderPreference: initialData.genderPreference || 'mixed',
         status: initialData.status || 'vacant',
         notes: initialData.notes || '',
-        landlord_id: initialData.landlord_id || '', // FIXED: Properly set landlord_id
+        landlord_id: initialData.landlord_id || '',
         moveInDate: initialData.moveInDate ? initialData.moveInDate.split('T')[0] : '',
         moveOutDate: initialData.moveOutDate ? initialData.moveOutDate.split('T')[0] : '',
-        // Admin fields
+        // FIXED: Properly initialize admin fields from backend data
         model: initialData.model || 'rental',
         managementFee: initialData.managementFee || 0,
         rentCost: initialData.rentCost || 0
       });
 
-      // FIXED: Set tenant data from current tenants
+      // Initialize tenants if they exist
       if (initialData.tenants && Array.isArray(initialData.tenants)) {
         const existingTenants = initialData.tenants.map(tenant => ({
-          id: tenant.id,
-          name: tenant.name || '',
-          email: tenant.email || '',
-          phone: tenant.phone || '',
-          date_of_birth: tenant.date_of_birth || '',
-          refund_iban: tenant.refund_iban || '',
-          passport_id: tenant.passport_id || '',
-          gender: tenant.gender || '',
+          ...tenant,
           isExistingTenant: true
         }));
-
         setTenantData(existingTenants);
-        setAddedTenantIds(new Set(existingTenants.map(t => t.id)));
+        setAddedTenantIds(new Set(initialData.tenants.map(t => t.id)));
       }
     }
-  }, [initialData, isEdit]);
+  }, [isEdit, initialData]);
 
-  // Load available tenants
+  // Fetch available tenants
   useEffect(() => {
     const fetchAvailableTenants = async () => {
       try {
         const response = await api.get('/tenants/available');
-        setAvailableTenants(response.data?.tenants || response.data || []);
+        setAvailableTenants(response.data.tenants || response.data || []);
       } catch (error) {
         console.error('Error fetching available tenants:', error);
-        showNotification?.('Failed to load available tenants', 'error');
       }
     };
 
     fetchAvailableTenants();
   }, []);
 
-  // Handle form field changes
+  // Handle form changes
   const handleChange = (event) => {
     const { name, value } = event.target;
-    console.log(`Field changed: ${name} = ${value}`);
-
-    setFormData(prev => {
-      const updated = { ...prev, [name]: value };
-      console.log('Updated form data:', updated);
-      return updated;
-    });
+    console.log(`Form field changed: ${name} = ${value}`);
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
   };
 
-  // FIXED: Handle tenant changes
+  // Handle tenant changes
   const handleTenantChange = (index, field, value) => {
     setTenantData(prev => {
       const updated = [...prev];
@@ -161,25 +150,18 @@ const ApartmentForm = ({
 
   // Remove tenant
   const removeTenant = (index) => {
-    setTenantData(prev => {
-      const updated = [...prev];
-      const removedTenant = updated[index];
-
-      // If it's an existing tenant, remove from added set
-      if (removedTenant.id && !String(removedTenant.id).startsWith('temp-')) {
-        setAddedTenantIds(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(removedTenant.id);
-          return newSet;
-        });
-      }
-
-      updated.splice(index, 1);
-      return updated;
-    });
+    const tenantToRemove = tenantData[index];
+    setTenantData(prev => prev.filter((_, i) => i !== index));
+    if (tenantToRemove.id) {
+      setAddedTenantIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(tenantToRemove.id);
+        return newSet;
+      });
+    }
   };
 
-  // Handle existing tenant selection
+  // Handle tenant selection
   const handleTenantSelection = (tenant) => {
     if (addedTenantIds.has(tenant.id)) {
       showNotification?.('Tenant already added', 'warning');
@@ -225,7 +207,7 @@ const ApartmentForm = ({
     setTenantFormOpen(false);
   };
 
-  // Handle apartment deletion
+  // FIXED: Handle apartment deletion
   const handleDelete = async () => {
     if (!isEdit || !initialData?.id) return;
 
@@ -236,7 +218,8 @@ const ApartmentForm = ({
         onSuccess?.();
       } catch (error) {
         console.error('Error deleting apartment:', error);
-        showNotification?.('Failed to delete apartment', 'error');
+        const errorMessage = error.response?.data?.message || 'Failed to delete apartment';
+        showNotification?.(errorMessage, 'error');
       }
     }
   };
@@ -250,6 +233,7 @@ const ApartmentForm = ({
       console.log('Form submission started');
       console.log('Form data:', formData);
       console.log('Tenant data:', tenantData);
+      console.log('Is admin:', isAdmin);
 
       // Validation
       if (!formData.street_name || !formData.house_number || !formData.city) {
@@ -282,7 +266,9 @@ const ApartmentForm = ({
         delete cleanedFormData.managementFee;
         delete cleanedFormData.rentCost;
         delete cleanedFormData.model;
-        // Note: landlord_id is NOT removed - regular users CAN select landlords
+        console.log('Removed admin-only fields for non-admin user');
+      } else {
+        console.log('Keeping admin fields - user is admin');
       }
 
       // FIXED: Ensure landlord_id is properly included
@@ -290,7 +276,7 @@ const ApartmentForm = ({
         cleanedFormData.landlord_id = parseInt(formData.landlord_id);
       }
 
-      console.log('Cleaned form data with landlord_id:', cleanedFormData);
+      console.log('Cleaned form data:', cleanedFormData);
 
       // FIXED: Process tenants with correct field names
       const processedTenants = tenantData.map(tenant => {
@@ -336,29 +322,26 @@ const ApartmentForm = ({
         const response = await api.put(endpoint, payload);
         console.log('Edit response:', response.data);
 
-        showNotification?.('Apartment updated successfully! Contract has been automatically updated.', 'success');
+        showNotification?.('Apartment updated successfully!', 'success');
+        onSuccess?.(response.data.apartment);
       } else {
-        // FIXED: Use correct create endpoint
-        console.log('Creating new apartment...');
-        const response = await api.post('/apartments/add', payload);
-        console.log('Create response:', response.data);
+        // Use add endpoint
+        const endpoint = '/apartments/add';
+        console.log(`Using add endpoint: ${endpoint}`);
 
-        showNotification?.('Apartment created successfully! Contract has been automatically created.', 'success');
+        const response = await api.post(endpoint, payload);
+        console.log('Add response:', response.data);
+
+        showNotification?.('Apartment created successfully!', 'success');
+        onSuccess?.(response.data.apartment);
       }
-
-      onSuccess?.();
 
     } catch (error) {
-      console.error('Error submitting apartment:', error);
-
-      let errorMessage = 'Failed to save apartment';
-      if (error.response?.data?.message) {
-        errorMessage = error.response.data.message;
-      } else if (error.response?.data?.error) {
-        errorMessage = error.response.data.error;
-      }
-
-              showNotification?.(errorMessage, 'error');
+      console.error('Submission error:', error);
+      const errorMessage = error.response?.data?.message ||
+                          error.response?.data?.error ||
+                          (isEdit ? 'Failed to update apartment' : 'Failed to create apartment');
+      showNotification?.(errorMessage, 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -378,14 +361,31 @@ const ApartmentForm = ({
         {isEdit ? 'Edit Apartment' : 'Add New Apartment'}
       </Typography>
 
+      {/* FIXED: Display admin status for debugging */}
+      {isAdmin && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Admin Mode: You can edit all fields including management fees and rent costs
+        </Alert>
+      )}
+
       <form onSubmit={handleSubmit}>
         {/* Apartment Details Form */}
         <ApartmentDetailsForm
           formData={formData}
           handleChange={handleChange}
-          isAdmin={isAdmin}
-          showNotification={showNotification}
+          tenantData={tenantData}
+          handleTenantChange={handleTenantChange}
+          removeTenant={removeTenant}
+          addNewTenant={() => setTenantFormOpen(true)}
+          handleTenantSelection={handleTenantSelection}
+          availableTenants={availableTenants}
+          loading={loading}
+          isSubmitting={isSubmitting}
           isEdit={isEdit}
+          handleDelete={handleDelete}
+          showNotification={showNotification}
+          isAdmin={isAdmin}
+          addedTenantIds={addedTenantIds}
         />
 
         <Divider sx={{ my: 3 }} />
@@ -410,18 +410,6 @@ const ApartmentForm = ({
 
         {/* Action Buttons */}
         <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end', mt: 3 }}>
-          {isEdit && isAdmin && (
-            <Button
-              variant="outlined"
-              color="error"
-              startIcon={<DeleteIcon />}
-              onClick={handleDelete}
-              disabled={isSubmitting}
-            >
-              Delete Apartment
-            </Button>
-          )}
-
           <Button
             type="submit"
             variant="contained"

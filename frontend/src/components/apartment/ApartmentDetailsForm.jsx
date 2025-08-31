@@ -86,31 +86,31 @@ function ApartmentDetailsForm({
     fetchLandlords();
   }, [showNotification]);
 
-  // FIXED: Handle landlord selection properly
-  const handleLandlordChange = (event, newValue) => {
-    console.log('Landlord selection changed:', newValue);
-
-    if (newValue === null) {
-      // Cleared selection
-      handleChange({ target: { name: 'landlord_id', value: '' } });
-    } else if (typeof newValue === 'object') {
-      // Selected from autocomplete
-      handleChange({ target: { name: 'landlord_id', value: newValue.id } });
-    }
+  // Helper function to get current landlord for autocomplete
+  const getCurrentLandlord = () => {
+    if (!formData.landlord_id) return null;
+    return landlords.find(landlord => landlord.id === parseInt(formData.landlord_id)) || null;
   };
 
-  // Get current landlord for autocomplete
-  const getCurrentLandlord = () => {
-    if (!formData.landlord_id || !landlords.length) return null;
-    return landlords.find(l => l.id === parseInt(formData.landlord_id)) || null;
+  // Handle landlord selection
+  const handleLandlordChange = (event, newValue) => {
+    const newLandlordId = newValue ? newValue.id : '';
+    console.log('Landlord changed to:', newLandlordId);
+
+    handleChange({
+      target: {
+        name: 'landlord_id',
+        value: newLandlordId
+      }
+    });
   };
 
   return (
     <Box>
-      {/* Location Section */}
+      {/* Address Information Section */}
       <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <LocationIcon />
-        Property Location
+        Address Information
       </Typography>
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
@@ -124,7 +124,7 @@ function ApartmentDetailsForm({
             required
           />
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid item xs={12} md={6}>
           <TextField
             fullWidth
             label="House Number *"
@@ -134,7 +134,7 @@ function ApartmentDetailsForm({
             required
           />
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid item xs={12} md={6}>
           <TextField
             fullWidth
             label="Building"
@@ -302,6 +302,96 @@ function ApartmentDetailsForm({
 
       <Divider sx={{ my: 3 }} />
 
+      {/* Financial Section */}
+      <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        <BankIcon />
+        Financial Information
+      </Typography>
+
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        <Grid item xs={12} md={6}>
+          <TextField
+            fullWidth
+            label="Monthly Rent *"
+            name="rent"
+            type="number"
+            value={formData.rent}
+            onChange={handleChange}
+            required
+            inputProps={{ min: 0, step: 0.01 }}
+            InputProps={{
+              startAdornment: '€'
+            }}
+          />
+        </Grid>
+        <Grid item xs={12} md={6}>
+          <TextField
+            fullWidth
+            label="Security Deposit"
+            name="deposit"
+            type="number"
+            value={formData.deposit}
+            onChange={handleChange}
+            inputProps={{ min: 0, step: 0.01 }}
+            InputProps={{
+              startAdornment: '€'
+            }}
+          />
+        </Grid>
+
+        {/* FIXED: Admin-only Financial Fields - Now properly visible for admins */}
+        {isAdmin && (
+          <>
+            <Grid item xs={12} md={4}>
+              <FormControl fullWidth>
+                <InputLabel>Property Model</InputLabel>
+                <Select
+                  name="model"
+                  value={formData.model || 'rental'}
+                  label="Property Model"
+                  onChange={handleChange}
+                >
+                  <MenuItem value={PROPERTY_MODELS.RENTAL}>Rental</MenuItem>
+                  <MenuItem value={PROPERTY_MODELS.MANAGEMENT}>Management</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <TextField
+                fullWidth
+                label="Management Fee"
+                name="managementFee"
+                type="number"
+                value={formData.managementFee || 0}
+                onChange={handleChange}
+                inputProps={{ min: 0, step: 0.01 }}
+                InputProps={{
+                  startAdornment: '₪'
+                }}
+                helperText="Admin-only field"
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <TextField
+                fullWidth
+                label="Rent Cost"
+                name="rentCost"
+                type="number"
+                value={formData.rentCost || 0}
+                onChange={handleChange}
+                inputProps={{ min: 0, step: 0.01 }}
+                InputProps={{
+                  startAdornment: '₪'
+                }}
+                helperText="Admin-only field"
+              />
+            </Grid>
+          </>
+        )}
+      </Grid>
+
+      <Divider sx={{ my: 3 }} />
+
       {/* Landlord Section */}
       <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <PersonIcon />
@@ -340,107 +430,14 @@ function ApartmentDetailsForm({
                 </Box>
               </li>
             )}
-            noOptionsText={loadingLandlords ? "Loading..." : "No landlords found"}
+            noOptionsText={loadingLandlords ?
+              "Loading..." : "No landlords found"}
             isOptionEqualToValue={(option, value) => option.id === value.id}
           />
         </Grid>
       </Grid>
 
-      <Divider sx={{ my: 3 }} />
-
-      {/* Financial Section */}
-      <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <BankIcon />
-        Financial Information
-      </Typography>
-
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={6}>
-          <TextField
-            fullWidth
-            label="Monthly Rent *"
-            name="rent"
-            type="number"
-            value={formData.rent}
-            onChange={handleChange}
-            required
-            inputProps={{ min: 0, step: 0.01 }}
-            InputProps={{
-              startAdornment: '€'
-            }}
-          />
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <TextField
-            fullWidth
-            label="Security Deposit"
-            name="deposit"
-            type="number"
-            value={formData.deposit}
-            onChange={handleChange}
-            inputProps={{ min: 0, step: 0.01 }}
-            InputProps={{
-              startAdornment: '€'
-            }}
-          />
-        </Grid>
-
-        {/* Admin-only Financial Fields */}
-        {isAdmin && (
-          <>
-            <Grid item xs={12} md={4}>
-              <FormControl fullWidth>
-                <InputLabel>Property Model</InputLabel>
-                <Select
-                  name="model"
-                  value={formData.model}
-                  label="Property Model"
-                  onChange={handleChange}
-                >
-                  <MenuItem value={PROPERTY_MODELS.RENTAL}>Rental</MenuItem>
-                  <MenuItem value={PROPERTY_MODELS.MANAGEMENT}>Management</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                label="Management Fee"
-                name="managementFee"
-                type="number"
-                value={formData.managementFee}
-                onChange={handleChange}
-                inputProps={{ min: 0, step: 0.01 }}
-                InputProps={{
-                  startAdornment: '₪'
-                }}
-              />
-            </Grid>
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                label="Rent Cost"
-                name="rentCost"
-                type="number"
-                value={formData.rentCost}
-                onChange={handleChange}
-                inputProps={{ min: 0, step: 0.01 }}
-                InputProps={{
-                  startAdornment: '₪'
-                }}
-              />
-            </Grid>
-          </>
-        )}
-      </Grid>
-
-      <Divider sx={{ my: 3 }} />
-
       {/* Notes Section */}
-      <Typography variant="h6" gutterBottom>
-        Additional Notes
-      </Typography>
-
       <Grid container spacing={3} sx={{ mb: 3 }}>
         <Grid item xs={12}>
           <TextField
@@ -451,24 +448,31 @@ function ApartmentDetailsForm({
             onChange={handleChange}
             multiline
             rows={3}
-            placeholder="Any additional information about the apartment..."
+            placeholder="Any additional notes about this apartment..."
           />
         </Grid>
       </Grid>
 
-      <Divider sx={{ my: 3 }} />
-
-      {/* Tenant Section */}
-      <Typography variant="h6" gutterBottom>
-        Tenants ({tenantData?.length || 0}/{formData.maxOccupancy})
-      </Typography>
-
-      <Box sx={{ mb: 3 }}>
-        {tenantSelection}
-      </Box>
+      {/* FIXED: Delete Button - Now visible for admins in edit mode */}
+      {isEdit && isAdmin && handleDelete && (
+        <Box sx={{ mt: 3, mb: 2 }}>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            Admin Actions
+          </Alert>
+          <Button
+            variant="outlined"
+            color="error"
+            startIcon={<DeleteIcon />}
+            onClick={handleDelete}
+            disabled={isSubmitting}
+            size="large"
+          >
+            Delete Apartment
+          </Button>
+        </Box>
+      )}
     </Box>
   );
 }
-
 
 export default ApartmentDetailsForm;

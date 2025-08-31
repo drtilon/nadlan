@@ -11,8 +11,11 @@ services:
       - app_network
 
   backend:
+    volumes:
+        - ./backend:/app
     environment:
-      FLASK_ENV: development
+        FLASK_ENV: development
+        FLASK_DEBUG: 1
     networks: [app_network]
 
   frontend:

@@ -163,15 +163,11 @@ function TenantsPanel({ showNotification }) {
       tenant.current_contracts && tenant.current_contracts.length > 0
     ).length;
     const withoutContracts = total - withContracts;
-    const activeContracts = tenantsData.reduce(
-      (sum, tenant) => sum + (tenant.current_contracts ? tenant.current_contracts.length : 0), 0
-    );
 
     setStats({
       total,
       withContracts,
-      withoutContracts,
-      activeContracts
+      withoutContracts
     });
   };
 
@@ -476,7 +472,7 @@ function TenantsPanel({ showNotification }) {
             <Card>
               <CardContent>
                 <Typography variant="h6" color="success.main">{stats.withContracts}</Typography>
-                <Typography variant="body2" color="text.secondary">With Contracts</Typography>
+                <Typography variant="body2" color="text.secondary">Active Contracts</Typography>
               </CardContent>
             </Card>
           </Grid>
@@ -484,19 +480,10 @@ function TenantsPanel({ showNotification }) {
             <Card>
               <CardContent>
                 <Typography variant="h6" color="warning.main">{stats.withoutContracts}</Typography>
-                <Typography variant="body2" color="text.secondary">Without Contracts</Typography>
+                <Typography variant="body2" color="text.secondary">Expired Contracts</Typography>
               </CardContent>
             </Card>
           </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card>
-              <CardContent>
-                <Typography variant="h6" color="info.main">{stats.activeContracts}</Typography>
-                <Typography variant="body2" color="text.secondary">Active Contracts</Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-        </Grid>
 
         {/* Filters */}
         <Box sx={{ mb: 3 }}>

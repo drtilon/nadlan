@@ -484,6 +484,7 @@ function TenantsPanel({ showNotification }) {
               </CardContent>
             </Card>
           </Grid>
+          </Grid>
 
         {/* Filters */}
         <Box sx={{ mb: 3 }}>

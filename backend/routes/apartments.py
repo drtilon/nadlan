@@ -340,6 +340,7 @@ def list_apartments():
                 "managementFee": float(apt.managementFee) if apt.managementFee else 0.0,
                 "rentCost": float(apt.rentCost) if apt.rentCost else 0.0,
                 "model": apt.model or "rental",
+                "latest_contract_number": apt.get_latest_contract_number(),
                 # Occupancy and status
                 "maxOccupancy": apt.maxOccupancy or 4,
                 "genderPreference": apt.genderPreference or "mixed",

@@ -181,6 +181,25 @@ class Apartment(db.Model):
 
     def __repr__(self):
         return f"<Apartment {self.id}: {self.get_short_address()}>"
+    def get_latest_contract_number(self):
+        """Get the latest active contract number for this apartment"""
+        current_contracts = self.get_current_contract_periods()
+        if current_contracts:
+            # Get the most recent contract (by start_date)
+            latest_contract = max(current_contracts, key=lambda c: c.start_date)
+            return latest_contract.contract_number
+
+        # Fallback to the most recent contract even if not active
+        from sqlalchemy import desc
+        latest_contract = (
+            db.session.query(ContractPeriod)
+            .filter_by(apartment_id=self.id)
+            .order_by(desc(ContractPeriod.start_date))
+            .first()
+        )
+
+        return latest_contract.contract_number if latest_contract else None
+
 
 
 class Tenant(db.Model):

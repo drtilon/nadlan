@@ -2,13 +2,11 @@ import React, { useState } from 'react';
 import {
   Card,
   CardContent,
-  Box,
   Typography,
-  Avatar,
-  Divider,
+  Box,
   IconButton,
-  Tooltip,
   Button,
+  Tooltip,
   Chip,
   Menu,
   MenuItem,
@@ -21,21 +19,14 @@ import {
   Description as DescriptionIcon,
   Person as PersonIcon,
   People as PeopleIcon,
-  Bed as BedIcon,
-  SquareFoot as SquareFootIcon,
-  Event as EventIcon,
-  AccessTime as AccessTimeIcon,
-  Warning as WarningIcon,
-  Error as ErrorIcon,
-  MoreVert as MoreVertIcon,
   Visibility as ViewIcon,
   Schedule as ScheduleIcon
 } from '@mui/icons-material';
 
-// Import utility functions locally
+// Status chip component with enhanced styling
 const getStatusChip = (status, contractEndDate) => {
   const getExpiryStatus = (contractEndDate) => {
-    if (!contractEndDate) return { status: 'no_date', daysUntilExpiry: null };
+    if (!contractEndDate) return { status: 'no_contract', color: 'default' };
 
     const endDate = new Date(contractEndDate);
     const today = new Date();
@@ -43,63 +34,69 @@ const getStatusChip = (status, contractEndDate) => {
     const daysUntilExpiry = Math.ceil(timeDiff / (1000 * 3600 * 24));
 
     if (daysUntilExpiry < 0) {
-      return { status: 'expired', daysUntilExpiry };
+      return { status: 'expired', color: 'error' };
+    } else if (daysUntilExpiry <= 7) {
+      return { status: 'critical', color: 'error' };
     } else if (daysUntilExpiry <= 30) {
-      return { status: 'expiring_soon', daysUntilExpiry };
+      return { status: 'expiring_soon', color: 'warning' };
     } else {
-      return { status: 'valid', daysUntilExpiry };
+      return { status: 'valid', color: 'success' };
     }
   };
 
   const expiryStatus = getExpiryStatus(contractEndDate);
 
-  let color = 'default';
-  let displayStatus = status;
-  let icon = null;
+  // Override status based on contract expiry
+  const effectiveStatus = expiryStatus.status === 'expired' ? 'expired' :
+                         expiryStatus.status === 'critical' ? 'critical' :
+                         expiryStatus.status === 'expiring_soon' ? 'expiring_soon' :
+                         status;
 
-  switch (status) {
-    case 'occupied':
-      color = 'success';
-      displayStatus = 'Occupied';
-      break;
-    case 'vacant':
-      color = 'primary';
-      displayStatus = 'Vacant';
-      break;
-    case 'contract_sent':
-      color = 'warning';
-      displayStatus = 'Contract Sent';
-      break;
-    default:
-      displayStatus = status || 'Unknown';
-  }
-
-  if (status === 'occupied') {
-    if (expiryStatus.status === 'expired') {
-      color = 'error';
-      displayStatus = 'Expired';
-      icon = <ErrorIcon sx={{ fontSize: '0.75rem' }} />;
-    } else if (expiryStatus.status === 'expiring_soon') {
-      color = 'warning';
-      displayStatus = `Expires in ${expiryStatus.daysUntilExpiry} days`;
-      icon = <WarningIcon sx={{ fontSize: '0.75rem' }} />;
+  const getStatusConfig = (effectiveStatus) => {
+    switch (effectiveStatus) {
+      case 'occupied':
+        return { label: 'Occupied', color: 'success' };
+      case 'vacant':
+        return { label: 'Vacant', color: 'error' };
+      case 'contract_sent':
+        return { label: 'Contract Sent', color: 'info' };
+      case 'expired':
+        return { label: 'Contract Expired', color: 'error' };
+      case 'critical':
+        return { label: 'Expires Soon', color: 'error' };
+      case 'expiring_soon':
+        return { label: 'Expiring Soon', color: 'warning' };
+      case 'maintenance':
+        return { label: 'Maintenance', color: 'warning' };
+      case 'available':
+        return { label: 'Available', color: 'primary' };
+      default:
+        return { label: status || 'Unknown', color: 'default' };
     }
-  }
+  };
+
+  const config = getStatusConfig(effectiveStatus);
 
   return (
     <Chip
-      icon={icon}
-      label={displayStatus}
+      label={config.label}
       size="small"
       sx={{
         height: 24,
         fontSize: '0.75rem',
         fontWeight: 500,
-        bgcolor: color === 'error' ? 'error.main' :
-                color === 'warning' ? 'warning.main' :
-                color === 'success' ? 'success.main' :
-                color === 'primary' ? 'primary.main' : 'grey.300',
-        color: color === 'default' ? 'text.primary' : 'white',
+        bgcolor: config.color === 'error' ? 'error.light' :
+                config.color === 'warning' ? 'warning.light' :
+                config.color === 'success' ? 'success.light' :
+                config.color === 'primary' ? 'primary.light' :
+                config.color === 'info' ? 'info.light' : 'grey.100',
+        border: '1px solid',
+        borderColor: config.color === 'error' ? 'error.main' :
+                    config.color === 'warning' ? 'warning.main' :
+                    config.color === 'success' ? 'success.main' :
+                    config.color === 'primary' ? 'primary.main' :
+                    config.color === 'info' ? 'info.main' : 'grey.300',
+        color: config.color === 'default' ? 'text.primary' : 'white',
         '& .MuiChip-icon': {
           fontSize: '0.75rem',
           color: 'inherit'
@@ -355,8 +352,15 @@ function ApartmentCard({
     return 'Property';
   };
 
-  const getPropertyId = () => {
-    return apartment.id ? `ID-${apartment.id}` : 'N/A';
+  // CHANGED: Replace getPropertyId with getLatestContractNumber
+  const getLatestContractNumber = () => {
+    // Use the latest_contract_number field from backend
+    if (apartment.latest_contract_number) {
+      return apartment.latest_contract_number;
+    }
+
+    // Fallback display
+    return 'No Contract';
   };
 
   return (
@@ -452,14 +456,14 @@ function ApartmentCard({
       <CardContent sx={{ p: 2, pt: 1 }}>
         {/* Middle bottom (3 lines with headers and values) */}
 
-        {/* Line 1: Property name · Property ID · Capacity */}
+        {/* Line 1: Property name · Contract · Capacity */}
         <Box sx={{ mb: 2 }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
               Property name
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-              Property ID
+              Contract
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
               Capacity
@@ -469,8 +473,8 @@ function ApartmentCard({
             <Typography variant="body2" sx={{ fontWeight: 500, maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {getPropertyName()}
             </Typography>
-            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-              {getPropertyId()}
+            <Typography variant="body2" sx={{ fontWeight: 500, maxWidth: '100px', overflow: 'hidden', textOverflow: 'ellipsis', textAlign: 'center' }}>
+              {getLatestContractNumber()}
             </Typography>
             <Typography variant="body2" sx={{ fontWeight: 500 }}>
               {maxOccupancy}

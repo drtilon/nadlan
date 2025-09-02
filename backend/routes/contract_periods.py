@@ -15,48 +15,41 @@ contract_periods_bp = Blueprint("contract_periods_bp", __name__)
 @contract_periods_bp.route("/apartments/<int:apartment_id>/contracts", methods=["GET"])
 @token_required
 def get_apartment_contracts(apartment_id):
-    """Get all contract periods for a specific apartment"""
+    """Get all contracts for an apartment"""
     try:
         apartment = Apartment.query.get(apartment_id)
         if not apartment:
             return jsonify({"message": "Apartment not found"}), 404
 
-        contracts = db.session.query(ContractPeriod)\
-            .filter_by(apartment_id=apartment_id)\
-            .order_by(ContractPeriod.start_date.desc())\
-            .all()
-
+        contracts = ContractPeriod.query.filter_by(apartment_id=apartment_id).order_by(ContractPeriod.start_date.desc()).all()
         contracts_data = []
+
         for contract in contracts:
-            contract_tenants = db.session.query(ContractTenant)\
-                .filter_by(contract_period_id=contract.id)\
-                .all()
+            # Get tenants for this contract
+            contract_tenants = db.session.query(ContractTenant, Tenant).join(
+                Tenant, ContractTenant.tenant_id == Tenant.id
+            ).filter(ContractTenant.contract_period_id == contract.id).all()
 
             tenants_data = []
-            for ct in contract_tenants:
-                tenant = db.session.query(Tenant).get(ct.tenant_id)
-                if tenant:
-                    tenants_data.append({
-                        "id": ct.id,
-                        "contract_period_id": ct.contract_period_id,
-                        "tenant_id": ct.tenant_id,
-                        "tenant": {
-                            "id": tenant.id,
-                            "name": tenant.name,
-                            "email": tenant.email,
-                            "phone": tenant.phone
-                        },
-                        "is_primary": ct.is_primary,
-                        "move_in_date": ct.move_in_date.isoformat() if ct.move_in_date else None,
-                        "move_out_date": ct.move_out_date.isoformat() if ct.move_out_date else None,
-                        "rent_share_percentage": float(ct.rent_share_percentage) if ct.rent_share_percentage else 100.0,
-                        "notes": ct.notes,
-                        "created_at": ct.created_at.isoformat() if ct.created_at else None
-                    })
+            for contract_tenant, tenant in contract_tenants:
+                tenants_data.append({
+                    "id": contract_tenant.id,
+                    "tenant_id": tenant.id,
+                    "tenant": {
+                        "id": tenant.id,
+                        "name": tenant.name,
+                        "email": tenant.email,
+                        "phone": tenant.phone
+                    },
+                    "is_primary": contract_tenant.is_primary,
+                    "move_in_date": contract_tenant.move_in_date.isoformat() if contract_tenant.move_in_date else None,
+                    "move_out_date": contract_tenant.move_out_date.isoformat() if contract_tenant.move_out_date else None,
+                    "rent_share_percentage": float(contract_tenant.rent_share_percentage) if contract_tenant.rent_share_percentage else 100.0,
+                    "notes": contract_tenant.notes
+                })
 
             contract_data = {
                 "id": contract.id,
-                "apartment_id": contract.apartment_id,
                 "contract_number": contract.contract_number,
                 "start_date": contract.start_date.isoformat() if contract.start_date else None,
                 "end_date": contract.end_date.isoformat() if contract.end_date else None,
@@ -86,7 +79,7 @@ def get_apartment_contracts(apartment_id):
 @token_required
 @role_required("admin")
 def create_contract_period():
-    """Create a new contract period"""
+    """Create a new contract period - FIXED VERSION"""
     try:
         data = request.get_json()
         if not data:
@@ -105,6 +98,7 @@ def create_contract_period():
         if not contract_number:
             return jsonify({"message": "Contract number is required"}), 400
 
+        # Check for overlapping contracts
         overlapping = check_overlapping_contracts(
             data["apartment_id"],
             data["start_date"],
@@ -116,24 +110,30 @@ def create_contract_period():
                 "overlapping_contract": overlapping
             }), 400
 
+        # Create the contract
+        start_date = datetime.strptime(data["start_date"], "%Y-%m-%d").date()
+
         contract = ContractPeriod(
             apartment_id=data["apartment_id"],
             contract_number=contract_number,
-            start_date=datetime.strptime(data["start_date"], "%Y-%m-%d").date(),
+            start_date=start_date,
             end_date=datetime.strptime(data["end_date"], "%Y-%m-%d").date() if data.get("end_date") else None,
             monthly_rent=float(data["monthly_rent"]),
             security_deposit=float(data.get("security_deposit", 0)),
             status=data.get("status", "active"),
             notes=data.get("notes", ""),
-            created_by=g.current_user.username if hasattr(g, 'current_user') else None
+            created_by=g.current_user.username if hasattr(g, 'current_user') else None,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
         )
 
         db.session.add(contract)
-        db.session.flush()
+        db.session.flush()  # Get the contract ID
 
+        # Add tenants to contract if provided - FIXED
         tenant_ids = data.get("tenant_ids", [])
         if tenant_ids:
-            add_tenants_to_contract(contract.id, tenant_ids)
+            add_tenants_to_contract(contract.id, tenant_ids, start_date)
 
         db.session.commit()
 
@@ -163,7 +163,7 @@ def create_contract_period():
 @token_required
 @role_required("admin")
 def update_contract_period(contract_id):
-    """Update an existing contract period"""
+    """Update an existing contract period - FIXED VERSION"""
     try:
         contract = ContractPeriod.query.get(contract_id)
         if not contract:
@@ -173,6 +173,7 @@ def update_contract_period(contract_id):
         if not data:
             return jsonify({"message": "No data provided"}), 400
 
+        # Update contract fields
         if "contract_number" in data:
             contract.contract_number = data["contract_number"]
         if "start_date" in data:
@@ -190,11 +191,15 @@ def update_contract_period(contract_id):
 
         contract.updated_at = datetime.utcnow()
 
+        # Update tenants if provided - FIXED
         if "tenant_ids" in data:
+            # Remove existing tenant assignments
             ContractTenant.query.filter_by(contract_period_id=contract_id).delete()
+
+            # Add new tenant assignments
             tenant_ids = data["tenant_ids"]
             if tenant_ids:
-                add_tenants_to_contract(contract_id, tenant_ids)
+                add_tenants_to_contract(contract_id, tenant_ids, contract.start_date)
 
         db.session.commit()
 
@@ -213,6 +218,110 @@ def update_contract_period(contract_id):
         current_app.logger.error(f"Error updating contract period: {e}")
         db.session.rollback()
         return jsonify({"message": "Error updating contract period", "error": str(e)}), 500
+@contract_periods_bp.route("/contracts/<int:contract_id>/add-tenant", methods=["POST"])
+@token_required
+@role_required("admin")
+def add_tenant_to_contract(contract_id):
+    """Add a new tenant to an existing contract period"""
+    try:
+        # Get the contract
+        contract = ContractPeriod.query.get(contract_id)
+        if not contract:
+            return jsonify({"message": "Contract not found"}), 404
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"message": "No data provided"}), 400
+
+        tenant_id = data.get("tenant_id")
+        move_in_date_str = data.get("move_in_date")
+        rent_share_percentage = data.get("rent_share_percentage", None)
+        is_primary = data.get("is_primary", False)
+        notes = data.get("notes", "")
+
+        if not tenant_id:
+            return jsonify({"message": "Tenant ID is required"}), 400
+
+        # Validate tenant exists
+        tenant = Tenant.query.get(tenant_id)
+        if not tenant:
+            return jsonify({"message": "Tenant not found"}), 404
+
+        # Use contract start date if no move_in_date provided
+        if move_in_date_str:
+            try:
+                move_in_date = datetime.strptime(move_in_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
+        else:
+            move_in_date = contract.start_date or date.today()
+
+        # Check if tenant is already in this contract
+        existing = ContractTenant.query.filter_by(
+            contract_period_id=contract_id,
+            tenant_id=tenant_id,
+            move_out_date=None
+        ).first()
+
+        if existing:
+            return jsonify({"message": "Tenant is already in this contract"}), 400
+
+        # Calculate rent share if not provided
+        if rent_share_percentage is None:
+            # Get current active tenants in this contract
+            current_tenants = ContractTenant.query.filter_by(
+                contract_period_id=contract_id,
+                move_out_date=None
+            ).count()
+            rent_share_percentage = 100.0 / (current_tenants + 1)
+
+            # Update existing tenants to have equal shares
+            existing_tenants = ContractTenant.query.filter_by(
+                contract_period_id=contract_id,
+                move_out_date=None
+            ).all()
+
+            for existing_tenant in existing_tenants:
+                existing_tenant.rent_share_percentage = rent_share_percentage
+                existing_tenant.updated_at = datetime.utcnow()
+
+        # Create new contract tenant record
+        contract_tenant = ContractTenant(
+            contract_period_id=contract_id,
+            tenant_id=tenant_id,
+            is_primary=is_primary,
+            move_in_date=move_in_date,  # FIXED: Always provide a valid date
+            rent_share_percentage=rent_share_percentage,
+            notes=notes,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+
+        db.session.add(contract_tenant)
+        db.session.commit()
+
+        ActivityLogger.log_apartment_action(
+            action="add_tenant_to_contract",
+            apartment_id=contract.apartment_id,
+            details={
+                "contract_id": contract_id,
+                "tenant_id": tenant_id,
+                "tenant_name": tenant.name,
+                "move_in_date": move_in_date.isoformat()
+            }
+        )
+
+        return jsonify({
+            "message": f"Tenant {tenant.name} added to contract successfully",
+            "contract_tenant_id": contract_tenant.id
+        }), 201
+
+    except Exception as e:
+        current_app.logger.error(f"Error adding tenant to contract: {e}")
+        db.session.rollback()
+        return jsonify({"message": "Error adding tenant to contract", "error": str(e)}), 500
+
+
 
 @contract_periods_bp.route("/contracts/<int:contract_id>", methods=["DELETE"])
 @token_required
@@ -332,7 +441,6 @@ def get_tenant_move_history(tenant_id):
 from datetime import datetime, date
 import json
 
-# EXISTING MOVE-OUT ENDPOINT (already in your code, but fixed)
 @contract_periods_bp.route("/contract-tenants/<int:contract_tenant_id>/move-out", methods=["PUT"])
 @token_required
 def move_out_tenant(contract_tenant_id):
@@ -667,19 +775,75 @@ def calculate_duration_days(contract):
     end_date = contract.end_date or date.today()
     return (end_date - contract.start_date).days
 
-def add_tenants_to_contract(contract_id, tenant_ids):
-    """Add multiple tenants to a contract"""
+def add_tenants_to_contract(contract_id, tenant_ids, start_date=None):
+    """Add multiple tenants to a contract - FIXED VERSION"""
     if not tenant_ids:
         return
+
+    # Get the contract to use its start_date if no start_date provided
+    if start_date is None:
+        contract = ContractPeriod.query.get(contract_id)
+        if contract and contract.start_date:
+            start_date = contract.start_date
+        else:
+            start_date = date.today()
+
+    # Convert string date to date object if needed
+    if isinstance(start_date, str):
+        try:
+            start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
+        except ValueError:
+            start_date = date.today()
+
+    # Calculate equal rent share
+    rent_share = 100.0 / len(tenant_ids) if len(tenant_ids) > 0 else 100.0
 
     for i, tenant_id in enumerate(tenant_ids):
         contract_tenant = ContractTenant(
             contract_period_id=contract_id,
             tenant_id=tenant_id,
             is_primary=(i == 0),  # First tenant is primary
-            rent_share_percentage=100.0 / len(tenant_ids)  # Equal split by default
+            move_in_date=start_date,  # FIXED: Always provide a date
+            rent_share_percentage=rent_share,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
         )
         db.session.add(contract_tenant)
+def assign_tenants_to_contract(contract_id, tenant_ids, move_in_date=None):
+    """Assign tenants to a contract period - FIXED VERSION"""
+    if not tenant_ids:
+        return
+
+    # Get contract start date if move_in_date not provided
+    if move_in_date is None:
+        contract = ContractPeriod.query.get(contract_id)
+        if contract and contract.start_date:
+            move_in_date = contract.start_date
+        else:
+            move_in_date = date.today()
+
+    # Convert string to date if needed
+    if isinstance(move_in_date, str):
+        try:
+            move_in_date = datetime.strptime(move_in_date, "%Y-%m-%d").date()
+        except ValueError:
+            move_in_date = date.today()
+
+    # Calculate equal rent share
+    rent_share = 100.0 / len(tenant_ids)
+
+    for tenant_id in tenant_ids:
+        contract_tenant = ContractTenant(
+            contract_period_id=contract_id,
+            tenant_id=tenant_id,
+            is_primary=False,  # All tenants equal
+            move_in_date=move_in_date,  # FIXED: Always provide a valid date
+            rent_share_percentage=rent_share,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
+        db.session.add(contract_tenant)
+
 
 def check_overlapping_contracts(apartment_id, start_date, end_date):
     """Check if the new contract period overlaps with existing ones"""

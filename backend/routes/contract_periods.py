@@ -77,7 +77,6 @@ def get_apartment_contracts(apartment_id):
 
 @contract_periods_bp.route("/contracts", methods=["POST"])
 @token_required
-@role_required("admin")
 def create_contract_period():
     """Create a new contract period - FIXED VERSION"""
     try:
@@ -161,7 +160,6 @@ def create_contract_period():
 
 @contract_periods_bp.route("/contracts/<int:contract_id>", methods=["PUT"])
 @token_required
-@role_required("admin")
 def update_contract_period(contract_id):
     """Update an existing contract period - FIXED VERSION"""
     try:
@@ -220,7 +218,6 @@ def update_contract_period(contract_id):
         return jsonify({"message": "Error updating contract period", "error": str(e)}), 500
 @contract_periods_bp.route("/contracts/<int:contract_id>/add-tenant", methods=["POST"])
 @token_required
-@role_required("admin")
 def add_tenant_to_contract(contract_id):
     """Add a new tenant to an existing contract period"""
     try:
@@ -325,7 +322,6 @@ def add_tenant_to_contract(contract_id):
 
 @contract_periods_bp.route("/contracts/<int:contract_id>", methods=["DELETE"])
 @token_required
-@role_required("admin")
 def delete_contract_period(contract_id):
     """Delete a contract period"""
     try:

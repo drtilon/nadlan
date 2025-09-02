@@ -260,7 +260,6 @@ def update_landlord(landlord_id: int) -> Tuple[Response, int]:
 
 @landlords_bp.route("/landlords/<int:landlord_id>", methods=["DELETE"])
 @token_required
-@role_required("admin")
 def delete_landlord(landlord_id: int) -> Tuple[Response, int]:
     """
     Deletes a landlord from the system.

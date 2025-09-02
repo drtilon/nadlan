@@ -70,7 +70,6 @@ def list_landlords() -> Tuple[Response, int]:
 
 @landlords_bp.route("/landlords/add", methods=["POST"])
 @token_required
-@role_required("admin")
 def add_landlord() -> Tuple[Response, int]:
     """
     Adds a new landlord to the system.

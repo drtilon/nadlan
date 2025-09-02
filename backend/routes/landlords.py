@@ -72,8 +72,7 @@ def list_landlords() -> Tuple[Response, int]:
 @token_required
 def add_landlord() -> Tuple[Response, int]:
     """
-    Adds a new landlord to the system.
-    FIXED: Removed notes field completely
+    Adds a new landlord to the system - ALLOWS DUPLICATE EMAILS
     """
     try:
         data = request.get_json()
@@ -87,12 +86,7 @@ def add_landlord() -> Tuple[Response, int]:
         if not data.get("email"):
             return jsonify({"message": "Email is required"}), 400
 
-        # Check if landlord with this email already exists
-        existing_landlord = Landlord.query.filter_by(email=data["email"]).first()
-        if existing_landlord:
-            return jsonify({"message": "A landlord with this email already exists"}), 400
-
-        # Create new landlord - FIXED: Removed notes field
+        # Create new landlord (no email uniqueness check)
         landlord = Landlord(
             company_name=data["company_name"],
             name=data["name"],
@@ -121,15 +115,6 @@ def add_landlord() -> Tuple[Response, int]:
     except Exception as e:
         current_app.logger.error(f"Error adding landlord: {e}")
         db.session.rollback()
-
-        # Log failure
-        ActivityLogger.log_landlord_action(
-            action="create",
-            details={"error": str(e)},
-            success=False,
-            error=e
-        )
-
         return jsonify({"message": "Error adding landlord", "error": str(e)}), 500
 
 

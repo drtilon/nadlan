@@ -217,7 +217,7 @@ const TenantDetails = ({ showNotification }) => {
   const fetchApartments = async () => {
     try {
       console.log('Fetching apartments...'); // DEBUG
-      const response = await api.get('/list');
+      const response = await api.get('/apartments/list');
       console.log('Raw response:', response.data); // DEBUG
 
       let apartmentData = response.data;
@@ -752,7 +752,7 @@ const TenantDetails = ({ showNotification }) => {
               fullWidth
               value={paymentForm.amount}
               onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
-              InputProps={{ startAdornment: '€' }}
+              InputProps={{ startAdornment: '₪' }}
               required
             />
             <TextField
@@ -816,7 +816,7 @@ const TenantDetails = ({ showNotification }) => {
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       {option.city && `${option.city} • `}
-                      Rent: €{option.rent || 0}/month
+                      Rent: ₪{option.rent || 0}/month
                       {option.tenants && option.tenants.length > 0 && (
                         ` • Current tenants: ${option.tenants.map(t => t.name || t).join(', ')}`
                       )}

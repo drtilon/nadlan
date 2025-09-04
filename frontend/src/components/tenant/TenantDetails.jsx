@@ -1,4 +1,4 @@
-// components/tenant/TenantDetails.jsx - ORIGINAL STRUCTURE with ONLY searchable transfer dialog fix
+// components/tenant/TenantDetails.jsx - FIXED: Property Details + EUR currency
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -113,15 +113,29 @@ const TenantDetails = ({ showNotification }) => {
     notes: ''
   });
 
-  // ONLY NEW STATES - For searchable transfer
-  const [apartments, setApartments] = useState([]);
+  // Transfer search states
   const [selectedApartment, setSelectedApartment] = useState(null);
   const [apartmentSearchValue, setApartmentSearchValue] = useState('');
+  const [apartmentSearchResults, setApartmentSearchResults] = useState([]);
+  const [isSearchingApartments, setIsSearchingApartments] = useState(false);
   const [formSubmitting, setFormSubmitting] = useState(false);
 
-  // Computed values
+  // Computed values - FIXED to handle different data structures
   const currentContract = tenant?.current_contracts?.[0];
-  const currentApartment = currentContract?.apartment || tenant?.current_apartment;
+  let currentApartment = currentContract?.apartment || tenant?.current_apartment;
+
+  // If no current apartment from contracts, try to get it from move history
+  if (!currentApartment && moveHistory.length > 0) {
+    const currentMove = moveHistory.find(move => move.is_current);
+    if (currentMove) {
+      currentApartment = {
+        id: currentMove.apartment_id,
+        address: currentMove.apartment_address,
+        monthly_rent: currentMove.monthly_rent || 0,
+        rent: currentMove.monthly_rent || 0
+      };
+    }
+  }
 
   // Utility functions
   const formatDate = (dateString) => {
@@ -130,9 +144,9 @@ const TenantDetails = ({ showNotification }) => {
   };
 
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('he-IL', {
+    return new Intl.NumberFormat('en-EU', {
       style: 'currency',
-      currency: 'ILS'
+      currency: 'EUR'
     }).format(amount || 0);
   };
 
@@ -150,6 +164,62 @@ const TenantDetails = ({ showNotification }) => {
       default:
         return 'default';
     }
+  };
+
+  // Search apartments on server side as user types
+  const searchApartments = async (searchQuery) => {
+    if (!searchQuery.trim()) {
+      setApartmentSearchResults([]);
+      return;
+    }
+
+    setIsSearchingApartments(true);
+    try {
+      console.log('Searching apartments with query:', searchQuery);
+
+      // Use the search parameter from the backend API
+      const response = await api.get(`/list?search=${encodeURIComponent(searchQuery)}&limit=20`);
+      console.log('Search response:', response.data);
+
+      let apartmentData = response.data;
+
+      // Based on backend code, the response structure is { apartments: [...] }
+      if (apartmentData && apartmentData.apartments) {
+        apartmentData = apartmentData.apartments;
+      }
+
+      console.log('Search results:', apartmentData?.length, 'apartments');
+
+      if (Array.isArray(apartmentData)) {
+        setApartmentSearchResults(apartmentData);
+      } else {
+        setApartmentSearchResults([]);
+      }
+    } catch (error) {
+      console.error('Error searching apartments:', error);
+      setApartmentSearchResults([]);
+
+      if (showNotification) {
+        showNotification('Failed to search apartments', 'error');
+      }
+    } finally {
+      setIsSearchingApartments(false);
+    }
+  };
+
+  // Debounce the search function
+  const [searchTimeout, setSearchTimeout] = useState(null);
+
+  const debouncedSearchApartments = (query) => {
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+    }
+
+    const timeout = setTimeout(() => {
+      searchApartments(query);
+    }, 500); // Wait 500ms after user stops typing
+
+    setSearchTimeout(timeout);
   };
 
   // Data fetching
@@ -213,49 +283,6 @@ const TenantDetails = ({ showNotification }) => {
     }
   };
 
-  // MODIFIED: Fetch apartments for transfer - only when dialog opens
-  const fetchApartments = async () => {
-    try {
-      console.log('Fetching apartments...'); // DEBUG
-      const response = await api.get('/apartments/list');
-      console.log('Raw response:', response.data); // DEBUG
-
-      let apartmentData = response.data;
-
-      // Handle different response structures
-      if (apartmentData.success) {
-        apartmentData = apartmentData.apartments;
-      } else if (apartmentData.apartments) {
-        apartmentData = apartmentData.apartments;
-      }
-
-      console.log('Processed apartment data:', apartmentData); // DEBUG
-      console.log('Is array?', Array.isArray(apartmentData)); // DEBUG
-
-      setApartments(Array.isArray(apartmentData) ? apartmentData : []);
-    } catch (error) {
-      console.error('Error fetching apartments:', error);
-      // Try alternative endpoint
-      try {
-        console.log('Trying alternative endpoint /list...'); // DEBUG
-        const response = await api.get('/list');
-        console.log('Alternative response:', response.data); // DEBUG
-
-        let apartmentData = response.data;
-        if (apartmentData.success) {
-          apartmentData = apartmentData.apartments;
-        } else if (apartmentData.apartments) {
-          apartmentData = apartmentData.apartments;
-        }
-
-        setApartments(Array.isArray(apartmentData) ? apartmentData : []);
-      } catch (altError) {
-        console.error('Alternative endpoint also failed:', altError);
-        setApartments([]);
-      }
-    }
-  };
-
   useEffect(() => {
     if (tenantId) {
       fetchTenantData();
@@ -316,7 +343,7 @@ const TenantDetails = ({ showNotification }) => {
     }
   };
 
-  // MODIFIED: Transfer handler for searchable apartments
+  // Transfer handler for searchable apartments
   const handleTransferTenant = async () => {
     if (!selectedApartment) {
       showNotification('Please select a new apartment', 'error');
@@ -374,21 +401,27 @@ const TenantDetails = ({ showNotification }) => {
     }
   };
 
-  // MODIFIED: Transfer dialog handlers
+  // Transfer dialog handlers
   const openTransferDialog = () => {
     setTransferDialogOpen(true);
-    fetchApartments(); // Load apartments when dialog opens
+    // No need to fetch all apartments anymore - we search as user types
   };
 
   const handleCloseTransferDialog = () => {
     setTransferDialogOpen(false);
     setSelectedApartment(null);
     setApartmentSearchValue('');
+    setApartmentSearchResults([]);
     setTransferForm({
       new_apartment_id: '',
       transfer_date: new Date().toISOString().split('T')[0],
       notes: ''
     });
+    // Clear any pending search timeout
+    if (searchTimeout) {
+      clearTimeout(searchTimeout);
+      setSearchTimeout(null);
+    }
   };
 
   if (loading) {
@@ -434,9 +467,9 @@ const TenantDetails = ({ showNotification }) => {
               {tenant.name}
             </Typography>
             <Chip
-              label={currentContract ? 'Active Tenant' : 'Inactive'}
-              color={currentContract ? 'success' : 'default'}
-              icon={currentContract ? <CheckCircleIcon /> : <ErrorIcon />}
+              label={currentContract || currentApartment ? 'Active Tenant' : 'Inactive'}
+              color={currentContract || currentApartment ? 'success' : 'default'}
+              icon={currentContract || currentApartment ? <CheckCircleIcon /> : <ErrorIcon />}
             />
           </Box>
         </Box>
@@ -452,7 +485,7 @@ const TenantDetails = ({ showNotification }) => {
             variant="contained"
             startIcon={<PaymentIcon />}
             onClick={() => setPaymentDialogOpen(true)}
-            disabled={!currentContract}
+            disabled={!currentContract && !currentApartment}
           >
             Add Payment
           </Button>
@@ -460,7 +493,7 @@ const TenantDetails = ({ showNotification }) => {
             variant="outlined"
             startIcon={<TransferIcon />}
             onClick={openTransferDialog}
-            disabled={!currentContract}
+            disabled={!currentContract && !currentApartment}
           >
             Transfer
           </Button>
@@ -469,7 +502,7 @@ const TenantDetails = ({ showNotification }) => {
             color="error"
             startIcon={<MoveOutIcon />}
             onClick={() => setMoveOutDialogOpen(true)}
-            disabled={!currentContract}
+            disabled={!currentContract && !currentApartment}
           >
             Move Out
           </Button>
@@ -567,7 +600,11 @@ const TenantDetails = ({ showNotification }) => {
                         <Typography variant="body2" color="text.secondary">Contract Period</Typography>
                         <Typography variant="body1">
                           {currentContract ?
-                            `${formatDate(currentContract.start_date)} - ${formatDate(currentContract.end_date) || 'Ongoing'}` : 'N/A'}
+                            `${formatDate(currentContract.start_date)} - ${formatDate(currentContract.end_date) || 'Ongoing'}` :
+                            moveHistory.find(move => move.is_current) ?
+                              `${formatDate(moveHistory.find(move => move.is_current).move_in_date)} - Present` :
+                              'N/A'
+                          }
                         </Typography>
                       </Box>
                     </Box>
@@ -576,7 +613,9 @@ const TenantDetails = ({ showNotification }) => {
                       <EuroIcon color="action" />
                       <Box>
                         <Typography variant="body2" color="text.secondary">Monthly Rent</Typography>
-                        <Typography variant="body1">{formatCurrency(currentApartment.monthly_rent)}</Typography>
+                        <Typography variant="body1">
+                          {formatCurrency(currentApartment.monthly_rent || currentApartment.rent)}
+                        </Typography>
                       </Box>
                     </Box>
                   </Stack>
@@ -752,7 +791,7 @@ const TenantDetails = ({ showNotification }) => {
               fullWidth
               value={paymentForm.amount}
               onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
-              InputProps={{ startAdornment: '₪' }}
+              InputProps={{ startAdornment: '€' }}
               required
             />
             <TextField
@@ -793,15 +832,14 @@ const TenantDetails = ({ showNotification }) => {
         </DialogActions>
       </Dialog>
 
-      {/* MODIFIED: Transfer Dialog with Searchable Autocomplete */}
+      {/* Transfer Dialog with Searchable Autocomplete */}
       <Dialog open={transferDialogOpen} onClose={handleCloseTransferDialog} maxWidth="sm" fullWidth>
         <DialogTitle>Transfer Tenant</DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
           <Stack spacing={3}>
             <Autocomplete
-              options={apartments}
+              options={apartmentSearchResults}
               getOptionLabel={(option) => {
-                // Handle the address format from backend
                 return option.address ||
                        `${option.street_name || ''} ${option.house_number || ''}`.trim() ||
                        `Apartment ${option.id}`;
@@ -816,7 +854,7 @@ const TenantDetails = ({ showNotification }) => {
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
                       {option.city && `${option.city} • `}
-                      Rent: ₪{option.rent || 0}/month
+                      Rent: €{option.rent || 0}/month
                       {option.tenants && option.tenants.length > 0 && (
                         ` • Current tenants: ${option.tenants.map(t => t.name || t).join(', ')}`
                       )}
@@ -827,45 +865,60 @@ const TenantDetails = ({ showNotification }) => {
               )}
               value={selectedApartment}
               onChange={(event, newValue) => {
-                console.log('Selected apartment:', newValue); // DEBUG
+                console.log('Selected apartment:', newValue);
                 setSelectedApartment(newValue);
               }}
               inputValue={apartmentSearchValue}
               onInputChange={(event, newInputValue) => {
-                console.log('Search input changed:', newInputValue); // DEBUG
+                console.log('Search input changed:', newInputValue);
                 setApartmentSearchValue(newInputValue);
+
+                // Trigger search when user types (debounced)
+                if (newInputValue.trim().length >= 2) {
+                  debouncedSearchApartments(newInputValue.trim());
+                } else {
+                  setApartmentSearchResults([]);
+                }
               }}
               renderInput={(params) => (
                 <TextField
                   {...params}
                   label="Search Apartment"
-                  placeholder="Type to search apartments..."
+                  placeholder="Type at least 2 characters to search..."
                   fullWidth
                   required
-                  helperText={apartments.length === 0 ? 'Loading apartments...' : `${apartments.length} apartments available`}
+                  helperText={
+                    apartmentSearchValue.length === 0
+                      ? 'Start typing to search apartments'
+                      : apartmentSearchValue.length < 2
+                        ? 'Type at least 2 characters'
+                        : isSearchingApartments
+                          ? 'Searching...'
+                          : `${apartmentSearchResults.length} apartments found`
+                  }
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {isSearchingApartments && <CircularProgress color="inherit" size={20} />}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
                 />
               )}
-              filterOptions={(options, { inputValue }) => {
-                console.log('Filtering options:', options.length, 'with input:', inputValue); // DEBUG
-                const filterValue = inputValue.toLowerCase();
-                const filtered = options.filter((option) => {
-                  const address = (option.address || '').toLowerCase();
-                  const city = (option.city || '').toLowerCase();
-                  const streetName = (option.street_name || '').toLowerCase();
-                  const houseNumber = (option.house_number || '').toString().toLowerCase();
-                  const building = (option.building || '').toLowerCase();
-
-                  return address.includes(filterValue) ||
-                         city.includes(filterValue) ||
-                         streetName.includes(filterValue) ||
-                         houseNumber.includes(filterValue) ||
-                         building.includes(filterValue);
-                });
-                console.log('Filtered results:', filtered.length); // DEBUG
-                return filtered;
-              }}
-              noOptionsText={apartments.length === 0 ? "Loading apartments..." : "No apartments found"}
-              loading={apartments.length === 0}
+              filterOptions={(options) => options}
+              noOptionsText={
+                apartmentSearchValue.length === 0
+                  ? "Start typing to search apartments"
+                  : apartmentSearchValue.length < 2
+                    ? "Type at least 2 characters"
+                    : isSearchingApartments
+                      ? "Searching..."
+                      : "No apartments found"
+              }
+              loading={isSearchingApartments}
+              freeSolo={false}
             />
             <TextField
               label="Transfer Date"

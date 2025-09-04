@@ -1,4 +1,4 @@
-// components/tenant/TenantDetails.jsx - FIXED: Property Details + EUR currency
+// components/tenant/TenantDetails.jsx - FIXED: Property Details + EUR currency + Transfer bug fix
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -63,7 +63,7 @@ import {
   Euro as EuroIcon,
   Business as BusinessIcon,
   Add as AddIcon
-} from '@mui/icons-material';
+} from '@mui/material';
 import { green, red, orange, blue, grey } from '@mui/material/colors';
 import api from '../../utils/api';
 
@@ -343,7 +343,7 @@ const TenantDetails = ({ showNotification }) => {
     }
   };
 
-  // Transfer handler for searchable apartments
+  // FIXED: Transfer handler with proper data structure
   const handleTransferTenant = async () => {
     if (!selectedApartment) {
       showNotification('Please select a new apartment', 'error');
@@ -353,9 +353,14 @@ const TenantDetails = ({ showNotification }) => {
     setFormSubmitting(true);
     try {
       const transferData = {
-        ...transferForm,
-        new_apartment_id: selectedApartment.id
+        new_apartment_id: selectedApartment.id,
+        transfer_date: transferForm.transfer_date,
+        move_out_date: transferForm.transfer_date,
+        move_in_date: transferForm.transfer_date,
+        notes: transferForm.notes
       };
+      console.log('Sending transfer data:', transferData);
+
       await api.post(`/tenants/${tenantId}/transfer`, transferData);
       showNotification('Tenant transferred successfully', 'success');
       setTransferDialogOpen(false);
@@ -404,7 +409,6 @@ const TenantDetails = ({ showNotification }) => {
   // Transfer dialog handlers
   const openTransferDialog = () => {
     setTransferDialogOpen(true);
-    // No need to fetch all apartments anymore - we search as user types
   };
 
   const handleCloseTransferDialog = () => {
@@ -417,7 +421,6 @@ const TenantDetails = ({ showNotification }) => {
       transfer_date: new Date().toISOString().split('T')[0],
       notes: ''
     });
-    // Clear any pending search timeout
     if (searchTimeout) {
       clearTimeout(searchTimeout);
       setSearchTimeout(null);
@@ -865,12 +868,10 @@ const TenantDetails = ({ showNotification }) => {
               )}
               value={selectedApartment}
               onChange={(event, newValue) => {
-                console.log('Selected apartment:', newValue);
                 setSelectedApartment(newValue);
               }}
               inputValue={apartmentSearchValue}
               onInputChange={(event, newInputValue) => {
-                console.log('Search input changed:', newInputValue);
                 setApartmentSearchValue(newInputValue);
 
                 // Trigger search when user types (debounced)

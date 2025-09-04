@@ -350,57 +350,17 @@ const TenantDetails = ({ showNotification }) => {
       return;
     }
 
-    // Validate transfer date
-    const transferDate = new Date(transferForm.transfer_date);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Reset time to start of day for comparison
-
-    if (transferDate < today) {
-      showNotification('Transfer date cannot be in the past', 'error');
-      return;
-    }
-
-    // If tenant has current move history, validate transfer date is after current move-in date
-    const currentMove = moveHistory.find(move => move.is_current);
-    if (currentMove && currentMove.move_in_date) {
-      const currentMoveInDate = new Date(currentMove.move_in_date);
-      if (transferDate <= currentMoveInDate) {
-        showNotification(`Transfer date must be after the current move-in date (${formatDate(currentMove.move_in_date)})`, 'error');
-        return;
-      }
-    }
-
     setFormSubmitting(true);
     try {
       const transferData = {
-        new_apartment_id: selectedApartment.id,
-        transfer_date: transferForm.transfer_date,
-        // Also send as separate fields in case backend expects them
-        move_out_date: transferForm.transfer_date,
-        move_in_date: transferForm.transfer_date,
-        notes: transferForm.notes
+        ...transferForm,
+        new_apartment_id: selectedApartment.id
       };
-      console.log('Sending transfer data:', transferData); // DEBUG
-
       await api.post(`/tenants/${tenantId}/transfer`, transferData);
       showNotification('Tenant transferred successfully', 'success');
       setTransferDialogOpen(false);
       setTransferForm({
         new_apartment_id: '',
-        transfer_date: new Date().toISOString().split('T')[0],
-        notes: ''
-      });
-      setSelectedApartment(null);
-      setApartmentSearchValue('');
-      fetchTenantData();
-    } catch (error) {
-      console.error('Error transferring tenant:', error);
-      const errorMessage = error.response?.data?.message || 'Error transferring tenant';
-      showNotification(errorMessage, 'error');
-    } finally {
-      setFormSubmitting(false);
-    }
-  };_apartment_id: '',
         transfer_date: new Date().toISOString().split('T')[0],
         notes: ''
       });

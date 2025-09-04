@@ -1,5 +1,5 @@
-// components/tenant/TransferComponent.jsx - FIXED with searchable apartment selection
-import React, { useState } from 'react';
+// components/tenant/TransferComponent.jsx - FIXED with proper date validation
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   TextField,
@@ -27,6 +27,20 @@ function TransferComponent({
 }) {
   const [selectedApartment, setSelectedApartment] = useState(null);
   const [apartmentSearchValue, setApartmentSearchValue] = useState('');
+
+  // FIXED: Auto-set move_in_date when move_out_date changes
+  useEffect(() => {
+    if (transferForm.move_out_date) {
+      const moveOutDate = new Date(transferForm.move_out_date);
+      const moveInDate = new Date(moveOutDate);
+      moveInDate.setDate(moveOutDate.getDate() + 1); // Next day by default
+
+      setTransferForm(prev => ({
+        ...prev,
+        move_in_date: moveInDate.toISOString().split('T')[0]
+      }));
+    }
+  }, [transferForm.move_out_date, setTransferForm]);
 
   const handleInputChange = (field, value) => {
     setTransferForm(prev => ({
@@ -56,7 +70,8 @@ function TransferComponent({
   const handleSubmit = () => {
     const error = validateForm();
     if (error) {
-      // You can show this error via notification if needed
+      // Show error notification
+      console.error('Validation error:', error);
       return;
     }
 
@@ -82,60 +97,43 @@ function TransferComponent({
 
       <Alert severity="info" sx={{ mb: 3 }}>
         This will move the tenant out of their current apartment and into a new one.
-        The tenant will be removed from their current contract and assigned to the new apartment's active contract.
+        The move-in date must be after the move-out date.
       </Alert>
 
       <Grid container spacing={3}>
-        {/* Searchable Apartment Selection */}
+        {/* Apartment Selection */}
         <Grid item xs={12}>
           <Autocomplete
             options={apartments}
-            getOptionLabel={(option) => option.address || `Apartment ${option.apartment_id || option.id}`}
-            renderOption={(props, option) => (
-              <Box component="li" {...props}>
-                <Box>
-                  <Typography variant="body1">
-                    {option.address}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Rent: €{option.monthly_rent || option.rent || 0}/month
-                    {option.tenants && option.tenants.length > 0 && (
-                      ` • Current tenants: ${option.tenants.join(', ')}`
-                    )}
-                  </Typography>
-                </Box>
-              </Box>
-            )}
+            getOptionLabel={(option) =>
+              `${option.full_address || option.address || `Apt ${option.id}`} - ${option.apartment_number || 'N/A'}`
+            }
             value={selectedApartment}
-            onChange={(event, newValue) => {
-              setSelectedApartment(newValue);
-            }}
+            onChange={(event, newValue) => setSelectedApartment(newValue)}
             inputValue={apartmentSearchValue}
-            onInputChange={(event, newInputValue) => {
-              setApartmentSearchValue(newInputValue);
-            }}
+            onInputChange={(event, newInputValue) => setApartmentSearchValue(newInputValue)}
             renderInput={(params) => (
               <TextField
                 {...params}
                 label="Search Destination Apartment"
-                placeholder="Type to search apartments by address..."
-                fullWidth
+                placeholder="Type address or apartment number..."
                 required
+                helperText="Select the apartment where the tenant will be transferred"
               />
             )}
-            filterOptions={(options, { inputValue }) => {
-              const filterValue = inputValue.toLowerCase();
-              return options.filter((option) => {
-                const address = (option.address || '').toLowerCase();
-                const city = (option.city || '').toLowerCase();
-                const streetName = (option.street_name || '').toLowerCase();
-                const houseNumber = (option.house_number || '').toString().toLowerCase();
-                return address.includes(filterValue) ||
-                       city.includes(filterValue) ||
-                       streetName.includes(filterValue) ||
-                       houseNumber.includes(filterValue);
-              });
-            }}
+            renderOption={(props, option) => (
+              <li {...props}>
+                <Box>
+                  <Typography variant="body1">
+                    {option.full_address || option.address || `Apartment ${option.id}`}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Unit: {option.apartment_number || 'N/A'} •
+                    Rent: €{option.monthly_rent || 'N/A'}/month
+                  </Typography>
+                </Box>
+              </li>
+            )}
             noOptionsText="No apartments found. Try a different search term."
           />
         </Grid>
@@ -154,7 +152,7 @@ function TransferComponent({
           />
         </Grid>
 
-        {/* Move In Date */}
+        {/* Move In Date - FIXED: Shows validation message */}
         <Grid item xs={12} sm={6}>
           <TextField
             fullWidth
@@ -164,7 +162,16 @@ function TransferComponent({
             onChange={(e) => handleInputChange('move_in_date', e.target.value)}
             InputLabelProps={{ shrink: true }}
             required
-            helperText="Date when tenant enters new apartment"
+            helperText={
+              transferForm.move_out_date && transferForm.move_in_date &&
+              new Date(transferForm.move_in_date) <= new Date(transferForm.move_out_date)
+                ? "❌ Must be after move-out date"
+                : "Date when tenant enters new apartment"
+            }
+            error={
+              transferForm.move_out_date && transferForm.move_in_date &&
+              new Date(transferForm.move_in_date) <= new Date(transferForm.move_out_date)
+            }
           />
         </Grid>
 
@@ -173,15 +180,14 @@ function TransferComponent({
           <FormControlLabel
             control={
               <Checkbox
-                checked={transferForm.assign_to_new_contract}
+                checked={transferForm.assign_to_new_contract || true}
                 onChange={(e) => handleInputChange('assign_to_new_contract', e.target.checked)}
               />
             }
             label="Automatically assign to active contract in new apartment"
           />
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            If checked, the tenant will be automatically added to any active contract in the destination apartment.
-            If unchecked, the tenant will be transferred but not assigned to any contract.
+            The tenant will be automatically added to any active contract in the destination apartment.
           </Typography>
         </Grid>
 
@@ -201,6 +207,16 @@ function TransferComponent({
 
       <Divider sx={{ my: 3 }} />
 
+      {/* FIXED: Show validation error */}
+      {(() => {
+        const error = validateForm();
+        return error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        );
+      })()}
+
       {/* Action Buttons */}
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
         <Button
@@ -213,19 +229,12 @@ function TransferComponent({
           onClick={handleSubmit}
           variant="contained"
           color="primary"
-          disabled={submitting || !selectedApartment || !transferForm.move_out_date || !transferForm.move_in_date}
+          disabled={submitting || !!validateForm()}
           startIcon={submitting ? <CircularProgress size={20} /> : <TransferIcon />}
         >
           {submitting ? 'Transferring...' : 'Transfer Tenant'}
         </Button>
       </Box>
-
-      {/* Validation Error Display */}
-      {validateForm() && (
-        <Alert severity="error" sx={{ mt: 2 }}>
-          {validateForm()}
-        </Alert>
-      )}
     </Box>
   );
 }

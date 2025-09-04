@@ -644,6 +644,8 @@ def transfer_tenant(tenant_id):
         data = request.get_json()
         new_apartment_id = data.get('new_apartment_id')
         transfer_date_str = data.get('transfer_date')
+        move_out_date_str = data.get('move_out_date')
+        move_in_date_str = data.get('move_in_date')
         notes = data.get('notes', '')
 
         if not new_apartment_id:
@@ -654,8 +656,24 @@ def transfer_tenant(tenant_id):
 
         try:
             transfer_date = datetime.strptime(transfer_date_str, '%Y-%m-%d').date()
+
+            # FIXED: Handle move_out_date and move_in_date separately
+            if move_out_date_str:
+                move_out_date = datetime.strptime(move_out_date_str, '%Y-%m-%d').date()
+            else:
+                move_out_date = transfer_date
+
+            if move_in_date_str:
+                move_in_date = datetime.strptime(move_in_date_str, '%Y-%m-%d').date()
+            else:
+                move_in_date = transfer_date
+
         except ValueError:
             return jsonify({"message": "Invalid date format. Use YYYY-MM-DD"}), 400
+
+        # FIXED: Validate that move_in_date is after move_out_date
+        if move_in_date <= move_out_date:
+            return jsonify({"message": "Move-in date must be after move-out date"}), 400
 
         # Check if new apartment exists
         new_apartment = Apartment.query.get(new_apartment_id)
@@ -676,44 +694,29 @@ def transfer_tenant(tenant_id):
 
         contract_tenant, contract_period = current_contract
 
-        # Set move out date for current contract
-        contract_tenant.move_out_date = transfer_date
+        # Set move out date for current contract - FIXED: Use move_out_date
+        contract_tenant.move_out_date = move_out_date
         # FIXED: Add transfer notes to existing notes field
         existing_notes = contract_tenant.notes or ""
         transfer_note = f"Transferred to apartment {new_apartment_id}. {notes}".strip()
         contract_tenant.notes = f"{existing_notes}\n{transfer_note}".strip() if existing_notes else transfer_note
 
-        # Check if new apartment has active contract period
-        new_contract_period = db.session.query(ContractPeriod)\
-            .filter(
-                ContractPeriod.apartment_id == new_apartment_id,
-                ContractPeriod.status == 'active',
-                ContractPeriod.start_date <= transfer_date,
-                or_(ContractPeriod.end_date.is_(None), ContractPeriod.end_date >= transfer_date)
-            ).first()
+        # Find active contract in the new apartment
+        new_apartment_contract = ContractPeriod.query.filter_by(
+            apartment_id=new_apartment_id,
+            status='active'
+        ).first()
 
-        if not new_contract_period:
-            # Create new contract period for the new apartment
-            new_contract_period = ContractPeriod(
-                apartment_id=new_apartment_id,
-                contract_number=f"CON-{datetime.now().year}-{tenant_id:03d}-{new_apartment_id:03d}",
-                start_date=transfer_date,
-                end_date=None,  # Open-ended
-                monthly_rent=new_apartment.rent or 1000.00,  # Use apartment rent or default
-                security_deposit=new_apartment.deposit or 1000.00,
-                status='active',
-                notes=f"Created for tenant transfer from apartment {contract_period.apartment_id}"
-            )
-            db.session.add(new_contract_period)
-            db.session.flush()
+        if not new_apartment_contract:
+            return jsonify({"message": f"No active contract found in apartment {new_apartment_id}"}), 400
 
-        # Create new contract tenant record
+        # Create new contract tenant record for the new apartment - FIXED: Use move_in_date
         new_contract_tenant = ContractTenant(
-            contract_period_id=new_contract_period.id,
             tenant_id=tenant_id,
-            rent_share_percentage=100.0,  # Default to 100%, can be adjusted later
-            is_primary=True,  # Default to primary, can be adjusted later
-            move_in_date=transfer_date,
+            contract_period_id=new_apartment_contract.id,
+            move_in_date=move_in_date,  # FIXED: Use the actual move_in_date
+            is_primary=False,  # Default to not primary
+            rent_share_percentage=100.0,  # Default percentage
             notes=f"Transferred from apartment {contract_period.apartment_id}. {notes}".strip()
         )
 
@@ -728,20 +731,23 @@ def transfer_tenant(tenant_id):
             details={
                 "from_apartment_id": contract_period.apartment_id,
                 "to_apartment_id": new_apartment_id,
+                "move_out_date": move_out_date.isoformat(),
+                "move_in_date": move_in_date.isoformat(),
                 "transfer_date": transfer_date_str
             }
         )
 
         return jsonify({
             "message": "Tenant transferred successfully",
-            "new_contract_tenant_id": new_contract_tenant.id
+            "new_contract_tenant_id": new_contract_tenant.id,
+            "move_out_date": move_out_date.isoformat(),
+            "move_in_date": move_in_date.isoformat()
         }), 200
 
     except Exception as e:
         current_app.logger.error(f"Error transferring tenant {tenant_id}: {e}")
         db.session.rollback()
         return jsonify({"message": "Error transferring tenant", "error": str(e)}), 500
-
 
 # FIXED MOVE OUT ENDPOINT
 @tenants_bp.route("/tenants/<int:tenant_id>/move-out", methods=["POST"])

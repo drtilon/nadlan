@@ -345,41 +345,49 @@ const TenantDetails = ({ showNotification }) => {
 
   // FIXED: Transfer handler with proper data structure
   const handleTransferTenant = async () => {
-    if (!selectedApartment) {
-      showNotification('Please select a new apartment', 'error');
-      return;
-    }
+  if (!selectedApartment) {
+    showNotification('Please select a new apartment', 'error');
+    return;
+  }
 
-    setFormSubmitting(true);
-    try {
-      const transferData = {
-        new_apartment_id: selectedApartment.id,
-        transfer_date: transferForm.transfer_date,
-        move_out_date: transferForm.transfer_date,
-        move_in_date: transferForm.transfer_date,
-        notes: transferForm.notes
-      };
-      console.log('Sending transfer data:', transferData);
+  setFormSubmitting(true);
+  try {
+    // FIXED: Use different dates for move_out and move_in
+    // Move out date should be the transfer date
+    // Move in date should be the day after (or the same day if immediate transfer)
+    const transferDate = new Date(transferForm.transfer_date);
+    const moveInDate = new Date(transferDate);
+    moveInDate.setDate(transferDate.getDate() + 1); // Move in the next day
 
-      await api.post(`/tenants/${tenantId}/transfer`, transferData);
-      showNotification('Tenant transferred successfully', 'success');
-      setTransferDialogOpen(false);
-      setTransferForm({
-        new_apartment_id: '',
-        transfer_date: new Date().toISOString().split('T')[0],
-        notes: ''
-      });
-      setSelectedApartment(null);
-      setApartmentSearchValue('');
-      fetchTenantData();
-    } catch (error) {
-      console.error('Error transferring tenant:', error);
-      const errorMessage = error.response?.data?.message || 'Error transferring tenant';
-      showNotification(errorMessage, 'error');
-    } finally {
-      setFormSubmitting(false);
-    }
-  };
+    const transferData = {
+      new_apartment_id: selectedApartment.id,
+      transfer_date: transferForm.transfer_date,
+      move_out_date: transferForm.transfer_date,
+      move_in_date: moveInDate.toISOString().split('T')[0], // Move in next day
+      notes: transferForm.notes
+    };
+    console.log('Sending transfer data:', transferData);
+
+    await api.post(`/tenants/${tenantId}/transfer`, transferData);
+    showNotification('Tenant transferred successfully', 'success');
+    setTransferDialogOpen(false);
+    setTransferForm({
+      new_apartment_id: '',
+      transfer_date: new Date().toISOString().split('T')[0],
+      notes: ''
+    });
+    setSelectedApartment(null);
+    setApartmentSearchValue('');
+    fetchTenantData();
+  } catch (error) {
+    console.error('Error transferring tenant:', error);
+    const errorMessage = error.response?.data?.message || 'Error transferring tenant';
+    showNotification(errorMessage, 'error');
+  } finally {
+    setFormSubmitting(false);
+  }
+};
+
 
   const handleMoveOut = async () => {
     if (!moveOutForm.move_out_date) {

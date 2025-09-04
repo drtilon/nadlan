@@ -1,4 +1,4 @@
-// components/tenant/TenantDetails.jsx - FIXED VERSION
+// components/tenant/TenantDetails.jsx - FIXED with searchable transfer
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -6,78 +6,60 @@ import {
   Paper,
   Typography,
   Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Stack,
   Box,
-  Grid,
+  Chip,
+  LinearProgress,
+  Alert,
   Card,
   CardContent,
   Divider,
-  Chip,
-  Stack,
-  IconButton,
-  Alert,
-  CircularProgress,
-  Avatar,
+  Grid,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Tooltip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
+  IconButton,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
-  List,
-  ListItem,
-  ListItemIcon,
-  ListItemText
+  Autocomplete
 } from '@mui/material';
 import {
   ArrowBack as BackIcon,
-  Person as PersonIcon,
-  Home as HomeIcon,
-  Phone as PhoneIcon,
-  Email as EmailIcon,
-  Cake as BirthdayIcon,
-  Wc as GenderIcon,
-  Schedule as ContractIcon,
-  AttachMoney as MoneyIcon,
+  Edit as EditIcon,
   Payment as PaymentIcon,
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  History as HistoryIcon,
   SwapHoriz as TransferIcon,
   ExitToApp as MoveOutIcon,
-  LocationOn as LocationIcon,
-  ContactPage as PassportIcon,
-  Edit as EditIcon,
-  Apartment as ApartmentIcon,
+  Person as PersonIcon,
+  Email as EmailIcon,
+  Phone as PhoneIcon,
+  Home as HomeIcon,
   CalendarToday as CalendarIcon,
-  Euro as EuroIcon,
-  Business as BusinessIcon,
-  Add as AddIcon
+  CreditCard as IbanIcon
 } from '@mui/icons-material';
-import { green, red, orange, blue, grey } from '@mui/material/colors';
 import api from '../../utils/api';
 
-const TenantDetails = ({ showNotification }) => {
+function TenantDetails({ showNotification }) {
   const { tenantId } = useParams();
   const navigate = useNavigate();
 
-  // State
+  // State management
   const [tenant, setTenant] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [moveHistory, setMoveHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Dialogs state
+  // Dialog states
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [transferDialogOpen, setTransferDialogOpen] = useState(false);
@@ -113,6 +95,8 @@ const TenantDetails = ({ showNotification }) => {
   });
 
   const [apartments, setApartments] = useState([]);
+  const [selectedApartment, setSelectedApartment] = useState(null);
+  const [apartmentSearchValue, setApartmentSearchValue] = useState('');
   const [formSubmitting, setFormSubmitting] = useState(false);
 
   // Utility functions
@@ -210,7 +194,7 @@ const TenantDetails = ({ showNotification }) => {
     }
   };
 
-  // Fetch apartments for transfer
+  // Fetch apartments for transfer - only when transfer dialog opens
   const fetchApartments = async () => {
     try {
       const response = await api.get('/list');
@@ -286,14 +270,18 @@ const TenantDetails = ({ showNotification }) => {
   };
 
   const handleTransferTenant = async () => {
-    if (!transferForm.new_apartment_id) {
+    if (!selectedApartment) {
       showNotification('Please select a new apartment', 'error');
       return;
     }
 
     setFormSubmitting(true);
     try {
-      await api.post(`/tenants/${tenantId}/transfer`, transferForm);
+      const transferData = {
+        ...transferForm,
+        new_apartment_id: selectedApartment.id
+      };
+      await api.post(`/tenants/${tenantId}/transfer`, transferData);
       showNotification('Tenant transferred successfully', 'success');
       setTransferDialogOpen(false);
       setTransferForm({
@@ -301,6 +289,8 @@ const TenantDetails = ({ showNotification }) => {
         transfer_date: new Date().toISOString().split('T')[0],
         notes: ''
       });
+      setSelectedApartment(null);
+      setApartmentSearchValue('');
       fetchTenantData();
     } catch (error) {
       console.error('Error transferring tenant:', error);
@@ -311,9 +301,9 @@ const TenantDetails = ({ showNotification }) => {
     }
   };
 
-  const handleMoveOut = async () => {
+  const handleMoveOutTenant = async () => {
     if (!moveOutForm.move_out_date) {
-      showNotification('Move out date is required', 'error');
+      showNotification('Please select a move-out date', 'error');
       return;
     }
 
@@ -329,300 +319,257 @@ const TenantDetails = ({ showNotification }) => {
       fetchTenantData();
     } catch (error) {
       console.error('Error moving out tenant:', error);
-      const errorMessage = error.response?.data?.message || 'Error processing move out';
+      const errorMessage = error.response?.data?.message || 'Error moving out tenant';
       showNotification(errorMessage, 'error');
     } finally {
       setFormSubmitting(false);
     }
   };
 
-  const openTransferDialog = () => {
-    fetchApartments();
+  // Handle transfer dialog open
+  const handleOpenTransferDialog = () => {
     setTransferDialogOpen(true);
+    fetchApartments(); // Load apartments when dialog opens
+  };
+
+  // Handle close dialogs
+  const handleCloseTransferDialog = () => {
+    setTransferDialogOpen(false);
+    setSelectedApartment(null);
+    setApartmentSearchValue('');
+    setTransferForm({
+      new_apartment_id: '',
+      transfer_date: new Date().toISOString().split('T')[0],
+      notes: ''
+    });
   };
 
   if (loading) {
     return (
-      <Container maxWidth="lg" sx={{ mt: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '50vh' }}>
-        <CircularProgress size={60} />
+      <Container maxWidth="lg" sx={{ py: 3 }}>
+        <LinearProgress />
+        <Typography sx={{ mt: 2 }}>Loading tenant details...</Typography>
       </Container>
     );
   }
 
   if (error || !tenant) {
     return (
-      <Container maxWidth="lg" sx={{ mt: 4 }}>
-        <Alert severity="error">
-          {error || 'Tenant not found or error loading tenant data.'}
-        </Alert>
+      <Container maxWidth="lg" sx={{ py: 3 }}>
+        <Alert severity="error">{error || 'Tenant not found'}</Alert>
+        <Button startIcon={<BackIcon />} onClick={() => navigate('/tenants')} sx={{ mt: 2 }}>
+          Back to Tenants
+        </Button>
       </Container>
     );
   }
 
-  // Get current apartment info
-  const currentContract = tenant.current_contracts?.[0] || null;
-  const currentApartment = currentContract ? {
-    id: currentContract.apartment_id,
-    address: currentContract.apartment_address,
-    monthly_rent: currentContract.monthly_rent,
-    is_primary: currentContract.is_primary
-  } : null;
-
   return (
-    <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+    <Container maxWidth="lg" sx={{ py: 3 }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 3 }}>
-        <IconButton onClick={() => navigate('/tenants')} color="primary">
-          <BackIcon />
-        </IconButton>
-        <Avatar sx={{ bgcolor: blue[500], width: 56, height: 56 }}>
-          <PersonIcon fontSize="large" />
-        </Avatar>
-        <Box sx={{ flexGrow: 1 }}>
-          <Typography variant="h4" component="h1" gutterBottom>
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <IconButton onClick={() => navigate('/tenants')} sx={{ mr: 1 }}>
+            <BackIcon />
+          </IconButton>
+          <Typography variant="h4" component="h1">
             {tenant.name}
           </Typography>
-          <Chip
-            label={currentContract ? 'Active Tenant' : 'Inactive'}
-            color={currentContract ? 'success' : 'default'}
-            icon={currentContract ? <CheckCircleIcon /> : <ErrorIcon />}
-          />
         </Box>
-        <Stack direction="row" spacing={2}>
+        <Box sx={{ display: 'flex', gap: 1 }}>
           <Button
-            variant="outlined"
             startIcon={<EditIcon />}
+            variant="outlined"
             onClick={() => setEditDialogOpen(true)}
           >
             Edit
           </Button>
           <Button
-            variant="contained"
             startIcon={<PaymentIcon />}
+            variant="outlined"
             onClick={() => setPaymentDialogOpen(true)}
-            disabled={!currentContract}
           >
             Add Payment
           </Button>
           <Button
-            variant="outlined"
             startIcon={<TransferIcon />}
-            onClick={openTransferDialog}
-            disabled={!currentContract}
+            variant="outlined"
+            onClick={handleOpenTransferDialog}
           >
             Transfer
           </Button>
           <Button
-            variant="outlined"
-            color="error"
             startIcon={<MoveOutIcon />}
+            variant="outlined"
+            color="warning"
             onClick={() => setMoveOutDialogOpen(true)}
-            disabled={!currentContract}
           >
             Move Out
           </Button>
-        </Stack>
+        </Box>
       </Box>
 
+      {/* Tenant Information */}
       <Grid container spacing={3}>
-        {/* Personal Information */}
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 3, height: 'fit-content' }}>
-            <Typography variant="h6" gutterBottom color="primary">
-              Personal Information
-            </Typography>
-            <Divider sx={{ mb: 2 }} />
-
-            <Stack spacing={2}>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <GenderIcon color="action" />
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Gender</Typography>
-                  <Typography variant="body1">{tenant.gender || 'N/A'}</Typography>
+        {/* Basic Information Card */}
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Basic Information
+              </Typography>
+              <Stack spacing={2}>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <PersonIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                  <Typography>{tenant.name}</Typography>
                 </Box>
-              </Box>
-
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <BirthdayIcon color="action" />
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Date of Birth</Typography>
-                  <Typography variant="body1">{formatDate(tenant.date_of_birth)}</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <EmailIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                  <Typography>{tenant.email || 'Not provided'}</Typography>
                 </Box>
-              </Box>
-
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <PassportIcon color="action" />
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Tenant ID (Passport)</Typography>
-                  <Typography variant="body1">{tenant.passport_id || 'N/A'}</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <PhoneIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                  <Typography>{tenant.phone || 'Not provided'}</Typography>
                 </Box>
-              </Box>
-
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <PhoneIcon color="action" />
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Phone Number</Typography>
-                  <Typography variant="body1">{tenant.phone || 'N/A'}</Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <CalendarIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                  <Typography>Born: {formatDate(tenant.date_of_birth)}</Typography>
                 </Box>
-              </Box>
-
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <EmailIcon color="action" />
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Email Address</Typography>
-                  <Typography variant="body1">{tenant.email}</Typography>
-                </Box>
-              </Box>
-            </Stack>
-          </Paper>
+                {tenant.gender && (
+                  <Box>
+                    <Chip
+                      label={tenant.gender.charAt(0).toUpperCase() + tenant.gender.slice(1)}
+                      size="small"
+                      color={tenant.gender.toLowerCase() === 'male' ? 'primary' : 'secondary'}
+                    />
+                  </Box>
+                )}
+                {tenant.passport_id && (
+                  <Typography variant="body2" color="text.secondary">
+                    Passport ID: {tenant.passport_id}
+                  </Typography>
+                )}
+                {tenant.refund_iban && (
+                  <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                    <IbanIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                    <Typography variant="body2">{tenant.refund_iban}</Typography>
+                  </Box>
+                )}
+              </Stack>
+            </CardContent>
+          </Card>
         </Grid>
 
-        {/* Property Details */}
-        <Grid item xs={12} md={8}>
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant="h6" gutterBottom color="primary">
-              Property Details
-            </Typography>
-            <Divider sx={{ mb: 2 }} />
-
-            {currentApartment ? (
-              <Grid container spacing={3}>
-                <Grid item xs={12} md={6}>
-                  <Stack spacing={2}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <LocationIcon color="action" />
-                      <Box>
-                        <Typography variant="body2" color="text.secondary">Address</Typography>
-                        <Typography variant="body1">{currentApartment.address}</Typography>
+        {/* Current Housing Card */}
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Current Housing
+              </Typography>
+              {tenant.current_contracts && tenant.current_contracts.length > 0 ? (
+                <Stack spacing={2}>
+                  {tenant.current_contracts.map((contract, index) => (
+                    <Box key={index}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                        <HomeIcon sx={{ mr: 1, color: 'text.secondary' }} />
+                        <Typography variant="body1">{contract.apartment_address}</Typography>
                       </Box>
+                      <Typography variant="body2" color="text.secondary">
+                        Contract: {contract.contract_number}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Period: {formatDate(contract.start_date)} - {formatDate(contract.end_date)}
+                      </Typography>
+                      <Chip
+                        label={contract.status || 'Active'}
+                        size="small"
+                        color={getStatusColor(contract.status)}
+                        sx={{ mt: 1 }}
+                      />
                     </Box>
-
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <ApartmentIcon color="action" />
-                      <Box>
-                        <Typography variant="body2" color="text.secondary">Property ID</Typography>
-                        <Typography variant="body1">#{currentApartment.id}</Typography>
-                      </Box>
-                    </Box>
-
-
-                  </Stack>
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <Stack spacing={2}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <CalendarIcon color="action" />
-                      <Box>
-                        <Typography variant="body2" color="text.secondary">Contract Period</Typography>
-                        <Typography variant="body1">
-                          {currentContract ? `${formatDate(currentContract.start_date)} - ${formatDate(currentContract.end_date) || 'Ongoing'}` : 'N/A'}
-                        </Typography>
-                      </Box>
-                    </Box>
-
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <EuroIcon color="action" />
-                      <Box>
-                        <Typography variant="body2" color="text.secondary">Monthly Rent</Typography>
-                        <Typography variant="body1">{formatCurrency(currentApartment.monthly_rent)}</Typography>
-                      </Box>
-                    </Box>
-                  </Stack>
-                </Grid>
-              </Grid>
-            ) : (
-              <Alert severity="info">No active property assignment</Alert>
-            )}
-          </Paper>
-
-          {/* Payment History */}
-          <Paper sx={{ p: 3 }}>
-            <Typography variant="h6" gutterBottom color="primary">
-              Payment History
-            </Typography>
-            <Divider sx={{ mb: 2 }} />
-
-            {paymentHistory.length > 0 ? (
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Date</TableCell>
-                      <TableCell>Description</TableCell>
-                      <TableCell align="right">Amount</TableCell>
-                      <TableCell>Status</TableCell>
-                      <TableCell>Method</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {paymentHistory.map((payment, index) => (
-                      <TableRow key={index}>
-                        <TableCell>{formatDate(payment.paymentDate || payment.payment_date || payment.date)}</TableCell>
-                        <TableCell>{payment.description || payment.paymentDescription || 'Payment'}</TableCell>
-                        <TableCell align="right">{formatCurrency(payment.amountPaid || payment.amount)}</TableCell>
-                        <TableCell>
-                          <Chip
-                            label={payment.status || payment.paymentStatus || 'Completed'}
-                            color={getStatusColor(payment.status || payment.paymentStatus)}
-                            size="small"
-                          />
-                        </TableCell>
-                        <TableCell>{payment.method || payment.paymentMethod || 'N/A'}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            ) : (
-              <Alert severity="info">No payment history available</Alert>
-            )}
-          </Paper>
+                  ))}
+                </Stack>
+              ) : (
+                <Alert severity="info">No current housing assignments</Alert>
+              )}
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
 
-      {/* Move History */}
-      {moveHistory.length > 0 && (
-        <Paper sx={{ p: 3, mt: 3 }}>
-          <Typography variant="h6" gutterBottom color="primary">
-            Move History
-          </Typography>
-          <Divider sx={{ mb: 2 }} />
+      {/* Payment History */}
+      <Paper sx={{ mt: 3, p: 2 }}>
+        <Typography variant="h6" gutterBottom>
+          Payment History
+        </Typography>
+        {paymentHistory.length > 0 ? (
+          <TableContainer>
+            <Table>
+              <TableHead>
+                <TableRow>
+                  <TableCell>Date</TableCell>
+                  <TableCell>Amount</TableCell>
+                  <TableCell>Description</TableCell>
+                  <TableCell>Method</TableCell>
+                  <TableCell>Status</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {paymentHistory.slice(0, 10).map((payment, index) => (
+                  <TableRow key={index}>
+                    <TableCell>{formatDate(payment.payment_date)}</TableCell>
+                    <TableCell>{formatCurrency(payment.amount)}</TableCell>
+                    <TableCell>{payment.description}</TableCell>
+                    <TableCell>{payment.method}</TableCell>
+                    <TableCell>
+                      <Chip
+                        label={payment.status || 'Paid'}
+                        size="small"
+                        color={getStatusColor(payment.status)}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        ) : (
+          <Alert severity="info">No payment history available</Alert>
+        )}
+      </Paper>
 
-          <List>
-            {moveHistory.map((history, index) => (
-              <ListItem key={index} sx={{ border: '1px solid #e0e0e0', borderRadius: 1, mb: 1 }}>
-                <ListItemIcon>
-                  <HistoryIcon color={history.is_current ? 'primary' : 'action'} />
-                </ListItemIcon>
-                <ListItemText
-                  primary={
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <Typography variant="body1">
-                        {history.apartment_address}
-                      </Typography>
-                      {history.is_current && (
-                        <Chip label="Current" color="primary" size="small" />
-                      )}
-                    </Box>
-                  }
-                  secondary={
-                    <Typography variant="body2" color="text.secondary">
-                      {formatDate(history.move_in_date)} - {history.move_out_date ? formatDate(history.move_out_date) : 'Present'}
-                      {history.monthly_rent && ` • ${formatCurrency(history.monthly_rent)}/month`}
-                      {history.is_primary && ' • Primary Tenant'}
-                    </Typography>
-                  }
-                />
-              </ListItem>
+      {/* Move History */}
+      <Paper sx={{ mt: 3, p: 2 }}>
+        <Typography variant="h6" gutterBottom>
+          Move History
+        </Typography>
+        {moveHistory.length > 0 ? (
+          <Stack spacing={2}>
+            {moveHistory.map((move, index) => (
+              <Box key={index} sx={{ p: 2, border: 1, borderColor: 'divider', borderRadius: 1 }}>
+                <Typography variant="body1">
+                  {move.type}: {move.details}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {formatDate(move.date)}
+                </Typography>
+                {move.notes && (
+                  <Typography variant="body2" sx={{ mt: 1 }}>
+                    Notes: {move.notes}
+                  </Typography>
+                )}
+              </Box>
             ))}
-          </List>
-        </Paper>
-      )}
+          </Stack>
+        ) : (
+          <Alert severity="info">No move history available</Alert>
+        )}
+      </Paper>
 
       {/* Edit Dialog */}
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Edit Tenant Information</DialogTitle>
+        <DialogTitle>Edit Tenant</DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
           <Stack spacing={3}>
             <TextField
@@ -661,10 +608,10 @@ const TenantDetails = ({ showNotification }) => {
                 onChange={(e) => setEditFormData({ ...editFormData, gender: e.target.value })}
                 label="Gender"
               >
+                <MenuItem value="">Select Gender</MenuItem>
                 <MenuItem value="male">Male</MenuItem>
                 <MenuItem value="female">Female</MenuItem>
                 <MenuItem value="other">Other</MenuItem>
-                <MenuItem value="">Prefer not to say</MenuItem>
               </Select>
             </FormControl>
             <TextField
@@ -741,25 +688,59 @@ const TenantDetails = ({ showNotification }) => {
         </DialogActions>
       </Dialog>
 
-      {/* Transfer Dialog */}
-      <Dialog open={transferDialogOpen} onClose={() => setTransferDialogOpen(false)} maxWidth="sm" fullWidth>
+      {/* Transfer Dialog with Searchable Autocomplete */}
+      <Dialog open={transferDialogOpen} onClose={handleCloseTransferDialog} maxWidth="sm" fullWidth>
         <DialogTitle>Transfer Tenant</DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
           <Stack spacing={3}>
-            <FormControl fullWidth required>
-              <InputLabel>New Apartment</InputLabel>
-              <Select
-                value={transferForm.new_apartment_id}
-                onChange={(e) => setTransferForm({ ...transferForm, new_apartment_id: e.target.value })}
-                label="New Apartment"
-              >
-                {apartments.map((apt) => (
-                  <MenuItem key={apt.id} value={apt.id}>
-                    {apt.address || apt.full_address || `Apartment ${apt.id}`}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <Autocomplete
+              options={apartments}
+              getOptionLabel={(option) => option.address || option.full_address || `Apartment ${option.id}`}
+              renderOption={(props, option) => (
+                <Box component="li" {...props}>
+                  <Box>
+                    <Typography variant="body1">
+                      {option.address || option.full_address || `Apartment ${option.id}`}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Rent: €{option.rent || option.monthly_rent || 0}/month
+                      {option.tenants && option.tenants.length > 0 && (
+                        ` • Current tenants: ${option.tenants.map(t => t.name || t).join(', ')}`
+                      )}
+                    </Typography>
+                  </Box>
+                </Box>
+              )}
+              value={selectedApartment}
+              onChange={(event, newValue) => {
+                setSelectedApartment(newValue);
+              }}
+              inputValue={apartmentSearchValue}
+              onInputChange={(event, newInputValue) => {
+                setApartmentSearchValue(newInputValue);
+              }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Search Apartment"
+                  placeholder="Type to search apartments..."
+                  fullWidth
+                  required
+                />
+              )}
+              filterOptions={(options, { inputValue }) => {
+                const filterValue = inputValue.toLowerCase();
+                return options.filter((option) => {
+                  const address = (option.address || option.full_address || '').toLowerCase();
+                  const city = (option.city || '').toLowerCase();
+                  const streetName = (option.street_name || '').toLowerCase();
+                  return address.includes(filterValue) ||
+                         city.includes(filterValue) ||
+                         streetName.includes(filterValue);
+                });
+              }}
+              noOptionsText="No apartments found"
+            />
             <TextField
               label="Transfer Date"
               type="date"
@@ -776,12 +757,13 @@ const TenantDetails = ({ showNotification }) => {
               rows={3}
               value={transferForm.notes}
               onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })}
+              placeholder="Reason for transfer, special instructions, etc."
             />
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setTransferDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleTransferTenant} variant="contained" disabled={formSubmitting}>
+          <Button onClick={handleCloseTransferDialog}>Cancel</Button>
+          <Button onClick={handleTransferTenant} variant="contained" disabled={formSubmitting || !selectedApartment}>
             {formSubmitting ? 'Transferring...' : 'Transfer'}
           </Button>
         </DialogActions>
@@ -814,13 +796,13 @@ const TenantDetails = ({ showNotification }) => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setMoveOutDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleMoveOut} variant="contained" color="error" disabled={formSubmitting}>
-            {formSubmitting ? 'Processing...' : 'Move Out'}
+          <Button onClick={handleMoveOutTenant} variant="contained" disabled={formSubmitting}>
+            {formSubmitting ? 'Moving Out...' : 'Move Out'}
           </Button>
         </DialogActions>
       </Dialog>
     </Container>
   );
-};
+}
 
 export default TenantDetails;

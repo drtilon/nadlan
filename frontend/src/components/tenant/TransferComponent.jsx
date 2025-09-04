@@ -1,12 +1,8 @@
-// components/tenant/TransferComponent.jsx
-import React from 'react';
+// components/tenant/TransferComponent.jsx - FIXED with searchable apartment selection
+import React, { useState } from 'react';
 import {
   Box,
   TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
   Button,
   Grid,
   Typography,
@@ -14,7 +10,8 @@ import {
   Divider,
   FormControlLabel,
   Checkbox,
-  Alert
+  Alert,
+  Autocomplete
 } from '@mui/material';
 import { SwapHoriz as TransferIcon } from '@mui/icons-material';
 
@@ -28,6 +25,9 @@ function TransferComponent({
   setTransferForm,
   submitting
 }) {
+  const [selectedApartment, setSelectedApartment] = useState(null);
+  const [apartmentSearchValue, setApartmentSearchValue] = useState('');
+
   const handleInputChange = (field, value) => {
     setTransferForm(prev => ({
       ...prev,
@@ -36,7 +36,7 @@ function TransferComponent({
   };
 
   const validateForm = () => {
-    if (!transferForm.new_apartment_id) {
+    if (!selectedApartment) {
       return 'Please select a destination apartment';
     }
     if (!transferForm.move_out_date) {
@@ -59,6 +59,13 @@ function TransferComponent({
       // You can show this error via notification if needed
       return;
     }
+
+    // Update the transfer form with selected apartment ID
+    const updatedForm = {
+      ...transferForm,
+      new_apartment_id: selectedApartment.apartment_id || selectedApartment.id
+    };
+    setTransferForm(updatedForm);
     onSuccess();
   };
 
@@ -79,32 +86,58 @@ function TransferComponent({
       </Alert>
 
       <Grid container spacing={3}>
-        {/* Destination Apartment */}
+        {/* Searchable Apartment Selection */}
         <Grid item xs={12}>
-          <FormControl fullWidth required>
-            <InputLabel>Select Destination Apartment</InputLabel>
-            <Select
-              value={transferForm.new_apartment_id}
-              label="Select Destination Apartment"
-              onChange={(e) => handleInputChange('new_apartment_id', e.target.value)}
-            >
-              {apartments.map((apartment) => (
-                <MenuItem key={apartment.apartment_id || apartment.id} value={apartment.apartment_id || apartment.id}>
-                  <Box>
-                    <Typography variant="body1">
-                      {apartment.address}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Rent: €{apartment.monthly_rent || apartment.rent || 0}/month
-                      {apartment.tenants && apartment.tenants.length > 0 && (
-                        ` • Current tenants: ${apartment.tenants.join(', ')}`
-                      )}
-                    </Typography>
-                  </Box>
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <Autocomplete
+            options={apartments}
+            getOptionLabel={(option) => option.address || `Apartment ${option.apartment_id || option.id}`}
+            renderOption={(props, option) => (
+              <Box component="li" {...props}>
+                <Box>
+                  <Typography variant="body1">
+                    {option.address}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Rent: €{option.monthly_rent || option.rent || 0}/month
+                    {option.tenants && option.tenants.length > 0 && (
+                      ` • Current tenants: ${option.tenants.join(', ')}`
+                    )}
+                  </Typography>
+                </Box>
+              </Box>
+            )}
+            value={selectedApartment}
+            onChange={(event, newValue) => {
+              setSelectedApartment(newValue);
+            }}
+            inputValue={apartmentSearchValue}
+            onInputChange={(event, newInputValue) => {
+              setApartmentSearchValue(newInputValue);
+            }}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Search Destination Apartment"
+                placeholder="Type to search apartments by address..."
+                fullWidth
+                required
+              />
+            )}
+            filterOptions={(options, { inputValue }) => {
+              const filterValue = inputValue.toLowerCase();
+              return options.filter((option) => {
+                const address = (option.address || '').toLowerCase();
+                const city = (option.city || '').toLowerCase();
+                const streetName = (option.street_name || '').toLowerCase();
+                const houseNumber = (option.house_number || '').toString().toLowerCase();
+                return address.includes(filterValue) ||
+                       city.includes(filterValue) ||
+                       streetName.includes(filterValue) ||
+                       houseNumber.includes(filterValue);
+              });
+            }}
+            noOptionsText="No apartments found. Try a different search term."
+          />
         </Grid>
 
         {/* Move Out Date */}
@@ -180,7 +213,7 @@ function TransferComponent({
           onClick={handleSubmit}
           variant="contained"
           color="primary"
-          disabled={submitting || !transferForm.new_apartment_id || !transferForm.move_out_date || !transferForm.move_in_date}
+          disabled={submitting || !selectedApartment || !transferForm.move_out_date || !transferForm.move_in_date}
           startIcon={submitting ? <CircularProgress size={20} /> : <TransferIcon />}
         >
           {submitting ? 'Transferring...' : 'Transfer Tenant'}

@@ -63,10 +63,9 @@ import {
   Euro as EuroIcon,
   Business as BusinessIcon,
   Add as AddIcon
-} from '@mui/material';
+} from '@mui/icons-material'; // FIXED: Import Add from @mui/icons-material
 import { green, red, orange, blue, grey } from '@mui/material/colors';
 import api from '../../utils/api';
-
 const TenantDetails = ({ showNotification }) => {
   const { tenantId } = useParams();
   const navigate = useNavigate();

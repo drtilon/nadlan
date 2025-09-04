@@ -216,15 +216,43 @@ const TenantDetails = ({ showNotification }) => {
   // MODIFIED: Fetch apartments for transfer - only when dialog opens
   const fetchApartments = async () => {
     try {
-      const response = await api.get('/list');
+      console.log('Fetching apartments...'); // DEBUG
+      const response = await api.get('/apartments/list');
+      console.log('Raw response:', response.data); // DEBUG
+
       let apartmentData = response.data;
+
+      // Handle different response structures
       if (apartmentData.success) {
         apartmentData = apartmentData.apartments;
+      } else if (apartmentData.apartments) {
+        apartmentData = apartmentData.apartments;
       }
+
+      console.log('Processed apartment data:', apartmentData); // DEBUG
+      console.log('Is array?', Array.isArray(apartmentData)); // DEBUG
+
       setApartments(Array.isArray(apartmentData) ? apartmentData : []);
     } catch (error) {
       console.error('Error fetching apartments:', error);
-      setApartments([]);
+      // Try alternative endpoint
+      try {
+        console.log('Trying alternative endpoint /list...'); // DEBUG
+        const response = await api.get('/list');
+        console.log('Alternative response:', response.data); // DEBUG
+
+        let apartmentData = response.data;
+        if (apartmentData.success) {
+          apartmentData = apartmentData.apartments;
+        } else if (apartmentData.apartments) {
+          apartmentData = apartmentData.apartments;
+        }
+
+        setApartments(Array.isArray(apartmentData) ? apartmentData : []);
+      } catch (altError) {
+        console.error('Alternative endpoint also failed:', altError);
+        setApartments([]);
+      }
     }
   };
 
@@ -772,28 +800,39 @@ const TenantDetails = ({ showNotification }) => {
           <Stack spacing={3}>
             <Autocomplete
               options={apartments}
-              getOptionLabel={(option) => option.address || option.full_address || `Apartment ${option.id}`}
+              getOptionLabel={(option) => {
+                // Handle the address format from backend
+                return option.address ||
+                       `${option.street_name || ''} ${option.house_number || ''}`.trim() ||
+                       `Apartment ${option.id}`;
+              }}
               renderOption={(props, option) => (
                 <Box component="li" {...props}>
                   <Box>
                     <Typography variant="body1">
-                      {option.address || option.full_address || `Apartment ${option.id}`}
+                      {option.address ||
+                       `${option.street_name || ''} ${option.house_number || ''}`.trim() ||
+                       `Apartment ${option.id}`}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Rent: €{option.rent || option.monthly_rent || 0}/month
+                      {option.city && `${option.city} • `}
+                      Rent: ₪{option.rent || 0}/month
                       {option.tenants && option.tenants.length > 0 && (
                         ` • Current tenants: ${option.tenants.map(t => t.name || t).join(', ')}`
                       )}
+                      {option.rooms && ` • ${option.rooms} rooms`}
                     </Typography>
                   </Box>
                 </Box>
               )}
               value={selectedApartment}
               onChange={(event, newValue) => {
+                console.log('Selected apartment:', newValue); // DEBUG
                 setSelectedApartment(newValue);
               }}
               inputValue={apartmentSearchValue}
               onInputChange={(event, newInputValue) => {
+                console.log('Search input changed:', newInputValue); // DEBUG
                 setApartmentSearchValue(newInputValue);
               }}
               renderInput={(params) => (
@@ -803,20 +842,30 @@ const TenantDetails = ({ showNotification }) => {
                   placeholder="Type to search apartments..."
                   fullWidth
                   required
+                  helperText={apartments.length === 0 ? 'Loading apartments...' : `${apartments.length} apartments available`}
                 />
               )}
               filterOptions={(options, { inputValue }) => {
+                console.log('Filtering options:', options.length, 'with input:', inputValue); // DEBUG
                 const filterValue = inputValue.toLowerCase();
-                return options.filter((option) => {
-                  const address = (option.address || option.full_address || '').toLowerCase();
+                const filtered = options.filter((option) => {
+                  const address = (option.address || '').toLowerCase();
                   const city = (option.city || '').toLowerCase();
                   const streetName = (option.street_name || '').toLowerCase();
+                  const houseNumber = (option.house_number || '').toString().toLowerCase();
+                  const building = (option.building || '').toLowerCase();
+
                   return address.includes(filterValue) ||
                          city.includes(filterValue) ||
-                         streetName.includes(filterValue);
+                         streetName.includes(filterValue) ||
+                         houseNumber.includes(filterValue) ||
+                         building.includes(filterValue);
                 });
+                console.log('Filtered results:', filtered.length); // DEBUG
+                return filtered;
               }}
-              noOptionsText="No apartments found"
+              noOptionsText={apartments.length === 0 ? "Loading apartments..." : "No apartments found"}
+              loading={apartments.length === 0}
             />
             <TextField
               label="Transfer Date"

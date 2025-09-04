@@ -213,7 +213,7 @@ const TenantDetails = ({ showNotification }) => {
   // Fetch apartments for transfer
   const fetchApartments = async () => {
     try {
-      const response = await api.get('/apartments');
+      const response = await api.get('/list');
       let apartmentData = response.data;
       if (apartmentData.success) {
         apartmentData = apartmentData.apartments;

@@ -668,7 +668,7 @@ class ContractTemplate(db.Model):
         return f"<ContractTemplate {self.id}: {self.name}{default_str}>"
 
 class UnassignedPayment(db.Model):
-    """Temporary storage for CSV payments that haven't been assigned to tenants yet"""
+    """Temporary storage for CSV payments that haven't been assigned to tenants yet - with user tracking"""
     __tablename__ = "unassigned_payments"
     __table_args__ = {"extend_existing": True}
 
@@ -679,63 +679,63 @@ class UnassignedPayment(db.Model):
     amount = db.Column(db.Numeric(10, 2), nullable=False)
     payment_date = db.Column(db.Date, nullable=True)
     description = db.Column(db.Text, nullable=True)
-    csv_line = db.Column(db.Integer, nullable=True)  # Line number from CSV for reference
+    csv_line = db.Column(db.Integer, nullable=True)
 
-    # Matching info
-    matched_tenant_id = db.Column(db.Integer, db.ForeignKey("tenants.id"), nullable=True)
-    matched_apartment_id = db.Column(db.Integer, db.ForeignKey("apartments.id"), nullable=True)
-    similarity_score = db.Column(db.Float, nullable=True)
+    # Additional fields for better matching
+    sender = db.Column(db.String(255), nullable=True)
+    reference = db.Column(db.String(500), nullable=True)
 
-    # Status
-    status = db.Column(db.String(20), default="unassigned")  # unassigned, matched, assigned, rejected
+    # Matching results
+    matched_tenant_id = db.Column(db.Integer, db.ForeignKey('tenants.id'), nullable=True)
+    matched_apartment_id = db.Column(db.Integer, db.ForeignKey('apartments.id'), nullable=True)
+    similarity_score = db.Column(db.Float, nullable=True, default=0.0)
 
-    # Processing info
-    processed_at = db.Column(db.DateTime, default=datetime.utcnow)
-    processed_by = db.Column(db.String(100), nullable=True)
-    notes = db.Column(db.Text, nullable=True)
+    # Status tracking
+    status = db.Column(db.String(50), nullable=False, default='unassigned')  # unassigned, matched, assigned, rejected
 
-    # Additional CSV fields that might be useful
-    reference = db.Column(db.String(500), nullable=True)  # Transaction reference from CSV
-    sender = db.Column(db.String(255), nullable=True)     # Alternative to name_from_csv
+    # User tracking - NEW FIELD
+    uploaded_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
 
     # Timestamps
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
     # Relationships
-    tenant = db.relationship("Tenant", backref="unassigned_payments", lazy=True)
-    apartment = db.relationship("Apartment", backref="unassigned_payments", lazy=True)
+    matched_tenant = db.relationship('Tenant', backref='potential_payments', lazy='select')
+    matched_apartment = db.relationship('Apartment', backref='potential_payments', lazy='select')
+    uploaded_by = db.relationship('User', backref='uploaded_payments', lazy='select')
 
     def to_dict(self):
         """Convert to dictionary for JSON serialization"""
-        result = {c.name: getattr(self, c.name) for c in self.__table__.columns}
+        result = {
+            'id': self.id,
+            'name_from_csv': self.name_from_csv,
+            'amount': float(self.amount),
+            'payment_date': self.payment_date.isoformat() if self.payment_date else None,
+            'description': self.description,
+            'csv_line': self.csv_line,
+            'sender': self.sender,
+            'reference': self.reference,
+            'matched_tenant_id': self.matched_tenant_id,
+            'matched_apartment_id': self.matched_apartment_id,
+            'similarity_score': self.similarity_score,
+            'status': self.status,
+            'uploaded_by_user_id': self.uploaded_by_user_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
 
-        # Convert date/datetime objects
-        if result.get("payment_date"):
-            result["payment_date"] = result["payment_date"].isoformat()
-        if result.get("processed_at"):
-            result["processed_at"] = result["processed_at"].isoformat()
-        if result.get("created_at"):
-            result["created_at"] = result["created_at"].isoformat()
-        if result.get("updated_at"):
-            result["updated_at"] = result["updated_at"].isoformat()
+        # Add related data if loaded
+        if self.matched_tenant:
+            result['matched_tenant_name'] = self.matched_tenant.name
 
-        # Convert Decimal to float
-        if result.get("amount"):
-            result["amount"] = float(result["amount"])
-        if result.get("similarity_score"):
-            result["similarity_score"] = float(result["similarity_score"])
+        if self.matched_apartment:
+            result['matched_apartment_address'] = self.matched_apartment.address
 
-        # Add tenant info if matched
-        if self.tenant:
-            result["tenant_name"] = self.tenant.name
-            result["tenant_email"] = self.tenant.email
-
-        # Add apartment info if matched
-        if self.apartment:
-            result["apartment_address"] = self.apartment.get_short_address()
+        if self.uploaded_by:
+            result['uploaded_by_username'] = self.uploaded_by.username
 
         return result
 
     def __repr__(self):
-        return f"<UnassignedPayment {self.id}: {self.name_from_csv} - ${self.amount} ({self.status})>"
+        return f"<UnassignedPayment {self.id}: {self.name_from_csv} - €{self.amount} ({self.status})>"

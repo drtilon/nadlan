@@ -1493,6 +1493,89 @@ def reject_previous_payment(payment_id):
     """Reject a previous upload payment - alternative endpoint naming"""
     return reject_payment(payment_id)
 
+@csv_payments_bp.route('/reject-all', methods=['POST'])
+@token_required
+def reject_all_payments():
+    """Reject all unassigned and matched payments matching the provided filters."""
+    try:
+        show_all = request.args.get('show_all', 'false').lower() == 'true'
+        user_id = request.args.get('user_id')
+        current_user = g.user
+
+        # Build query for payments to reject (unassigned or matched)
+        query = UnassignedPayment.query.filter(UnassignedPayment.status.in_(['unassigned', 'matched']))
+
+        # Apply filters based on user role and parameters
+        if not show_all or current_user.get('role') != 'admin':
+            query = query.filter(UnassignedPayment.uploaded_by == current_user.get('id'))
+        elif user_id and user_id != 'legacy':
+            query = query.filter(UnassignedPayment.uploaded_by == user_id)
+
+        # Get payments to reject
+        payments_to_reject = query.all()
+
+        if not payments_to_reject:
+            ActivityLogger.log_activity(
+                action='reject_all_payments',
+                entity_type='csv_payment',
+                entity_id=None,
+                details={
+                    'rejected_count': 0,
+                    'filters': {'show_all': show_all, 'user_id': user_id},
+                    'user_id': current_user.get('id')
+                },
+                status='success'
+            )
+            return jsonify({
+                'success': True,
+                'message': 'No payments to reject',
+                'rejected_count': 0
+            }), 200
+
+        # Reject payments in a transaction
+        rejected_count = 0
+        for payment in payments_to_reject:
+            payment.status = 'rejected'
+            payment.updated_at = datetime.utcnow()
+            rejected_count += 1
+
+        db.session.commit()
+
+        ActivityLogger.log_activity(
+            action='reject_all_payments',
+            entity_type='csv_payment',
+            entity_id=None,
+            details={
+                'rejected_count': rejected_count,
+                'filters': {'show_all': show_all, 'user_id': user_id},
+                'user_id': current_user.get('id'),
+                'username': current_user.get('sub')
+            },
+            status='success'
+        )
+
+        return jsonify({
+            'success': True,
+            'message': f'Successfully rejected {rejected_count} payments',
+            'rejected_count': rejected_count
+        }), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f'Error rejecting all payments: {e}')
+        ActivityLogger.log_activity(
+            action='reject_all_payments',
+            entity_type='csv_payment',
+            entity_id=None,
+            details={
+                'error': str(e),
+                'filters': {'show_all': show_all, 'user_id': user_id},
+                'user_id': current_user.get('id')
+            },
+            status='failed',
+            error=e
+        )
+        return jsonify({'error': f'Failed to reject payments: {str(e)}'}), 500
 
 @csv_payments_bp.route("/previous-uploads/<int:payment_id>/reject", methods=["POST"])
 @token_required

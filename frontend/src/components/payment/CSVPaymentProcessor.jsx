@@ -87,7 +87,7 @@ const CSVPaymentProcessor = () => {
     }
   };
 
-  const loadPreviousUploads = async (pageNum = 0) => {
+  const loadPreviousUploads = async (pageNum = 0, overrideLimit = null) => {
     try {
       setPreviousUploads(prev => ({ ...prev, loading: true }));
 
@@ -100,7 +100,7 @@ const CSVPaymentProcessor = () => {
       // Build query parameters based on filter
       const params = new URLSearchParams({
         page: pageNum.toString(),
-        limit: previousUploads.pagination.limit.toString()
+        limit: (overrideLimit || previousUploads.pagination.limit).toString()
       });
 
       if (adminFilter.selectedUploader === 'all') {
@@ -136,7 +136,7 @@ const CSVPaymentProcessor = () => {
         },
         pagination: data.pagination || {
           page: pageNum,
-          limit: 50,
+          limit: overrideLimit || 50,
           total_items: 0,
           total_pages: 1,
           has_next: false,
@@ -490,6 +490,51 @@ const CSVPaymentProcessor = () => {
     }
   };
 
+  const handleRejectAll = async () => {
+    if (!window.confirm('Are you sure you want to reject all previous payments?')) return;
+
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        alert('Authentication required. Please log in.');
+        return;
+      }
+
+      // Build query parameters to match current filter
+      const params = new URLSearchParams();
+      if (adminFilter.selectedUploader === 'all') {
+        params.append('show_all', 'true');
+      } else if (adminFilter.selectedUploader !== 'own') {
+        params.append('user_id', adminFilter.selectedUploader);
+      }
+
+      const response = await fetch(`/api/csv-payments/reject-all?${params}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.status === 401) {
+        alert('Authentication failed. Please log in again.');
+        return;
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        alert(`Successfully rejected ${data.rejected_count} payments`);
+        loadPreviousUploads(0); // Refresh with default pagination
+      } else {
+        alert(`Error: ${data.error || 'Failed to reject all payments'}`);
+      }
+    } catch (error) {
+      console.error('Failed to reject all payments:', error);
+      alert('Failed to reject all payments. Please try again.');
+    }
+  };
+
   const displayedPreviousPayments = [...previousUploads.unassigned, ...previousUploads.matched];
 
   return (
@@ -620,10 +665,26 @@ const CSVPaymentProcessor = () => {
           boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
           overflow: 'hidden'
         }}>
-          <div style={{ padding: '24px 32px', borderBottom: '1px solid #e2e8f0' }}>
+          <div style={{ padding: '24px 32px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: '#1e293b', margin: 0 }}>
               Previous Uploads
             </h2>
+            {!previousUploads.loading && displayedPreviousPayments.length > 0 && (
+              <button
+                onClick={handleRejectAll}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#ef4444',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: 6,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer'
+                }}
+              >
+                Reject All
+              </button>
+            )}
           </div>
 
           {previousUploads.loading ? (
@@ -723,7 +784,7 @@ const CSVPaymentProcessor = () => {
               padding: '20px 32px',
               borderTop: '1px solid #e2e8f0',
               display: 'flex',
-              justifyContent: 'between',
+              justifyContent: 'space-between',
               alignItems: 'center'
             }}>
               <div style={{ fontSize: '0.9rem', color: '#64748b' }}>

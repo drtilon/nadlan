@@ -1079,3 +1079,98 @@ def get_single_apartment(apartment_id):
 
         traceback.print_exc()
         return jsonify({"error": "Failed to get apartment", "details": str(e)}), 500
+
+
+@apartments_bp.route("apartments/list-with-contracts", methods=["GET"])
+@token_required
+def list_apartments_with_contracts():
+    """
+    List apartments with their contract periods for payment assignment search.
+    This endpoint includes contract_number in the response for search functionality.
+    """
+    try:
+        # Get search parameter
+        search = request.args.get("search", "").strip()
+
+        current_app.logger.info(f"Apartment with contracts request - Search: '{search}'")
+
+        # Start with base query including contract periods
+        query = db.session.query(Apartment).options(
+            joinedload(Apartment.contract_periods)
+        )
+
+        # Apply search filter if provided
+        if search:
+            search_pattern = f"%{search}%"
+
+            # Subquery to find apartments with matching contract numbers
+            contract_subquery = db.session.query(ContractPeriod.apartment_id).filter(
+                ContractPeriod.contract_number.ilike(search_pattern)
+            ).subquery()
+
+            query = query.filter(
+                or_(
+                    Apartment.address.ilike(search_pattern),
+                    Apartment.street_name.ilike(search_pattern),
+                    Apartment.city.ilike(search_pattern),
+                    Apartment.full_address.ilike(search_pattern),
+                    Apartment.id.in_(contract_subquery)  # Search by contract number
+                )
+            )
+
+        # Execute query
+        apartments = query.all()
+
+        # Format response
+        apartments_data = []
+        for apartment in apartments:
+            apt_dict = {
+                "id": apartment.id,
+                "address": apartment.address or apartment.get_short_address(),
+                "street_name": apartment.street_name,
+                "city": apartment.city,
+                "full_address": apartment.full_address,
+                "rent": float(apartment.rent) if apartment.rent else 0.0,
+                "rooms": apartment.rooms,
+                "contract_periods": []
+            }
+
+            # Add contract periods with contract numbers
+            if apartment.contract_periods:
+                for contract in apartment.contract_periods:
+                    contract_dict = {
+                        "id": contract.id,
+                        "contract_number": contract.contract_number,
+                        "start_date": contract.start_date.isoformat() if contract.start_date else None,
+                        "end_date": contract.end_date.isoformat() if contract.end_date else None,
+                        "monthly_rent": float(contract.monthly_rent) if contract.monthly_rent else 0.0,
+                        "status": contract.status
+                    }
+                    apt_dict["contract_periods"].append(contract_dict)
+
+            # Add current tenants info
+            current_tenants = apartment.get_current_tenants()
+            if current_tenants:
+                apt_dict["tenants"] = [
+                    {
+                        "id": tenant.id,
+                        "name": tenant.name
+                    }
+                    for tenant in current_tenants
+                ]
+
+            apartments_data.append(apt_dict)
+
+        return jsonify({
+            "success": True,
+            "apartments": apartments_data,
+            "count": len(apartments_data)
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error listing apartments with contracts: {e}")
+        current_app.logger.error(traceback.format_exc())
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500

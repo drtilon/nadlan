@@ -1060,3 +1060,4 @@ def get_statistics():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+

@@ -161,18 +161,18 @@ def create_app():
             from routes.apartments import apartments_bp
             from routes.tenants import tenants_bp
             from routes.landlords import landlords_bp
-            from routes.adminPanel.user_actions import adminPanel_bp
             from routes.payments import payments_bp
             from routes.analytics import analytics_bp
-            from routes.fast_analytics import fast_analytics_bp  # NEW: Fast analytics
-            from routes.documents import documents_bp
-            from routes.logs import logs_bp
+            from routes.fast_analytics import fast_analytics_bp
             from routes.payment_history import payment_history_bp
+            from routes.documents import documents_bp
             from routes.contracts import contracts_bp
             from routes.contract_templates import contract_templates_bp
-            from routes.health import health_bp
             from routes.contract_periods import contract_periods_bp
+            from routes.logs import logs_bp
             from routes.csv_payments import csv_payments_bp
+            from routes.health import health_bp
+            from routes.adminPanel.user_actions import adminPanel_bp
 
             # Register all blueprints
             app.register_blueprint(contract_periods_bp, url_prefix="/api")

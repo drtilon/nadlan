@@ -229,10 +229,35 @@ const CSVPaymentProcessor = () => {
     }
   };
 
-  const handleUploadClick = () => {
-    if (processing) return;
-    fileInputRef.current?.click();
-  };
+  const filteredTenants = tenants.filter(tenant => {
+    if (!tenantSearchQuery) return false;
+    const query = tenantSearchQuery.toLowerCase();
+    return (
+      tenant.name?.toLowerCase().includes(query) ||
+      tenant.email?.toLowerCase().includes(query) ||
+      tenant.phone?.toLowerCase().includes(query)
+    );
+  });
+
+  const filteredApartments = apartments.filter(apartment => {
+    if (!apartmentSearchQuery) return false;
+    const query = apartmentSearchQuery.toLowerCase();
+
+    // Search by address fields
+    const addressMatch = (
+      apartment.address?.toLowerCase().includes(query) ||
+      apartment.street_name?.toLowerCase().includes(query) ||
+      apartment.city?.toLowerCase().includes(query) ||
+      apartment.full_address?.toLowerCase().includes(query)
+    );
+
+    // Search by contract numbers - check all contract periods for this apartment
+    const contractMatch = apartment.contract_periods?.some(contract =>
+      contract.contract_number?.toLowerCase().includes(query)
+    ) || false;
+
+    return addressMatch || contractMatch;
+  });
 
   const loadTenants = async () => {
     try {
@@ -256,7 +281,8 @@ const CSVPaymentProcessor = () => {
   const loadApartments = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch('/api/list', {
+      // Use the new endpoint that includes contract periods
+      const response = await fetch('/api/apartments/list-with-contracts', {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -272,20 +298,20 @@ const CSVPaymentProcessor = () => {
     }
   };
 
-  const handleAssignTransaction = async (transaction) => {
+  const handleAssignTransaction = async (payment) => {
     await loadTenants();
     await loadApartments();
 
-    const transactionDate = transaction.payment_date || transaction.date || new Date().toISOString().split('T')[0];
+    const transactionDate = payment.payment_date || payment.date || new Date().toISOString().split('T')[0];
 
     setAssignmentDialog({
       open: true,
-      transaction: transaction,
+      transaction: payment,
       selectedTenant: null,
       selectedApartment: null,
-      customAmount: transaction.amount?.toString() || '',
+      customAmount: payment.amount?.toString() || '',
       customDate: transactionDate,
-      notes: transaction.reference || transaction.description || '',
+      notes: payment.reference || payment.description || '',
       paymentMethod: 'bank_transfer'
     });
 
@@ -450,8 +476,8 @@ const CSVPaymentProcessor = () => {
         allPaymentIds = [...allPaymentIds, ...pageIds];
       }
 
-      // Now delete all at once
-      const response = await fetch('/api/csv-payments/reject-multiple', {
+      // Now reject all IDs
+      const deleteResponse = await fetch('/api/csv-payments/reject-multiple', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -460,332 +486,323 @@ const CSVPaymentProcessor = () => {
         body: JSON.stringify({ payment_ids: allPaymentIds })
       });
 
-      if (response.ok) {
-        alert(`Successfully deleted all ${allPaymentIds.length} payments`);
-        loadPreviousUploads();
+      const result = await deleteResponse.json();
+
+      if (result.success) {
+        alert(`Successfully rejected ${result.rejected_count} payment(s).`);
+        loadPreviousUploads(0);
       } else {
-        alert('Failed to delete payments');
+        alert(`Error: ${result.error || 'Failed to reject payments'}`);
       }
     } catch (error) {
-      console.error('Error deleting payments:', error);
-      alert('Failed to delete payments');
+      console.error('Failed to reject all payments:', error);
+      alert('Failed to reject all payments. Please try again.');
     }
   };
 
   const displayedPreviousPayments = [...previousUploads.unassigned, ...previousUploads.matched];
 
-  // Filter tenants based on search query
-  const filteredTenants = tenants.filter(tenant =>
-    tenant.name?.toLowerCase().includes(tenantSearchQuery.toLowerCase()) ||
-    tenant.email?.toLowerCase().includes(tenantSearchQuery.toLowerCase()) ||
-    tenant.phone?.includes(tenantSearchQuery)
-  );
-
-  // Filter apartments based on search query
-  const filteredApartments = apartments.filter(apartment =>
-    apartment.address?.toLowerCase().includes(apartmentSearchQuery.toLowerCase()) ||
-    apartment.street_name?.toLowerCase().includes(apartmentSearchQuery.toLowerCase()) ||
-    apartment.city?.toLowerCase().includes(apartmentSearchQuery.toLowerCase())
-  );
-
   return (
-    <div style={{ padding: '24px', backgroundColor: '#f8fafc', minHeight: '100vh' }}>
-      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-        <h1 style={{ fontSize: '2rem', fontWeight: '700', color: '#1e293b', marginBottom: '32px' }}>
+    <div style={{ padding: '32px', maxWidth: '1600px', margin: '0 auto' }}>
+      {/* Header */}
+      <div style={{ marginBottom: '32px' }}>
+        <h1 style={{ fontSize: '2.5rem', fontWeight: '700', color: '#1e293b', marginBottom: '8px' }}>
           CSV Payment Processor
         </h1>
+        <p style={{ color: '#64748b', fontSize: '1.1rem' }}>
+          Upload and process bank statements automatically
+        </p>
+      </div>
 
-        {/* Upload Section */}
+      {/* File Upload Section */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: 16,
+        padding: '40px',
+        marginBottom: '32px',
+        border: '2px dashed #cbd5e1',
+        textAlign: 'center',
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
+      }}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.txt"
+          onChange={handleFileSelect}
+          style={{ display: 'none' }}
+        />
+
+        <div style={{ fontSize: '3rem', marginBottom: '16px' }}>📄</div>
+
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={processing}
+          style={{
+            padding: '14px 32px',
+            backgroundColor: processing ? '#94a3b8' : '#3b82f6',
+            color: 'white',
+            border: 'none',
+            borderRadius: 12,
+            fontSize: '1rem',
+            fontWeight: '600',
+            cursor: processing ? 'not-allowed' : 'pointer',
+            transition: 'all 0.2s ease'
+          }}
+        >
+          {processing ? 'Processing...' : 'Choose CSV File'}
+        </button>
+
+        <p style={{ marginTop: '12px', color: '#64748b', fontSize: '0.9rem' }}>
+          Supported formats: CSV, TXT (Max 50MB)
+        </p>
+      </div>
+
+      {/* Admin Filter Section */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: 16,
+        padding: '24px',
+        marginBottom: '32px',
+        border: '1px solid #e2e8f0',
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
+      }}>
+        <h3 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#1e293b', marginBottom: '16px' }}>
+          Filter by Uploader
+        </h3>
+
+        <select
+          value={adminFilter.selectedUploader}
+          onChange={(e) => setAdminFilter(prev => ({ ...prev, selectedUploader: e.target.value }))}
+          style={{
+            padding: '12px 16px',
+            border: '2px solid #e2e8f0',
+            borderRadius: 8,
+            fontSize: '1rem',
+            backgroundColor: 'white',
+            minWidth: '300px'
+          }}
+        >
+          <option value="own">My Uploads Only</option>
+          <option value="all">All Uploads (All Users)</option>
+          {adminFilter.uploadersList.map(uploader => (
+            <option key={uploader.user_id || 'legacy'} value={uploader.user_id || 'legacy'}>
+              {uploader.username} ({uploader.upload_count} uploads)
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Summary Statistics */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+        gap: '20px',
+        marginBottom: '32px'
+      }}>
+        {/* Auto-Assigned Box */}
         <div style={{
           backgroundColor: 'white',
-          borderRadius: 16,
-          padding: '32px',
-          marginBottom: '32px',
-          border: '1px solid #e2e8f0',
-          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
-        }}>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: '#1e293b', marginBottom: '16px' }}>
-            Upload New CSV File
-          </h2>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv,.txt"
-            onChange={handleFileSelect}
-            style={{ display: 'none' }}
-          />
-
-          <button
-            onClick={handleUploadClick}
-            disabled={processing}
-            style={{
-              padding: '16px 32px',
-              backgroundColor: processing ? '#94a3b8' : '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: 12,
-              fontSize: '1rem',
-              fontWeight: '600',
-              cursor: processing ? 'not-allowed' : 'pointer',
-              transition: 'all 0.2s ease'
-            }}
-          >
-            {processing ? 'Processing...' : 'Choose CSV File'}
-          </button>
-
-          <p style={{ marginTop: '12px', color: '#64748b', fontSize: '0.9rem' }}>
-            Supported formats: CSV, TXT (Max 50MB)
-          </p>
-        </div>
-
-        {/* Admin Filter Section */}
-        <div style={{
-          backgroundColor: 'white',
-          borderRadius: 16,
           padding: '24px',
-          marginBottom: '32px',
+          borderRadius: 12,
           border: '1px solid #e2e8f0',
           boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
         }}>
-          <h3 style={{ fontSize: '1.25rem', fontWeight: '600', color: '#1e293b', marginBottom: '16px' }}>
-            Filter by Uploader
+          <h3 style={{
+            fontSize: '0.9rem',
+            fontWeight: '600',
+            color: '#64748b',
+            textTransform: 'uppercase',
+            marginBottom: '8px'
+          }}>
+            ✅ Auto-Assigned
           </h3>
-
-          <select
-            value={adminFilter.selectedUploader}
-            onChange={(e) => setAdminFilter(prev => ({ ...prev, selectedUploader: e.target.value }))}
-            style={{
-              padding: '12px 16px',
-              border: '2px solid #e2e8f0',
-              borderRadius: 8,
-              fontSize: '1rem',
-              backgroundColor: 'white',
-              minWidth: '300px'
-            }}
-          >
-            <option value="own">My Uploads Only</option>
-            <option value="all">All Uploads (All Users)</option>
-            {adminFilter.uploadersList.map(uploader => (
-              <option key={uploader.user_id || 'legacy'} value={uploader.user_id || 'legacy'}>
-                {uploader.username} ({uploader.total_uploads} uploads)
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Summary Statistics - SIMPLIFIED */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-          gap: '20px',
-          marginBottom: '32px'
-        }}>
-          {/* Auto-Assigned Box */}
-          <div style={{
-            backgroundColor: 'white',
-            padding: '24px',
-            borderRadius: 12,
-            border: '1px solid #e2e8f0',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
-          }}>
-            <h3 style={{
-              fontSize: '0.9rem',
-              fontWeight: '600',
-              color: '#64748b',
-              textTransform: 'uppercase',
-              marginBottom: '8px'
-            }}>
-              ✅ Auto-Assigned
-            </h3>
-            <div style={{ fontSize: '2rem', fontWeight: '700', color: '#1e293b', marginBottom: '4px' }}>
-              {previousUploads.summary.assigned.count + previousUploads.summary.matched.count}
-            </div>
-            <div style={{ fontSize: '1rem', color: '#059669', fontWeight: '600' }}>
-              €{(Number(previousUploads.summary.assigned.total_amount) + Number(previousUploads.summary.matched.total_amount)).toFixed(2)}
-            </div>
+          <div style={{ fontSize: '2rem', fontWeight: '700', color: '#1e293b', marginBottom: '4px' }}>
+            {previousUploads.summary.assigned.count + previousUploads.summary.matched.count}
           </div>
-
-          {/* Manual Review Box */}
-          <div style={{
-            backgroundColor: 'white',
-            padding: '24px',
-            borderRadius: 12,
-            border: '1px solid #e2e8f0',
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
-          }}>
-            <h3 style={{
-              fontSize: '0.9rem',
-              fontWeight: '600',
-              color: '#64748b',
-              textTransform: 'uppercase',
-              marginBottom: '8px'
-            }}>
-              ⚠️ Needs Manual Review
-            </h3>
-            <div style={{ fontSize: '2rem', fontWeight: '700', color: '#1e293b', marginBottom: '4px' }}>
-              {previousUploads.summary.unassigned.count}
-            </div>
-            <div style={{ fontSize: '1rem', color: '#f59e0b', fontWeight: '600' }}>
-              €{Number(previousUploads.summary.unassigned.total_amount).toFixed(2)}
-            </div>
+          <div style={{ fontSize: '1rem', color: '#059669', fontWeight: '600' }}>
+            €{(Number(previousUploads.summary.assigned.total_amount) + Number(previousUploads.summary.matched.total_amount)).toFixed(2)}
           </div>
         </div>
 
-        {/* Previous Uploads Table */}
+        {/* Manual Review Box */}
         <div style={{
           backgroundColor: 'white',
-          borderRadius: 16,
+          padding: '24px',
+          borderRadius: 12,
           border: '1px solid #e2e8f0',
-          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
-          overflow: 'hidden'
+          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)'
         }}>
-          <div style={{ padding: '24px 32px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: '#1e293b', margin: 0 }}>
-              Previous Uploads
-            </h2>
-            <button
-              onClick={handleRejectAll}
-              disabled={displayedPreviousPayments.length === 0}
-              style={{
-                padding: '10px 20px',
-                backgroundColor: displayedPreviousPayments.length === 0 ? '#e2e8f0' : '#ef4444',
-                color: 'white',
-                border: 'none',
-                borderRadius: 8,
-                fontSize: '0.9rem',
-                fontWeight: '600',
-                cursor: displayedPreviousPayments.length === 0 ? 'not-allowed' : 'pointer',
-                transition: 'all 0.2s ease'
-              }}
-            >
-              🗑️ Reject All
-            </button>
+          <h3 style={{
+            fontSize: '0.9rem',
+            fontWeight: '600',
+            color: '#64748b',
+            textTransform: 'uppercase',
+            marginBottom: '8px'
+          }}>
+            ⚠️ Needs Manual Review
+          </h3>
+          <div style={{ fontSize: '2rem', fontWeight: '700', color: '#1e293b', marginBottom: '4px' }}>
+            {previousUploads.summary.unassigned.count}
           </div>
-
-          {previousUploads.loading ? (
-            <div style={{ padding: '48px', textAlign: 'center', color: '#64748b' }}>
-              Loading payments...
-            </div>
-          ) : displayedPreviousPayments.length === 0 ? (
-            <div style={{ padding: '48px', textAlign: 'center', color: '#64748b' }}>
-              No payments found for the selected filter.
-            </div>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead style={{ backgroundColor: '#f8fafc' }}>
-                  <tr>
-                    <th style={{ padding: '16px 12px', textAlign: 'left', fontWeight: '600', color: '#374151' }}>Date</th>
-                    <th style={{ padding: '16px 12px', textAlign: 'left', fontWeight: '600', color: '#374151' }}>Name from CSV</th>
-                    <th style={{ padding: '16px 12px', textAlign: 'right', fontWeight: '600', color: '#374151' }}>Amount</th>
-                    <th style={{ padding: '16px 12px', textAlign: 'left', fontWeight: '600', color: '#374151' }}>Description</th>
-                    <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600', color: '#374151' }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayedPreviousPayments.map((payment) => (
-                    <tr key={payment.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
-                      <td style={{ padding: '16px 12px', fontSize: '0.9rem' }}>
-                        {payment.payment_date ? new Date(payment.payment_date).toLocaleDateString() : 'N/A'}
-                      </td>
-                      <td style={{ padding: '16px 12px', fontWeight: '500' }}>
-                        {payment.name_from_csv}
-                      </td>
-                      <td style={{ padding: '16px 12px', textAlign: 'right', fontWeight: '600', color: '#059669' }}>
-                        €{Number(payment.amount).toFixed(2)}
-                      </td>
-                      <td style={{ padding: '16px 12px', fontSize: '0.9rem', color: '#64748b' }}>
-                        {payment.description || '-'}
-                      </td>
-                      <td style={{ padding: '16px 12px', textAlign: 'center' }}>
-                        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-                          <button
-                            onClick={() => handleAssignTransaction(payment)}
-                            style={{
-                              padding: '6px 12px',
-                              backgroundColor: '#3b82f6',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: 6,
-                              fontSize: '0.8rem',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            Assign
-                          </button>
-                          <button
-                            onClick={() => handleRejectPreviousPayment(payment)}
-                            style={{
-                              padding: '6px 12px',
-                              backgroundColor: '#ef4444',
-                              color: 'white',
-                              border: 'none',
-                              borderRadius: 6,
-                              fontSize: '0.8rem',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Pagination */}
-          {previousUploads.pagination.total_pages > 1 && (
-            <div style={{
-              padding: '20px 32px',
-              borderTop: '1px solid #e2e8f0',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
-              <div style={{ fontSize: '0.9rem', color: '#64748b' }}>
-                Page {previousUploads.pagination.page + 1} of {previousUploads.pagination.total_pages}
-                ({previousUploads.pagination.total_items} total items)
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button
-                  onClick={() => loadPreviousUploads(previousUploads.pagination.page - 1)}
-                  disabled={!previousUploads.pagination.has_prev}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: previousUploads.pagination.has_prev ? '#3b82f6' : '#e2e8f0',
-                    color: previousUploads.pagination.has_prev ? 'white' : '#94a3b8',
-                    border: 'none',
-                    borderRadius: 6,
-                    cursor: previousUploads.pagination.has_prev ? 'pointer' : 'not-allowed'
-                  }}
-                >
-                  Previous
-                </button>
-                <button
-                  onClick={() => loadPreviousUploads(previousUploads.pagination.page + 1)}
-                  disabled={!previousUploads.pagination.has_next}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: previousUploads.pagination.has_next ? '#3b82f6' : '#e2e8f0',
-                    color: previousUploads.pagination.has_next ? 'white' : '#94a3b8',
-                    border: 'none',
-                    borderRadius: 6,
-                    cursor: previousUploads.pagination.has_next ? 'pointer' : 'not-allowed'
-                  }}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
+          <div style={{ fontSize: '1rem', color: '#f59e0b', fontWeight: '600' }}>
+            €{Number(previousUploads.summary.unassigned.total_amount).toFixed(2)}
+          </div>
         </div>
       </div>
 
-      {/* Assignment Dialog - WIDER WITH SEARCH */}
+      {/* Previous Uploads Table */}
+      <div style={{
+        backgroundColor: 'white',
+        borderRadius: 16,
+        border: '1px solid #e2e8f0',
+        boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+        overflow: 'hidden'
+      }}>
+        <div style={{ padding: '24px 32px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 style={{ fontSize: '1.5rem', fontWeight: '600', color: '#1e293b', margin: 0 }}>
+            Previous Uploads
+          </h2>
+          <button
+            onClick={handleRejectAll}
+            disabled={displayedPreviousPayments.length === 0}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: displayedPreviousPayments.length === 0 ? '#e2e8f0' : '#ef4444',
+              color: 'white',
+              border: 'none',
+              borderRadius: 8,
+              fontSize: '0.9rem',
+              fontWeight: '600',
+              cursor: displayedPreviousPayments.length === 0 ? 'not-allowed' : 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            🗑️ Reject All
+          </button>
+        </div>
+
+        {previousUploads.loading ? (
+          <div style={{ padding: '48px', textAlign: 'center', color: '#64748b' }}>
+            Loading payments...
+          </div>
+        ) : displayedPreviousPayments.length === 0 ? (
+          <div style={{ padding: '48px', textAlign: 'center', color: '#64748b' }}>
+            No payments found for the selected filter.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead style={{ backgroundColor: '#f8fafc' }}>
+                <tr>
+                  <th style={{ padding: '16px 12px', textAlign: 'left', fontWeight: '600', color: '#374151' }}>Date</th>
+                  <th style={{ padding: '16px 12px', textAlign: 'left', fontWeight: '600', color: '#374151' }}>Name from CSV</th>
+                  <th style={{ padding: '16px 12px', textAlign: 'right', fontWeight: '600', color: '#374151' }}>Amount</th>
+                  <th style={{ padding: '16px 12px', textAlign: 'left', fontWeight: '600', color: '#374151' }}>Description</th>
+                  <th style={{ padding: '16px 12px', textAlign: 'center', fontWeight: '600', color: '#374151' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayedPreviousPayments.map((payment) => (
+                  <tr key={payment.id} style={{ borderBottom: '1px solid #e2e8f0' }}>
+                    <td style={{ padding: '16px 12px', fontSize: '0.9rem' }}>
+                      {payment.payment_date ? new Date(payment.payment_date).toLocaleDateString() : 'N/A'}
+                    </td>
+                    <td style={{ padding: '16px 12px', fontWeight: '500' }}>
+                      {payment.name_from_csv}
+                    </td>
+                    <td style={{ padding: '16px 12px', textAlign: 'right', fontWeight: '600', color: '#059669' }}>
+                      €{Number(payment.amount).toFixed(2)}
+                    </td>
+                    <td style={{ padding: '16px 12px', fontSize: '0.9rem', color: '#64748b' }}>
+                      {payment.description || '-'}
+                    </td>
+                    <td style={{ padding: '16px 12px', textAlign: 'center' }}>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
+                        <button
+                          onClick={() => handleAssignTransaction(payment)}
+                          style={{
+                            padding: '6px 12px',
+                            backgroundColor: '#3b82f6',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: 6,
+                            fontSize: '0.8rem',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Assign
+                        </button>
+                        <button
+                          onClick={() => handleRejectPreviousPayment(payment)}
+                          style={{
+                            padding: '6px 12px',
+                            backgroundColor: '#ef4444',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: 6,
+                            fontSize: '0.8rem',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Pagination */}
+        {previousUploads.pagination.total_pages > 1 && (
+          <div style={{
+            padding: '20px 32px',
+            borderTop: '1px solid #e2e8f0',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center'
+          }}>
+            <div style={{ fontSize: '0.9rem', color: '#64748b' }}>
+              Page {previousUploads.pagination.page + 1} of {previousUploads.pagination.total_pages}
+              ({previousUploads.pagination.total_items} total items)
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => loadPreviousUploads(previousUploads.pagination.page - 1)}
+                disabled={!previousUploads.pagination.has_prev}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: previousUploads.pagination.has_prev ? '#3b82f6' : '#e2e8f0',
+                  color: previousUploads.pagination.has_prev ? 'white' : '#94a3b8',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: previousUploads.pagination.has_prev ? 'pointer' : 'not-allowed'
+                }}
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => loadPreviousUploads(previousUploads.pagination.page + 1)}
+                disabled={!previousUploads.pagination.has_next}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: previousUploads.pagination.has_next ? '#3b82f6' : '#e2e8f0',
+                  color: previousUploads.pagination.has_next ? 'white' : '#94a3b8',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: previousUploads.pagination.has_next ? 'pointer' : 'not-allowed'
+                }}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Assignment Dialog */}
       {assignmentDialog.open && (
         <div style={{
           position: 'fixed',
@@ -923,13 +940,14 @@ const CSVPaymentProcessor = () => {
                     >
                       <div style={{ fontWeight: '500', color: '#1e293b' }}>{tenant.name}</div>
                       {tenant.email && (
-                        <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '2px' }}>
+                        <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '4px' }}>
                           {tenant.email}
+                          {tenant.phone && ` • ${tenant.phone}`}
                         </div>
                       )}
                       {tenant.current_contracts && tenant.current_contracts.length > 0 && (
                         <div style={{ fontSize: '0.8rem', color: '#059669', marginTop: '4px' }}>
-                          📍 {tenant.current_contracts[0].apartment_address}
+                          Current: {tenant.current_contracts[0].apartment_address}
                         </div>
                       )}
                     </div>
@@ -960,7 +978,7 @@ const CSVPaymentProcessor = () => {
                 type="text"
                 value={apartmentSearchQuery}
                 onChange={(e) => setApartmentSearchQuery(e.target.value)}
-                placeholder="Type to search by address, street, or city..."
+                placeholder="Type to search by address, street, city, or contract name..."
                 style={{
                   width: '100%',
                   padding: '12px 16px',
@@ -989,6 +1007,15 @@ const CSVPaymentProcessor = () => {
                     <div style={{ fontSize: '0.85rem', color: '#1e40af', marginTop: '4px' }}>
                       €{assignmentDialog.selectedApartment.rent}/month • {assignmentDialog.selectedApartment.rooms} rooms
                     </div>
+                    {assignmentDialog.selectedApartment.contract_periods &&
+                     assignmentDialog.selectedApartment.contract_periods.length > 0 && (
+                      <div style={{ fontSize: '0.8rem', color: '#1e40af', marginTop: '4px' }}>
+                        Contract: {assignmentDialog.selectedApartment.contract_periods
+                          .filter(c => c.status === 'active')
+                          .map(c => c.contract_number)
+                          .join(', ')}
+                      </div>
+                    )}
                   </div>
                   <button
                     onClick={() => {
@@ -1043,6 +1070,14 @@ const CSVPaymentProcessor = () => {
                           </span>
                         )}
                       </div>
+                      {apartment.contract_periods && apartment.contract_periods.length > 0 && (
+                        <div style={{ fontSize: '0.8rem', color: '#7c3aed', marginTop: '4px' }}>
+                          Contracts: {apartment.contract_periods
+                            .filter(c => c.status === 'active')
+                            .map(c => c.contract_number)
+                            .join(', ') || 'None active'}
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1062,45 +1097,46 @@ const CSVPaymentProcessor = () => {
               )}
             </div>
 
-            {/* Amount and Date */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>
-                  Amount (€) *
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={assignmentDialog.customAmount}
-                  onChange={(e) => setAssignmentDialog(prev => ({ ...prev, customAmount: e.target.value }))}
-                  style={{
-                    width: '100%',
-                    padding: '12px 16px',
-                    border: '2px solid #e2e8f0',
-                    borderRadius: 8,
-                    fontSize: '1rem',
-                    outline: 'none'
-                  }}
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>
-                  Payment Date *
-                </label>
-                <input
-                  type="date"
-                  value={assignmentDialog.customDate}
-                  onChange={(e) => setAssignmentDialog(prev => ({ ...prev, customDate: e.target.value }))}
-                  style={{
-                    width: '100%',
-                    padding: '12px 16px',
-                    border: '2px solid #e2e8f0',
-                    borderRadius: 8,
-                    fontSize: '1rem',
-                    outline: 'none'
-                  }}
-                />
-              </div>
+            {/* Amount */}
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>
+                Payment Amount *
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={assignmentDialog.customAmount}
+                onChange={(e) => setAssignmentDialog(prev => ({ ...prev, customAmount: e.target.value }))}
+                placeholder="Enter amount"
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  border: '2px solid #e2e8f0',
+                  borderRadius: 8,
+                  fontSize: '1rem',
+                  outline: 'none'
+                }}
+              />
+            </div>
+
+            {/* Payment Date */}
+            <div style={{ marginBottom: '24px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>
+                Payment Date *
+              </label>
+              <input
+                type="date"
+                value={assignmentDialog.customDate}
+                onChange={(e) => setAssignmentDialog(prev => ({ ...prev, customDate: e.target.value }))}
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  border: '2px solid #e2e8f0',
+                  borderRadius: 8,
+                  fontSize: '1rem',
+                  outline: 'none'
+                }}
+              />
             </div>
 
             {/* Payment Method */}
@@ -1117,26 +1153,25 @@ const CSVPaymentProcessor = () => {
                   border: '2px solid #e2e8f0',
                   borderRadius: 8,
                   fontSize: '1rem',
-                  outline: 'none',
-                  backgroundColor: 'white',
-                  cursor: 'pointer'
+                  outline: 'none'
                 }}
               >
                 <option value="bank_transfer">Bank Transfer</option>
                 <option value="cash">Cash</option>
-                <option value="card">Card</option>
-                <option value="other">Other</option>
+                <option value="check">Check</option>
+                <option value="credit_card">Credit Card</option>
               </select>
             </div>
 
             {/* Notes */}
-            <div style={{ marginBottom: '32px' }}>
+            <div style={{ marginBottom: '24px' }}>
               <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>
                 Notes
               </label>
               <textarea
                 value={assignmentDialog.notes}
                 onChange={(e) => setAssignmentDialog(prev => ({ ...prev, notes: e.target.value }))}
+                placeholder="Add any additional notes..."
                 rows={3}
                 style={{
                   width: '100%',
@@ -1150,26 +1185,31 @@ const CSVPaymentProcessor = () => {
               />
             </div>
 
-            {/* Dialog Actions */}
+            {/* Action Buttons */}
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
               <button
-                onClick={() => setAssignmentDialog({
-                  open: false,
-                  transaction: null,
-                  selectedTenant: null,
-                  selectedApartment: null,
-                  customAmount: '',
-                  customDate: '',
-                  notes: '',
-                  paymentMethod: 'bank_transfer'
-                })}
+                onClick={() => {
+                  setAssignmentDialog({
+                    open: false,
+                    transaction: null,
+                    selectedTenant: null,
+                    selectedApartment: null,
+                    customAmount: '',
+                    customDate: '',
+                    notes: '',
+                    paymentMethod: 'bank_transfer'
+                  });
+                  setTenantSearchQuery('');
+                  setApartmentSearchQuery('');
+                }}
                 style={{
                   padding: '12px 24px',
-                  backgroundColor: '#e2e8f0',
-                  color: '#64748b',
+                  backgroundColor: '#e5e7eb',
+                  color: '#374151',
                   border: 'none',
-                  borderRadius: 8,
+                  borderRadius: '8px',
                   fontSize: '1rem',
+                  fontWeight: '500',
                   cursor: 'pointer'
                 }}
               >
@@ -1179,12 +1219,12 @@ const CSVPaymentProcessor = () => {
                 onClick={handleAssignmentSubmit}
                 style={{
                   padding: '12px 24px',
-                  backgroundColor: '#059669',
+                  backgroundColor: '#3b82f6',
                   color: 'white',
                   border: 'none',
-                  borderRadius: 8,
+                  borderRadius: '8px',
                   fontSize: '1rem',
-                  fontWeight: '600',
+                  fontWeight: '500',
                   cursor: 'pointer'
                 }}
               >

@@ -3,7 +3,7 @@ import json
 import sys
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta, date
 from flask import Blueprint, request, jsonify, current_app, g
 from werkzeug.utils import secure_filename
 from .auth import token_required, role_required
@@ -14,16 +14,16 @@ from models.models import (
     UnassignedPayment,
     ContractTenant,
     ContractPeriod,
+    User,
 )
 from extentions import db
-from openai import OpenAI
 from activity_logger import ActivityLogger
 from sqlalchemy import func, desc, case
 from difflib import SequenceMatcher
 import pandas as pd
 from io import StringIO
 
-# Set up basic logging (as fallback)
+# Set up basic logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - CSV_PROCESSOR - %(levelname)s - %(message)s",
@@ -31,25 +31,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Configuration
-XAI_API_KEY = os.environ.get("XAI_API_KEY")
-
-
-def get_grok_client():
-    """Get Grok client using X.AI API"""
-    if not XAI_API_KEY:
-        return None
-    return OpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1")
-
-
 # Define blueprint
 csv_payments_bp = Blueprint("csv_payments", __name__, url_prefix="/api/csv-payments")
+
+ALLOWED_EXTENSIONS = {"csv", "txt"}
 
 
 def log_csv_activity(action, details, success=True, error=None):
     """Log CSV payment activities using standard format"""
-    from activity_logger import ActivityLogger
-
     ActivityLogger.log_activity(
         action=action,
         entity_type="csv_payment",
@@ -62,231 +51,392 @@ def log_csv_activity(action, details, success=True, error=None):
 
 def allowed_file(filename):
     """Check if file extension is allowed"""
-    ALLOWED_EXTENSIONS = {"csv", "txt"}
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def find_column_by_keywords(headers, keywords):
+    """Find column index by matching keywords (case insensitive)"""
+    headers_lower = [str(h).lower().strip() for h in headers]
+
+    for keyword in keywords:
+        keyword_lower = keyword.lower()
+        for i, header in enumerate(headers_lower):
+            if keyword_lower in header:
+                return i
+    return -1
+
+
+def detect_delimiter(line):
+    """Detect delimiter from a line"""
+    semicolon_count = line.count(';')
+    comma_count = line.count(',')
+    tab_count = line.count('\t')
+    pipe_count = line.count('|')
+
+    counts = {
+        ';': semicolon_count,
+        ',': comma_count,
+        '\t': tab_count,
+        '|': pipe_count
+    }
+
+    delimiter = max(counts, key=counts.get)
+    return delimiter if counts[delimiter] > 0 else ','
+
+
+def find_header_row(lines):
+    """Find the header row by looking for date/amount/name keywords"""
+    date_keywords = ['datum', 'date', 'buchung', 'beleg', 'wert', 'tag']
+    amount_keywords = ['betrag', 'amount', 'soll', 'haben']
+    name_keywords = ['name', 'empfänger', 'auftraggeber', 'beschreibung', 'zahlungs', 'begünstig']
+
+    for line_num, line in enumerate(lines[:15]):
+        if not line.strip():
+            continue
+
+        line_lower = line.lower()
+
+        # Check if line contains keywords from all three categories
+        has_date = any(kw in line_lower for kw in date_keywords)
+        has_amount = any(kw in line_lower for kw in amount_keywords)
+        has_name = any(kw in line_lower for kw in name_keywords)
+
+        if has_date and has_amount and has_name:
+            return line_num
+
+    return 0  # Default to first line if not found
+
+
 def parse_date_from_string(date_str):
-    """Enhanced date parsing that handles various European date formats"""
+    """Enhanced date parsing for multiple formats"""
     if not date_str or pd.isna(date_str):
         return None
 
-    # Convert to string and clean
     date_str = str(date_str).strip()
 
-    if not date_str or date_str.lower() in ["nan", "n/a", "none", ""]:
-        return None
+    # Try ISO format first (YYYY-MM-DD or with time)
+    if 'T' in date_str or (len(date_str) >= 10 and '-' in date_str and date_str[4] == '-'):
+        try:
+            return datetime.fromisoformat(date_str.replace('Z', '+00:00')).date()
+        except:
+            pass
 
-    # Common European date formats to try
-    date_formats = [
-        "%d.%m.%Y",  # German: 31.12.2024
-        "%d/%m/%Y",  # European: 31/12/2024
-        "%d-%m-%Y",  # Dash: 31-12-2024
-        "%Y-%m-%d",  # ISO: 2024-12-31
-        "%d.%m.%y",  # Short year: 31.12.24
-        "%d/%m/%y",  # Short year: 31/12/24
-        "%d-%m-%y",  # Short year: 31-12-24
-        "%m/%d/%Y",  # US format: 12/31/2024
-        "%Y/%m/%d",  # Alternative ISO: 2024/12/31
-        "%d %m %Y",  # Space separated: 31 12 2024
-        "%d %b %Y",  # Month name: 31 Dec 2024
-        "%d %B %Y",  # Full month: 31 December 2024
-        "%b %d, %Y",  # US style: Dec 31, 2024
-        "%B %d, %Y",  # US style full: December 31, 2024
+    # Try German formats: DD.MM.YYYY or DD.MM.YY
+    date_patterns = [
+        r'(\d{1,2})\.(\d{1,2})\.(\d{4})',  # DD.MM.YYYY
+        r'(\d{1,2})\.(\d{1,2})\.(\d{2})',   # DD.MM.YY
+        r'(\d{4})-(\d{1,2})-(\d{1,2})',     # YYYY-MM-DD
+        r'(\d{1,2})/(\d{1,2})/(\d{4})',     # DD/MM/YYYY or MM/DD/YYYY
     ]
 
-    for fmt in date_formats:
-        try:
-            parsed_date = datetime.strptime(date_str, fmt)
-            # Validate reasonable date range (not too far in past/future)
-            current_year = datetime.now().year
-            if 1900 <= parsed_date.year <= current_year + 10:
-                return parsed_date.date()
-        except ValueError:
-            continue
+    for pattern in date_patterns:
+        match = re.search(pattern, date_str)
+        if match:
+            try:
+                if '.' in date_str:
+                    # German format DD.MM.YYYY or DD.MM.YY
+                    day, month, year = match.groups()
+                    if len(year) == 2:
+                        year = '20' + year
+                    return date(int(year), int(month), int(day))
+                elif date_str[4] == '-':
+                    # ISO format YYYY-MM-DD
+                    year, month, day = match.groups()
+                    return date(int(year), int(month), int(day))
+                else:
+                    # Ambiguous slash format - assume DD/MM/YYYY
+                    day, month, year = match.groups()
+                    return date(int(year), int(month), int(day))
+            except ValueError:
+                continue
 
-    # Try pandas date parsing as fallback
-    try:
-        parsed = pd.to_datetime(date_str, dayfirst=True, errors="coerce")
-        if not pd.isna(parsed):
-            return parsed.date()
-    except:
-        pass
-
-    log_csv_activity(action="parse_date_failed", details={"date_string": date_str})
     return None
 
 
 def parse_amount_from_string(amount_str):
-    """Enhanced amount parsing for various European formats"""
+    """Parse amount from string, handling German number format"""
     if not amount_str or pd.isna(amount_str):
         return 0.0
 
-    # Convert to string and clean
     amount_str = str(amount_str).strip()
 
-    if not amount_str or amount_str.lower() in ["nan", "n/a", "none", ""]:
-        return 0.0
+    # Remove currency symbols
+    amount_str = amount_str.replace('€', '').replace('EUR', '').replace('$', '').strip()
 
-    # Remove currency symbols and spaces
-    amount_str = re.sub(r"[€$£¥₹]", "", amount_str)
-    amount_str = re.sub(r"\s+", "", amount_str)
+    # Handle German number format: 1.234,56 -> 1234.56
+    # Count dots and commas
+    dot_count = amount_str.count('.')
+    comma_count = amount_str.count(',')
 
-    # Handle different decimal separators and thousand separators
-    if "," in amount_str and "." in amount_str:
-        # Both comma and dot present
-        comma_pos = amount_str.rfind(",")
-        dot_pos = amount_str.rfind(".")
-
-        if comma_pos > dot_pos:
-            # European: 1.234,56
-            amount_str = amount_str.replace(".", "").replace(",", ".")
+    if comma_count > 0 and dot_count > 0:
+        # Has both: German format (1.234,56)
+        amount_str = amount_str.replace('.', '').replace(',', '.')
+    elif comma_count > 0:
+        # Only comma: could be decimal separator
+        # If comma is not in last 3 positions, it's thousands separator
+        comma_pos = amount_str.rfind(',')
+        if len(amount_str) - comma_pos - 1 <= 2:
+            # Likely decimal separator
+            amount_str = amount_str.replace(',', '.')
         else:
-            # US: 1,234.56
-            amount_str = amount_str.replace(",", "")
-    elif "," in amount_str:
-        # Only comma - could be decimal separator in European format
-        if len(amount_str.split(",")[-1]) <= 2:
-            # Likely decimal separator: 1234,56
-            amount_str = amount_str.replace(",", ".")
-        else:
-            # Likely thousand separator: 1,234
-            amount_str = amount_str.replace(",", "")
+            # Thousands separator
+            amount_str = amount_str.replace(',', '')
+    elif dot_count > 1:
+        # Multiple dots: thousands separator (1.234.567)
+        amount_str = amount_str.replace('.', '')
+    elif dot_count == 1:
+        # Single dot: check if it's thousands or decimal
+        parts = amount_str.split('.')
+        if len(parts) == 2:
+            after_dot = parts[1]
+            if len(after_dot) == 3:
+                # Likely thousands separator (1.234)
+                amount_str = amount_str.replace('.', '')
+            elif len(after_dot) <= 2:
+                # Could be decimal
+                pass
 
-    # Handle negative amounts (could be in parentheses or with minus)
-    is_negative = False
-    if amount_str.startswith("(") and amount_str.endswith(")"):
-        is_negative = True
-        amount_str = amount_str[1:-1]
-    elif amount_str.startswith("-"):
-        is_negative = True
-        amount_str = amount_str[1:]
-
-    # Remove any remaining non-numeric characters except decimal point
-    amount_str = re.sub(r"[^\d.]", "", amount_str)
+    # Remove any remaining non-numeric characters except minus and dot
+    amount_str = re.sub(r'[^\d.-]', '', amount_str)
 
     try:
-        amount = float(amount_str)
-        if is_negative:
-            amount = -amount
-        return abs(amount)  # We usually want positive amounts for rent payments
+        return float(amount_str)
     except ValueError:
-        log_csv_activity(
-            action="parse_amount_failed", details={"amount_string": amount_str}
-        )
         return 0.0
 
 
-def create_unassigned_payments_table():
-    """Create the unassigned_payments table if it doesn't exist and add user tracking column"""
+def process_csv_content(file_content):
+    """Process CSV by finding: sender, date, amount, notes columns"""
     try:
-        db.create_all()
+        lines = file_content.split('\n')
+
+        # Find header row
+        header_line = find_header_row(lines)
+
+        if header_line >= len(lines):
+            return {"error": "Could not find header row in CSV"}
+
+        # Detect delimiter
+        delimiter = detect_delimiter(lines[header_line])
+
         log_csv_activity(
-            action="create_table", details={"table": "unassigned_payments"}
+            action="csv_structure_detected",
+            details={
+                "header_line": header_line,
+                "delimiter": delimiter
+            }
         )
 
-        # Add uploaded_by_user_id column if it doesn't exist
+        # Read CSV starting from header line
+        data_lines = '\n'.join(lines[header_line:])
+
         try:
-            db.session.execute(
-                "ALTER TABLE unassigned_payments ADD COLUMN uploaded_by_user_id INTEGER"
+            df = pd.read_csv(
+                StringIO(data_lines),
+                delimiter=delimiter,
+                dtype=str,
+                skip_blank_lines=True
             )
-            db.session.commit()
+
+            # Clean column names
+            df.columns = df.columns.str.strip()
+            headers = list(df.columns)
+
             log_csv_activity(
-                action="add_column",
+                action="csv_read",
                 details={
-                    "table": "unassigned_payments",
-                    "column": "uploaded_by_user_id",
-                },
+                    "rows": df.shape[0],
+                    "columns": df.shape[1],
+                    "headers": headers
+                }
             )
-
-            # Assign existing records to admin user
-            admin_user = db.session.execute(
-                "SELECT id FROM users WHERE username = 'admin' OR role = 'admin' LIMIT 1"
-            ).fetchone()
-
-            if admin_user:
-                admin_id = admin_user[0]
-                result = db.session.execute(
-                    "UPDATE unassigned_payments SET uploaded_by_user_id = :admin_id WHERE uploaded_by_user_id IS NULL",
-                    {"admin_id": admin_id},
-                )
-                db.session.commit()
-                log_csv_activity(
-                    action="assign_existing_payments",
-                    details={"admin_id": admin_id, "updated_rows": result.rowcount},
-                )
-            else:
-                log_csv_activity(
-                    action="no_admin_user",
-                    details={
-                        "message": "No admin user found - existing payments will remain unassigned"
-                    },
-                )
 
         except Exception as e:
-            if "Duplicate column name" in str(e) or "already exists" in str(e):
-                log_csv_activity(
-                    action="column_exists", details={"column": "uploaded_by_user_id"}
-                )
-            else:
-                log_csv_activity(
-                    action="add_column_failed",
-                    details={"column": "uploaded_by_user_id", "error": str(e)},
-                    success=False,
-                )
-            db.session.rollback()
-    except Exception as e:
+            log_csv_activity(
+                action="csv_read_failed",
+                details={"error": str(e)},
+                success=False
+            )
+            return {"error": f"Failed to read CSV: {str(e)}"}
+
+        # Find columns by keywords
+        date_keywords = ['datum', 'date', 'buchung', 'beleg', 'wert', 'buchungstag', 'tag']
+
+        # For sender: prefer payer columns for incoming
+        sender_keywords = [
+            'zahlungspflichtige', 'auftraggeber', 'sender', 'payer',
+            'zahlungsempfänger', 'empfänger', 'begünstigter', 'payee',
+            'beschreibung', 'name'
+        ]
+
+        # For amount: look for amount column, or soll/haben columns
+        amount_keywords = ['betrag', 'amount']
+        soll_keywords = ['soll', 'debit']
+        haben_keywords = ['haben', 'credit']
+
+        notes_keywords = ['verwendungszweck', 'zweck', 'reference', 'beschreibung', 'memo', 'notiz', 'description']
+
+        date_col = find_column_by_keywords(headers, date_keywords)
+        sender_col = find_column_by_keywords(headers, sender_keywords)
+        amount_col = find_column_by_keywords(headers, amount_keywords)
+        soll_col = find_column_by_keywords(headers, soll_keywords)
+        haben_col = find_column_by_keywords(headers, haben_keywords)
+        notes_col = find_column_by_keywords(headers, notes_keywords)
+
         log_csv_activity(
-            action="create_table_failed",
-            details={"table": "unassigned_payments", "error": str(e)},
-            success=False,
+            action="columns_identified",
+            details={
+                "date_column": date_col,
+                "sender_column": sender_col,
+                "amount_column": amount_col,
+                "soll_column": soll_col,
+                "haben_column": haben_col,
+                "notes_column": notes_col
+            }
         )
 
+        # Validate required columns
+        if date_col == -1:
+            return {"error": "Could not find date column. Expected headers like: Datum, Date, Buchungsdatum"}
 
-def exact_match_tenant_name(csv_name):
-    """Find exact matching tenant by name (case-insensitive)"""
-    if not csv_name:
-        return None, 0
+        if sender_col == -1:
+            return {"error": "Could not find sender/name column. Expected headers like: Name, Empfänger, Auftraggeber"}
 
-    try:
-        # Clean the CSV name (remove extra spaces, normalize)
-        clean_csv_name = csv_name.strip().lower()
+        if amount_col == -1 and (soll_col == -1 or haben_col == -1):
+            return {"error": "Could not find amount column. Expected headers like: Betrag, Amount, Soll/Haben"}
 
-        tenants = Tenant.query.all()
+        # Extract payments
+        payments = []
 
-        for tenant in tenants:
-            clean_tenant_name = tenant.name.strip().lower()
+        for i, row in df.iterrows():
+            try:
+                # Skip empty rows
+                if row.isna().all():
+                    continue
 
-            # Exact match (case-insensitive)
-            if clean_csv_name == clean_tenant_name:
+                # Extract date
+                parsed_date = parse_date_from_string(row.iloc[date_col])
+                if not parsed_date:
+                    continue
+
+                # Extract sender name
+                sender = str(row.iloc[sender_col]).strip()
+                if not sender or sender.lower() in ['nan', 'none', '']:
+                    continue
+
+                # Extract amount
+                amount = 0.0
+                if amount_col != -1:
+                    # Regular amount column
+                    amount = parse_amount_from_string(row.iloc[amount_col])
+                elif soll_col != -1 and haben_col != -1:
+                    # Soll/Haben columns (Postbank style)
+                    soll = parse_amount_from_string(row.iloc[soll_col])
+                    haben = parse_amount_from_string(row.iloc[haben_col])
+                    amount = haben - soll
+
+                # Skip zero amounts
+                if amount == 0.0:
+                    continue
+
+                # Skip negative amounts (outgoing payments)
+                if amount < 0:
+                    log_csv_activity(
+                        action="skip_negative_amount",
+                        details={"row": i, "amount": amount, "name": sender}
+                    )
+                    continue
+
+                # Extract notes/description
+                notes = ""
+                if notes_col != -1:
+                    notes = str(row.iloc[notes_col]).strip()
+                    if notes.lower() in ['nan', 'none']:
+                        notes = ""
+
+                payments.append({
+                    "date": parsed_date,
+                    "name": sender,
+                    "amount": amount,
+                    "description": notes,
+                    "row_number": i + 1 + header_line,
+                })
+
+            except Exception as e:
                 log_csv_activity(
-                    action="exact_match_found",
-                    details={"csv_name": csv_name, "tenant_name": tenant.name},
+                    action="process_row_error",
+                    details={"row": i, "error": str(e)},
+                    success=False
                 )
-                return tenant, 1.0  # Perfect match score
+                continue
 
-        log_csv_activity(action="no_exact_match", details={"csv_name": csv_name})
-        return None, 0
+        log_csv_activity(
+            action="extract_payments",
+            details={"payment_count": len(payments)}
+        )
+
+        # Log sample payments for debugging
+        for i, payment in enumerate(payments[:3]):
+            log_csv_activity(
+                action="sample_payment",
+                details={
+                    "index": i + 1,
+                    "date": str(payment["date"]),
+                    "name": payment["name"],
+                    "amount": payment["amount"],
+                }
+            )
+
+        return {"payments": payments}
 
     except Exception as e:
         log_csv_activity(
-            action="exact_match_error",
-            details={"csv_name": csv_name, "error": str(e)},
-            success=False,
+            action="process_csv_error",
+            details={"error": str(e)},
+            success=False
         )
-        return None, 0
+        return {"error": str(e)}
+
+
+def fuzzy_match_tenant(name, limit=5):
+    """Find tenants matching the name using fuzzy matching"""
+    if not name:
+        return []
+
+    name_lower = name.lower().strip()
+    all_tenants = Tenant.query.all()
+
+    matches = []
+    for tenant in all_tenants:
+        if not tenant.name:
+            continue
+
+        tenant_name_lower = tenant.name.lower().strip()
+        score = SequenceMatcher(None, name_lower, tenant_name_lower).ratio()
+
+        # Also check if one name contains the other
+        if name_lower in tenant_name_lower or tenant_name_lower in name_lower:
+            score = max(score, 0.8)
+
+        if score >= 0.6:
+            current_apartment = get_tenant_current_apartment(tenant.id)
+            matches.append({
+                "id": tenant.id,
+                "name": tenant.name,
+                "score": score,
+                "current_apartment": current_apartment,
+            })
+
+    matches.sort(key=lambda x: x["score"], reverse=True)
+    return matches[:limit]
 
 
 def get_tenant_current_apartment(tenant_id):
-    """Get the current apartment for a tenant through ContractTenant relationship"""
+    """Get the current apartment for a tenant"""
     try:
-        # Find active contract assignments for this tenant
         active_contract = (
-            db.session.query(ContractTenant, ContractPeriod, Apartment)
-            .join(
-                ContractPeriod, ContractTenant.contract_period_id == ContractPeriod.id
-            )
-            .join(Apartment, ContractPeriod.apartment_id == Apartment.id)
+            db.session.query(ContractTenant)
+            .join(ContractPeriod)
             .filter(
                 ContractTenant.tenant_id == tenant_id,
                 ContractTenant.move_out_date.is_(None),
@@ -295,76 +445,104 @@ def get_tenant_current_apartment(tenant_id):
             .first()
         )
 
-        if active_contract:
-            contract_tenant, contract_period, apartment = active_contract
-            return {
-                "id": apartment.id,
-                "address": apartment.get_short_address(),
-                "contract_number": contract_period.contract_number,
-                "monthly_rent": float(contract_period.monthly_rent)
-                if contract_period.monthly_rent
-                else 0,
-            }
+        if active_contract and active_contract.contract_period:
+            apartment = Apartment.query.get(active_contract.contract_period.apartment_id)
+            if apartment:
+                return {
+                    "id": apartment.id,
+                    "address": apartment.address or f"{apartment.street_name or ''} {apartment.house_number or ''}".strip()
+                }
 
         return None
 
     except Exception as e:
         log_csv_activity(
-            action="get_apartment_error",
+            action="get_tenant_apartment_error",
             details={"tenant_id": tenant_id, "error": str(e)},
-            success=False,
+            success=False
         )
         return None
 
 
-def get_closest_tenant_names(csv_name, limit=3):
-    """Get the closest matching tenant names for suggestions"""
-    if not csv_name or csv_name.strip() == "":
-        return []
+def create_automatic_payment_record(tenant, payment_data, current_user_id):
+    """Create payment record automatically for perfect match"""
+    try:
+        apartment_id = get_current_apartment_for_tenant(tenant.id)
+        if not apartment_id:
+            return False
 
-    csv_name_clean = csv_name.strip().lower()
-    tenants = Tenant.query.all()
+        amount = float(payment_data["amount"])
+        payment_date = payment_data["date"]
 
-    matches = []
-    for tenant in tenants:
-        if not tenant.name:
-            continue
+        # Create payment record - REMOVED tenant_id parameter (FIXED)
+        new_payment = Payment(
+            apartment_id=apartment_id,
+            amount=amount,
+            payment_date=payment_date,
+            month=payment_date.month if payment_date else None,
+            year=payment_date.year if payment_date else None,
+            status="paid",
+            payment_method="bank_transfer",
+            payment_type="rent",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
+        )
 
-        score = SequenceMatcher(None, csv_name_clean, tenant.name.lower()).ratio()
-        if score > 0.3:  # Only include reasonable matches
-            # Get current apartment info
-            current_apartment = get_tenant_current_apartment(tenant.id)
+        # Set optional fields if they exist in the model
+        if hasattr(new_payment, 'paymentStatus'):
+            new_payment.paymentStatus = "Completed"
 
-            matches.append(
-                {
-                    "id": tenant.id,
-                    "name": tenant.name,
-                    "score": score,
-                    "current_apartment": current_apartment,
-                }
-            )
+        if hasattr(new_payment, 'notes'):
+            new_payment.notes = f"Auto-assigned from CSV: {tenant.name}"
 
-    # Sort by score descending and return top matches
-    matches.sort(key=lambda x: x["score"], reverse=True)
-    return matches[:limit]
+        db.session.add(new_payment)
+        db.session.flush()
+
+        # Create tracking record
+        tracking_record = UnassignedPayment(
+            payment_date=payment_date,
+            amount=amount,
+            status="assigned",
+            sender=payment_data["name"][:255],
+            name_from_csv=payment_data["name"][:255],
+            reference=payment_data.get("description", "")[:500] if payment_data.get("description") else None,
+            matched_tenant_id=tenant.id,
+            matched_apartment_id=apartment_id,
+            similarity_score=1.0,
+            description=payment_data.get("description", "")[:500] if payment_data.get("description") else None,
+            uploaded_by_user_id=current_user_id,
+        )
+
+        db.session.add(tracking_record)
+
+        log_csv_activity(
+            action="create_automatic_payment",
+            details={
+                "tenant_name": tenant.name,
+                "amount": amount,
+                "apartment_id": apartment_id,
+            }
+        )
+        return True
+
+    except Exception as e:
+        log_csv_activity(
+            action="create_payment_error",
+            details={"tenant_name": tenant.name, "error": str(e)},
+            success=False
+        )
+        return False
 
 
 def get_current_apartment_for_tenant(tenant_id):
-    """Get the current apartment ID for a tenant through ContractTenant relationship"""
+    """Get the current apartment ID for a tenant"""
     try:
-        from datetime import date
-
-        today = date.today()
-
-        # Find active contract assignments for this tenant
         active_contract = (
             db.session.query(ContractTenant)
             .join(ContractPeriod)
             .filter(
                 ContractTenant.tenant_id == tenant_id,
-                ContractTenant.move_out_date.is_(
-                    None
-                ),  # No move-out date means still active
+                ContractTenant.move_out_date.is_(None),
                 ContractPeriod.status == "active",
             )
             .first()
@@ -379,232 +557,16 @@ def get_current_apartment_for_tenant(tenant_id):
         log_csv_activity(
             action="get_apartment_for_tenant_error",
             details={"tenant_id": tenant_id, "error": str(e)},
-            success=False,
+            success=False
         )
         return None
-
-
-def process_csv_content(file_content):
-    """Enhanced CSV processing with better date handling"""
-    try:
-        client = get_grok_client()
-        if not client:
-            return {"error": "Grok AI not configured"}
-
-        # Get first 15 lines for better column detection
-        lines = file_content.strip().split("\n")
-        sample_lines = "\n".join(lines[:15])
-
-        log_csv_activity(
-            action="send_to_ai", details={"sample_lines_count": len(lines[:15])}
-        )
-
-        # Enhanced AI prompt for column identification
-        prompt = f"""Analyze this CSV/bank statement data and identify the structure. Here are the first 15 lines:
-
-{sample_lines}
-
-I need you to identify these columns precisely:
-1. Date column (payment/transaction/value date) - look for dates in DD.MM.YYYY, DD/MM/YYYY, or YYYY-MM-DD format
-2. Name column (sender/recipient name, business name, or person who made the payment)
-3. Amount column (money amount, could be positive/negative, with € symbol or decimal)
-4. Reference/Description column (payment reference, memo, description, purpose)
-5. Which row number contains the actual transaction data (skip headers and account info)
-
-IMPORTANT: Look carefully at the data structure. Some CSV files have:
-- Multiple header rows
-- Account information at the top
-- Empty rows
-- Different separators (comma, semicolon, tab)
-
-Return ONLY a JSON object with this exact structure:
-{{
-    "date_column": column_index_number,
-    "name_column": column_index_number,
-    "amount_column": column_index_number,
-    "reference_column": column_index_number,
-    "data_start_row": row_number_where_actual_transactions_begin,
-    "delimiter": "," or ";" or "|" or "\\t"
-}}
-
-Use 0-based indexing. If a column doesn't exist, use -1.
-Be very careful about the data_start_row - make sure it points to actual transaction data, not headers."""
-
-        completion = client.chat.completions.create(
-            model="grok-3-mini",
-            messages=[{"role": "user", "content": prompt}],
-            timeout=30,
-        )
-
-        ai_response = completion.choices[0].message.content.strip()
-        log_csv_activity(
-            action="ai_response_received", details={"response_length": len(ai_response)}
-        )
-
-        # Clean AI response
-        if ai_response.startswith("```"):
-            ai_response = re.sub(r"```[json]*\n?", "", ai_response)
-            ai_response = re.sub(r"\n?```", "", ai_response)
-
-        try:
-            structure = json.loads(ai_response)
-        except json.JSONDecodeError as e:
-            log_csv_activity(
-                action="parse_ai_response_failed",
-                details={"response": ai_response, "error": str(e)},
-                success=False,
-            )
-            return {"error": "Failed to detect CSV structure"}
-
-        # Validate structure
-        required_fields = [
-            "date_column",
-            "name_column",
-            "amount_column",
-            "data_start_row",
-            "delimiter",
-        ]
-        for field in required_fields:
-            if field not in structure:
-                return {"error": f"Missing required field: {field}"}
-
-        log_csv_activity(action="structure_detected", details={"structure": structure})
-
-        # Parse CSV with detected structure
-        delimiter = structure["delimiter"]
-        if delimiter == "\\t":
-            delimiter = "\t"
-
-        try:
-            # Try to read with pandas first
-            from io import StringIO
-
-            csv_buffer = StringIO(file_content)
-
-            # Read all data first to understand structure
-            df = pd.read_csv(csv_buffer, delimiter=delimiter, header=None, dtype=str)
-            log_csv_activity(
-                action="csv_read", details={"rows": df.shape[0], "columns": df.shape[1]}
-            )
-
-        except Exception as e:
-            log_csv_activity(
-                action="csv_read_failed", details={"error": str(e)}, success=False
-            )
-            # Fallback to manual parsing
-            lines = file_content.strip().split("\n")
-            data_rows = []
-            for line in lines[structure["data_start_row"] :]:
-                if line.strip():
-                    row = [
-                        cell.strip().strip('"').strip("'")
-                        for cell in line.split(delimiter)
-                    ]
-                    data_rows.append(row)
-            df = pd.DataFrame(data_rows)
-
-        # Extract payment data starting from the detected row
-        payments = []
-        start_row = structure["data_start_row"]
-
-        if start_row >= len(df):
-            return {
-                "error": f"Data start row {start_row} is beyond CSV length {len(df)}"
-            }
-
-        for i, row in df.iloc[start_row:].iterrows():
-            try:
-                # Extract date with enhanced parsing
-                raw_date = None
-                if structure["date_column"] >= 0 and structure["date_column"] < len(
-                    row
-                ):
-                    raw_date = row.iloc[structure["date_column"]]
-
-                parsed_date = parse_date_from_string(raw_date)
-
-                # Extract name
-                name = ""
-                if structure["name_column"] >= 0 and structure["name_column"] < len(
-                    row
-                ):
-                    name = str(row.iloc[structure["name_column"]]).strip()
-
-                # Extract amount with better number parsing
-                amount = 0.0
-                if structure["amount_column"] >= 0 and structure["amount_column"] < len(
-                    row
-                ):
-                    amount_str = str(row.iloc[structure["amount_column"]]).strip()
-                    amount = parse_amount_from_string(amount_str)
-
-                # Extract reference
-                reference = ""
-                if structure.get("reference_column", -1) >= 0 and structure[
-                    "reference_column"
-                ] < len(row):
-                    reference = str(row.iloc[structure["reference_column"]]).strip()
-
-                # Skip rows with invalid data
-                if not name or amount == 0.0:
-                    log_csv_activity(
-                        action="skip_row",
-                        details={"row": i, "name": name, "amount": amount},
-                    )
-                    continue
-
-                payments.append(
-                    {
-                        "date": parsed_date,
-                        "name": name,
-                        "amount": amount,
-                        "description": reference,
-                        "row_number": i + 1,
-                        "raw_date": str(raw_date)
-                        if raw_date
-                        else None,  # Keep for debugging
-                    }
-                )
-
-            except Exception as e:
-                log_csv_activity(
-                    action="process_row_error",
-                    details={"row": i, "error": str(e)},
-                    success=False,
-                )
-                continue
-
-        log_csv_activity(
-            action="extract_payments", details={"payment_count": len(payments)}
-        )
-
-        # Log some sample payments for debugging
-        for i, payment in enumerate(payments[:3]):
-            log_csv_activity(
-                action="sample_payment",
-                details={
-                    "index": i + 1,
-                    "date": str(payment["date"]),
-                    "name": payment["name"],
-                    "amount": payment["amount"],
-                },
-            )
-
-        return {"payments": payments}
-
-    except Exception as e:
-        log_csv_activity(
-            action="process_csv_error", details={"error": str(e)}, success=False
-        )
-        return {"error": str(e)}
 
 
 @csv_payments_bp.route("/process-csv-simple", methods=["POST"])
 @token_required
 def process_csv_simple():
-    """Enhanced CSV processing with automatic assignment for perfect matches"""
+    """Enhanced CSV processing with automatic assignment and duplicate prevention"""
     try:
-        # Check if file was uploaded
         if "file" not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
 
@@ -612,11 +574,9 @@ def process_csv_simple():
         if file.filename == "":
             return jsonify({"error": "No file selected"}), 400
 
-        # Validate file type
         if not file.filename.lower().endswith((".csv", ".txt")):
             return jsonify({"error": "Please upload CSV or TXT files."}), 400
 
-        # Get current user ID
         current_user_id = g.user.get("id")
         if not current_user_id:
             return jsonify({"error": "User authentication required"}), 401
@@ -628,120 +588,86 @@ def process_csv_simple():
             try:
                 file_content = file.read().decode("latin-1")
             except:
-                return jsonify(
-                    {
-                        "error": "Could not decode file. Please ensure it is a valid CSV file."
-                    }
-                ), 400
+                return jsonify({"error": "Could not decode file. Please ensure it is a valid CSV file."}), 400
 
-        # Process CSV content
+        log_csv_activity(
+            action="process_csv_start",
+            details={"filename": file.filename, "user_id": current_user_id}
+        )
+
+        # Process CSV
         result = process_csv_content(file_content)
 
         if "error" in result:
-            return jsonify(result), 400
+            return jsonify({"error": result["error"]}), 400
 
-        # Process payments with automatic assignment for perfect matches
-        unassigned_transactions = []  # Only truly unassigned payments
+        # Process each payment
+        unassigned_transactions = []
         auto_assigned = 0
         auto_assigned_details = []
+        skipped_duplicates = 0
+        duplicate_details = []
 
         for i, payment_data in enumerate(result["payments"]):
-            # Try to find exact matching tenant
-            matched_tenant, similarity_score = exact_match_tenant_name(
-                payment_data["name"]
-            )
-
-            if matched_tenant and similarity_score == 1.0:  # Perfect match found
-                matched_apartment_id = get_current_apartment_for_tenant(
-                    matched_tenant.id
-                )
-
-                if matched_apartment_id:
-                    # AUTO-ASSIGN: Create actual payment record immediately
-                    try:
-                        payment_success = create_automatic_payment_record(
-                            payment_data,
-                            matched_tenant,
-                            matched_apartment_id,
-                            current_user_id,
-                        )
-
-                        if payment_success:
-                            auto_assigned += 1
-                            auto_assigned_details.append(
-                                {
-                                    "tenant_name": matched_tenant.name,
-                                    "amount": float(payment_data["amount"]),
-                                    "date": payment_data["date"].isoformat()
-                                    if payment_data["date"]
-                                    else None,
-                                }
-                            )
-                            log_csv_activity(
-                                action="auto_assign_success",
-                                details={
-                                    "csv_name": payment_data["name"],
-                                    "tenant_name": matched_tenant.name,
-                                    "amount": payment_data["amount"],
-                                },
-                            )
-                            continue  # Skip adding to unassigned table
-                        else:
-                            log_csv_activity(
-                                action="auto_assign_failed",
-                                details={"csv_name": payment_data["name"]},
-                                success=False,
-                            )
-                    except Exception as e:
-                        log_csv_activity(
-                            action="auto_assign_error",
-                            details={"csv_name": payment_data["name"], "error": str(e)},
-                            success=False,
-                        )
-                        # Fall through to add as unassigned
-
-            # No perfect match or auto-assignment failed - add to unassigned table
-            unassigned_payment = UnassignedPayment(
-                name_from_csv=payment_data["name"][:255],
-                amount=payment_data["amount"],
+            # Check for duplicates
+            existing = UnassignedPayment.query.filter_by(
                 payment_date=payment_data["date"],
-                description=payment_data["description"][:1000]
-                if payment_data["description"]
-                else None,
-                csv_line=payment_data.get("row_number", i + 1),
-                matched_tenant_id=None,  # No auto-match for unassigned
-                matched_apartment_id=None,
-                similarity_score=0,  # No confident match
-                status="unassigned",  # Only unassigned status now
+                amount=float(payment_data["amount"]),
+                sender=payment_data["name"][:255]
+            ).first()
+
+            if existing:
+                skipped_duplicates += 1
+                duplicate_details.append({
+                    "name": payment_data["name"],
+                    "amount": payment_data["amount"],
+                    "date": str(payment_data["date"])
+                })
+                continue
+
+            # Try to auto-assign
+            matches = fuzzy_match_tenant(payment_data["name"], limit=1)
+
+            if matches and matches[0]["score"] >= 0.95:
+                # Perfect match - auto assign
+                tenant = Tenant.query.get(matches[0]["id"])
+                if create_automatic_payment_record(tenant, payment_data, current_user_id):
+                    auto_assigned += 1
+                    auto_assigned_details.append({
+                        "tenant_name": tenant.name,
+                        "amount": payment_data["amount"],
+                        "date": str(payment_data["date"])
+                    })
+                    continue
+
+            # Create unassigned payment
+            unassigned_payment = UnassignedPayment(
+                payment_date=payment_data["date"],
+                amount=float(payment_data["amount"]),
+                status="unassigned",
                 sender=payment_data["name"][:255],
-                reference=payment_data["description"][:500]
-                if payment_data["description"]
-                else None,
+                name_from_csv=payment_data["name"][:255],
+                reference=payment_data.get("description", "")[:500] if payment_data.get("description") else None,
+                description=payment_data.get("description", "")[:500] if payment_data.get("description") else None,
+                csv_line=payment_data.get("row_number", i + 1),
                 uploaded_by_user_id=current_user_id,
             )
 
             db.session.add(unassigned_payment)
-            db.session.flush()  # Get the ID
+            db.session.flush()
 
-            # Add to unassigned list for frontend
-            unassigned_transactions.append(
-                {
-                    "id": unassigned_payment.id,
-                    "date": payment_data["date"].isoformat()
-                    if payment_data["date"]
-                    else None,
-                    "payment_date": payment_data["date"].isoformat()
-                    if payment_data["date"]
-                    else None,
-                    "amount": float(payment_data["amount"]),
-                    "sender": payment_data["name"],
-                    "name_from_csv": payment_data["name"],
-                    "reference": payment_data["description"] or "",
-                    "description": payment_data["description"] or "",
-                    "csv_line": payment_data.get("row_number", i + 1),
-                    "status": "unassigned",
-                }
-            )
+            unassigned_transactions.append({
+                "id": unassigned_payment.id,
+                "date": payment_data["date"].isoformat(),
+                "payment_date": payment_data["date"].isoformat(),
+                "amount": float(payment_data["amount"]),
+                "sender": payment_data["name"],
+                "name_from_csv": payment_data["name"],
+                "reference": payment_data.get("description", "") or "",
+                "description": payment_data.get("description", "") or "",
+                "csv_line": payment_data.get("row_number", i + 1),
+                "status": "unassigned",
+            })
 
         try:
             db.session.commit()
@@ -751,371 +677,171 @@ def process_csv_simple():
                     "total_payments": len(result["payments"]),
                     "auto_assigned": auto_assigned,
                     "unassigned": len(unassigned_transactions),
-                },
+                    "duplicates_skipped": skipped_duplicates,
+                }
             )
         except Exception as e:
             db.session.rollback()
             log_csv_activity(
-                action="database_error", details={"error": str(e)}, success=False
+                action="database_error",
+                details={"error": str(e)},
+                success=False
             )
             return jsonify({"error": "Failed to store transactions in database"}), 500
 
-        return jsonify(
-            {
-                "transactions": unassigned_transactions,  # Only unassigned payments
-                "auto_assigned": auto_assigned,
-                "auto_assigned_details": auto_assigned_details,
-                "total_processed": len(result["payments"]),
-                "message": f"Processed {len(result['payments'])} payments: {auto_assigned} automatically assigned, {len(unassigned_transactions)} require manual review",
-            }
-        ), 200
+        return jsonify({
+            "transactions": unassigned_transactions,
+            "auto_assigned": auto_assigned,
+            "auto_assigned_details": auto_assigned_details,
+            "duplicates_skipped": skipped_duplicates,
+            "duplicate_details": duplicate_details,
+            "total_processed": len(result["payments"]),
+            "message": f"Processed {len(result['payments'])} payments: {auto_assigned} auto-assigned, {len(unassigned_transactions)} require review, {skipped_duplicates} duplicates skipped",
+        }), 200
 
     except Exception as e:
         db.session.rollback()
         log_csv_activity(
-            action="process_csv_simple_error", details={"error": str(e)}, success=False
+            action="process_csv_error",
+            details={"error": str(e)},
+            success=False
         )
         return jsonify({"error": str(e)}), 500
 
 
-def create_automatic_payment_record(
-    payment_data, tenant, apartment_id, current_user_id
-):
-    """Create a payment record automatically for perfect matches"""
-    try:
-        # Get apartment object
-        apartment = Apartment.query.get(apartment_id)
-        if not apartment:
-            log_csv_activity(
-                action="apartment_not_found",
-                details={"apartment_id": apartment_id},
-                success=False,
-            )
-            return False
-
-        payment_date = payment_data["date"] or datetime.now().date()
-        amount = float(payment_data["amount"])
-
-        # Find current contract for this tenant and apartment
-        current_contract = (
-            db.session.query(ContractPeriod)
-            .join(ContractTenant)
-            .filter(
-                ContractTenant.tenant_id == tenant.id,
-                ContractPeriod.apartment_id == apartment_id,
-                ContractTenant.move_out_date.is_(None),
-                ContractPeriod.status == "active",
-            )
-            .first()
-        )
-
-        # Create payment record
-        tenant_data = [
-            {
-                "id": tenant.id,
-                "name": tenant.name,
-                "amountPaid": amount,
-                "amountDue": amount,
-                "paid": True,
-            }
-        ]
-
-        new_payment = Payment(
-            apartment_id=apartment_id,
-            month=payment_date.month,
-            year=payment_date.year,
-            amount=amount,
-            payment_date=payment_date,
-            payment_method="bank_transfer",  # Default for CSV imports
-            payment_type="rent",
-            internet=0.0,
-            electricity=0.0,
-            other=0.0,
-            status="paid",
-            notes=f"Auto-assigned from CSV: {payment_data['name']}",
-            contract_period_id=current_contract.id if current_contract else None,
-        )
-
-        # Set tenants JSON field after creation
-        new_payment.tenants = json.dumps(tenant_data)
-        new_payment.extraPayments = "{}"
-
-        db.session.add(new_payment)
-
-        # Also create a record in unassigned_payments for tracking, but mark as assigned
-        tracking_record = UnassignedPayment(
-            name_from_csv=payment_data["name"][:255],
-            amount=payment_data["amount"],
-            payment_date=payment_data["date"],
-            description=payment_data["description"][:1000]
-            if payment_data["description"]
-            else None,
-            csv_line=payment_data.get("row_number", 0),
-            matched_tenant_id=tenant.id,
-            matched_apartment_id=apartment_id,
-            similarity_score=1.0,
-            status="auto_assigned",  # New status for tracking
-            sender=payment_data["name"][:255],
-            reference=payment_data["description"][:500]
-            if payment_data["description"]
-            else None,
-            uploaded_by_user_id=current_user_id,
-        )
-
-        db.session.add(tracking_record)
-
-        log_csv_activity(
-            action="create_payment",
-            details={
-                "tenant_name": tenant.name,
-                "amount": amount,
-                "apartment_id": apartment_id,
-            },
-        )
-        return True
-
-    except Exception as e:
-        log_csv_activity(
-            action="create_payment_error",
-            details={"tenant_name": tenant.name, "error": str(e)},
-            success=False,
-        )
-        return False
-
-
-@csv_payments_bp.route("/grok-status", methods=["GET"])
+@csv_payments_bp.route("/unassigned", methods=["GET"])
 @token_required
-def check_grok_status():
-    """Check if Grok AI is configured and working - compatible with your component"""
+def get_unassigned_payments():
+    """Get all unassigned payments with filters"""
     try:
-        client = get_grok_client()
-        if not client:
-            log_csv_activity(
-                action="grok_not_configured",
-                details={"message": "Grok API key not configured"},
-            )
-            return jsonify(
-                {
-                    "configured": False,
-                    "api_working": False,
-                    "fullyOperational": False,
-                    "message": "Grok API key not configured",
-                }
-            ), 200
+        status = request.args.get("status", "unassigned")
+        uploader_id = request.args.get("uploader_id")
 
-        # Test with a simple query
-        try:
-            completion = client.chat.completions.create(
-                model="grok-3-mini",
-                messages=[{"role": "user", "content": "Say 'ok' if you can hear me"}],
-                timeout=10,
-            )
-            api_working = "ok" in completion.choices[0].message.content.lower()
-        except Exception as e:
-            log_csv_activity(
-                action="grok_test_failed", details={"error": str(e)}, success=False
-            )
-            api_working = False
+        query = UnassignedPayment.query
 
-        return jsonify(
-            {
-                "configured": True,
-                "api_working": api_working,
-                "fullyOperational": api_working,
-            }
-        ), 200
+        if status and status != "all":
+            if status == "unassigned":
+                query = query.filter(UnassignedPayment.status.in_(["unassigned", "matched"]))
+            else:
+                query = query.filter_by(status=status)
+
+        if uploader_id:
+            query = query.filter_by(uploaded_by_user_id=int(uploader_id))
+
+        payments = query.order_by(desc(UnassignedPayment.created_at)).all()
+
+        results = []
+        for payment in payments:
+            potential_matches = fuzzy_match_tenant(payment.name_from_csv, limit=5)
+
+            payment_dict = payment.to_dict()
+            payment_dict["potential_matches"] = potential_matches
+            results.append(payment_dict)
+
+        return jsonify({"payments": results}), 200
+
     except Exception as e:
         log_csv_activity(
-            action="grok_status_error", details={"error": str(e)}, success=False
+            action="get_unassigned_error",
+            details={"error": str(e)},
+            success=False
         )
-        return jsonify({"configured": False, "message": str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 
 @csv_payments_bp.route("/previous-uploads", methods=["GET"])
 @token_required
 def get_previous_uploads():
-    """Get unassigned payments only (no auto-matched ones needing approval)"""
+    """Get previous CSV uploads with pagination and filtering"""
     try:
-        # Get current user info
         current_user_id = g.user.get("id")
-        if not current_user_id:
-            return jsonify({"error": "User authentication required"}), 401
+        is_admin = g.user.get("role") == "admin"
 
-        # Get pagination parameters
         page = int(request.args.get("page", 0))
         limit = int(request.args.get("limit", 50))
-        offset = page * limit
-
-        # Get filter parameters
         filter_user_id = request.args.get("user_id")
         show_all = request.args.get("show_all", "false").lower() == "true"
 
-        # Determine filtering logic
-        if show_all:
-            user_filter = True
-            log_csv_activity(
-                action="view_all_uploads", details={"user_id": current_user_id}
-            )
+        # Base query - only unassigned and matched (not assigned or rejected)
+        query = UnassignedPayment.query.filter(
+            UnassignedPayment.status.in_(["unassigned", "matched"])
+        )
+
+        # Apply user filters
+        if not is_admin or (not show_all and not filter_user_id):
+            query = query.filter_by(uploaded_by_user_id=current_user_id)
         elif filter_user_id:
-            try:
-                filter_user_id = int(filter_user_id)
-                user_filter = UnassignedPayment.uploaded_by_user_id == filter_user_id
-                log_csv_activity(
-                    action="filter_by_user",
-                    details={
-                        "user_id": current_user_id,
-                        "filter_user_id": filter_user_id,
-                    },
-                )
-            except ValueError:
-                user_filter = UnassignedPayment.uploaded_by_user_id == current_user_id
-                log_csv_activity(
-                    action="invalid_user_filter", details={"user_id": current_user_id}
-                )
-        else:
-            user_filter = UnassignedPayment.uploaded_by_user_id == current_user_id
-            log_csv_activity(
-                action="view_own_uploads", details={"user_id": current_user_id}
-            )
+            query = query.filter_by(uploaded_by_user_id=int(filter_user_id))
 
-        # Get summary counts for all statuses
-        summary_query = db.session.query(
-            UnassignedPayment.status,
-            func.count(UnassignedPayment.id).label("count"),
-            func.sum(UnassignedPayment.amount).label("total_amount"),
-        )
-
-        if user_filter is not True:
-            summary_query = summary_query.filter(user_filter)
-
-        summary = summary_query.group_by(UnassignedPayment.status).all()
-
-        summary_dict = {}
-        for status, count, total_amount in summary:
-            summary_dict[status] = {
-                "count": count,
-                "total_amount": float(total_amount) if total_amount else 0.0,
+        # Get counts by status for summary
+        summary = {
+            "unassigned": {
+                "count": query.filter_by(status="unassigned").count(),
+                "total_amount": db.session.query(func.sum(UnassignedPayment.amount)).filter(
+                    UnassignedPayment.status == "unassigned",
+                    UnassignedPayment.uploaded_by_user_id == current_user_id if not is_admin else True
+                ).scalar() or 0
+            },
+            "matched": {
+                "count": query.filter_by(status="matched").count(),
+                "total_amount": db.session.query(func.sum(UnassignedPayment.amount)).filter(
+                    UnassignedPayment.status == "matched",
+                    UnassignedPayment.uploaded_by_user_id == current_user_id if not is_admin else True
+                ).scalar() or 0
+            },
+            "assigned": {
+                "count": UnassignedPayment.query.filter_by(
+                    status="assigned",
+                    uploaded_by_user_id=current_user_id if not is_admin else None
+                ).count(),
+                "total_amount": db.session.query(func.sum(UnassignedPayment.amount)).filter(
+                    UnassignedPayment.status == "assigned",
+                    UnassignedPayment.uploaded_by_user_id == current_user_id if not is_admin else True
+                ).scalar() or 0
             }
+        }
 
-        # Get only UNASSIGNED payments for manual review
-        base_query = UnassignedPayment.query.filter(
-            UnassignedPayment.status == "unassigned"  # Only truly unassigned
-        )
+        # Get counts
+        total_items = query.count()
 
-        if user_filter is not True:
-            base_query = base_query.filter(user_filter)
+        # Pagination
+        offset = page * limit
+        paginated_payments = query.order_by(desc(UnassignedPayment.payment_date)).offset(offset).limit(limit).all()
 
-        base_query = base_query.order_by(desc(UnassignedPayment.created_at))
-
-        # Get total counts for pagination
-        total_items = base_query.count()
-        paginated_payments = base_query.offset(offset).limit(limit).all()
-
-        def format_payment(payment):
-            formatted = {
-                "id": payment.id,
-                "name_from_csv": payment.name_from_csv,
-                "amount": float(payment.amount),
-                "payment_date": payment.payment_date.isoformat()
-                if payment.payment_date
-                else None,
-                "description": payment.description,
-                "csv_line": payment.csv_line,
-                "status": payment.status,
-                "created_at": payment.created_at.isoformat()
-                if hasattr(payment, "created_at") and payment.created_at
-                else None,
+        # Format payments
+        def format_payment(p):
+            return {
+                "id": p.id,
+                "payment_date": p.payment_date.isoformat() if p.payment_date else None,
+                "amount": float(p.amount) if p.amount else 0,
+                "name_from_csv": p.sender or "",
+                "sender": p.sender or "",
+                "reference": p.reference or "",
+                "description": p.reference or "",
+                "status": p.status or "unassigned",
             }
-
-            # Include upload user info
-            if hasattr(payment, "uploaded_by_user_id"):
-                formatted["uploaded_by_user_id"] = payment.uploaded_by_user_id
-                if payment.uploaded_by_user_id:
-                    try:
-                        from models.models import User
-
-                        user = User.query.get(payment.uploaded_by_user_id)
-                        formatted["uploaded_by_username"] = (
-                            user.username if user else "Unknown"
-                        )
-                    except:
-                        formatted["uploaded_by_username"] = "Unknown"
-                else:
-                    formatted["uploaded_by_username"] = "Legacy (Pre-tracking)"
-
-            return formatted
-
-        # Get uploaders list
-        uploaders_query = (
-            db.session.query(
-                UnassignedPayment.uploaded_by_user_id,
-                func.count(UnassignedPayment.id).label("upload_count"),
-            )
-            .group_by(UnassignedPayment.uploaded_by_user_id)
-            .all()
-        )
-
-        uploaders = []
-        for uploader_id, count in uploaders_query:
-            if uploader_id:
-                try:
-                    from models.models import User
-
-                    user = User.query.get(uploader_id)
-                    uploaders.append(
-                        {
-                            "user_id": uploader_id,
-                            "username": user.username if user else "Unknown",
-                            "upload_count": count,
-                        }
-                    )
-                except:
-                    uploaders.append(
-                        {
-                            "user_id": uploader_id,
-                            "username": "Unknown",
-                            "upload_count": count,
-                        }
-                    )
-            else:
-                uploaders.append(
-                    {
-                        "user_id": None,
-                        "username": "Legacy (Pre-tracking)",
-                        "upload_count": count,
-                    }
-                )
 
         unassigned_payments = [format_payment(p) for p in paginated_payments]
 
-        return (
-            jsonify(
-                {
-                    "summary": summary_dict,
-                    "unassigned": unassigned_payments,
-                    "matched": [],  # No longer needed - auto-assigned payments don't appear here
-                    "pagination": {
-                        "page": page,
-                        "limit": limit,
-                        "total_items": total_items,
-                        "total_pages": (total_items + limit - 1) // limit
-                        if limit > 0
-                        else 1,
-                        "has_next": offset + limit < total_items,
-                        "has_prev": page > 0,
-                    },
-                    "uploaders": uploaders,
-                    "current_filter": {"user_id": filter_user_id, "show_all": show_all},
-                }
-            ),
-            200,
-        )
+        return jsonify({
+            "unassigned": unassigned_payments,
+            "matched": [],  # For compatibility
+            "summary": summary,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total_items": total_items,
+                "total_pages": (total_items + limit - 1) // limit if limit > 0 else 1,
+                "has_next": offset + limit < total_items,
+                "has_prev": page > 0,
+            },
+        }), 200
 
     except Exception as e:
         log_csv_activity(
             action="get_previous_uploads_error",
             details={"error": str(e)},
-            success=False,
+            success=False
         )
         return jsonify({"error": str(e)}), 500
 
@@ -1123,221 +849,78 @@ def get_previous_uploads():
 @csv_payments_bp.route("/uploaders", methods=["GET"])
 @token_required
 def get_uploaders():
-    """Get list of all users who have uploaded CSV payments (for admin filtering)"""
+    """Get list of users who have uploaded CSV payments"""
     try:
-        # FIXED: Use correct SQLAlchemy case syntax
         uploaders_query = (
             db.session.query(
                 UnassignedPayment.uploaded_by_user_id,
                 func.count(UnassignedPayment.id).label("total_uploads"),
-                func.sum(
-                    case((UnassignedPayment.status == "unassigned", 1), else_=0)
-                ).label("unassigned_count"),
-                func.sum(
-                    case((UnassignedPayment.status == "matched", 1), else_=0)
-                ).label("matched_count"),
-                func.sum(
-                    case((UnassignedPayment.status == "assigned", 1), else_=0)
-                ).label("assigned_count"),
-                func.sum(
-                    case((UnassignedPayment.status == "rejected", 1), else_=0)
-                ).label("rejected_count"),
+                User.username
             )
-            .group_by(UnassignedPayment.uploaded_by_user_id)
+            .outerjoin(User, UnassignedPayment.uploaded_by_user_id == User.id)
+            .filter(UnassignedPayment.status.in_(["unassigned", "matched"]))
+            .group_by(UnassignedPayment.uploaded_by_user_id, User.username)
             .all()
         )
 
         uploaders = []
-        for (
-            uploader_id,
-            total,
-            unassigned,
-            matched,
-            assigned,
-            rejected,
-        ) in uploaders_query:
-            if uploader_id:
-                try:
-                    from models.models import User
-
-                    user = User.query.get(uploader_id)
-                    uploaders.append(
-                        {
-                            "user_id": uploader_id,
-                            "username": user.username if user else "Unknown",
-                            "total_uploads": total,
-                            "unassigned_count": unassigned or 0,
-                            "matched_count": matched or 0,
-                            "assigned_count": assigned or 0,
-                            "rejected_count": rejected or 0,
-                        }
-                    )
-                except:
-                    uploaders.append(
-                        {
-                            "user_id": uploader_id,
-                            "username": "Unknown",
-                            "total_uploads": total,
-                            "unassigned_count": unassigned or 0,
-                            "matched_count": matched or 0,
-                            "assigned_count": assigned or 0,
-                            "rejected_count": rejected or 0,
-                        }
-                    )
-            else:
-                uploaders.append(
-                    {
-                        "user_id": None,
-                        "username": "Legacy (Pre-tracking)",
-                        "total_uploads": total,
-                        "unassigned_count": unassigned or 0,
-                        "matched_count": matched or 0,
-                        "assigned_count": assigned or 0,
-                        "rejected_count": rejected or 0,
-                    }
-                )
+        for uploader_id, total, username in uploaders_query:
+            uploaders.append({
+                "user_id": uploader_id,
+                "username": username or f"User {uploader_id}",
+                "upload_count": total
+            })
 
         return jsonify({"uploaders": uploaders}), 200
 
     except Exception as e:
         log_csv_activity(
-            action="get_uploaders_error", details={"error": str(e)}, success=False
-        )
-        return jsonify({"error": str(e)}), 500
-
-
-@csv_payments_bp.route("/suggest-tenants/<int:payment_id>", methods=["GET"])
-@token_required
-def suggest_tenants(payment_id):
-    """Get closest tenant name suggestions for a payment"""
-    try:
-        current_user_id = g.user.get("id")
-        if not current_user_id:
-            return jsonify({"error": "User authentication required"}), 401
-
-        # Admins can access any payment
-        payment = UnassignedPayment.query.get(payment_id)
-
-        if not payment:
-            return jsonify({"error": "Payment not found"}), 404
-
-        suggestions = get_closest_tenant_names(payment.name_from_csv, limit=3)
-
-        return jsonify(
-            {"suggestions": suggestions, "original_name": payment.name_from_csv}
-        ), 200
-
-    except Exception as e:
-        log_csv_activity(
-            action="suggest_tenants_error",
-            details={"payment_id": payment_id, "error": str(e)},
-            success=False,
+            action="get_uploaders_error",
+            details={"error": str(e)},
+            success=False
         )
         return jsonify({"error": str(e)}), 500
 
 
 @csv_payments_bp.route("/assign/<int:payment_id>", methods=["POST"])
 @token_required
-def assign_previous_payment(payment_id):
-    """Assign a previous upload payment to a tenant and apartment with full details"""
+def assign_payment(payment_id):
+    """Assign an unassigned payment to a tenant and apartment"""
     try:
+        payment = UnassignedPayment.query.get(payment_id)
+        if not payment:
+            return jsonify({"error": "Payment not found"}), 404
+
         data = request.get_json()
         tenant_id = data.get("tenant_id")
         apartment_id = data.get("apartment_id")
-        custom_amount = data.get("amount")  # Allow custom amount
-        custom_date = data.get("payment_date")  # Allow custom date
+        amount = data.get("amount")
+        payment_date = data.get("payment_date")
         notes = data.get("notes", "")
-        payment_method = data.get("payment_method", "bank_transfer")
-
-        # Get current user info
-        current_user_id = g.user.get("id")
-
-        if not current_user_id:
-            return jsonify(
-                {"success": False, "error": "User authentication required"}
-            ), 401
 
         if not tenant_id or not apartment_id:
-            return jsonify(
-                {"success": False, "error": "Missing tenant_id or apartment_id"}
-            ), 400
+            return jsonify({"error": "Tenant and apartment are required"}), 400
 
-        # Get the unassigned payment (admins can access any payment)
-        payment = UnassignedPayment.query.get(payment_id)
-
-        if not payment:
-            return jsonify({"success": False, "error": "Payment not found"}), 404
-
-        # Validate tenant and apartment exist
-        tenant = Tenant.query.get(tenant_id)
-        apartment = Apartment.query.get(apartment_id)
-
-        if not tenant or not apartment:
-            return jsonify(
-                {"success": False, "error": "Tenant or apartment not found"}
-            ), 404
-
-        # Use custom amount if provided, otherwise use original amount
-        final_amount = float(custom_amount) if custom_amount else float(payment.amount)
-
-        # Use custom date if provided, otherwise use original date
-        if custom_date:
-            try:
-                final_date = datetime.strptime(custom_date, "%Y-%m-%d").date()
-            except ValueError:
-                final_date = payment.payment_date or datetime.now().date()
-        else:
-            final_date = payment.payment_date or datetime.now().date()
-
-        # Find current contract for this tenant and apartment
-        current_contract = (
-            db.session.query(ContractPeriod)
-            .join(ContractTenant)
-            .filter(
-                ContractTenant.tenant_id == tenant_id,
-                ContractPeriod.apartment_id == apartment_id,
-                ContractTenant.move_out_date.is_(None),
-                ContractPeriod.status == "active",
-            )
-            .first()
-        )
-
-        # Create payment record using correct Payment model structure
-        tenant_data = [
-            {
-                "id": tenant.id,
-                "name": tenant.name,
-                "amountPaid": final_amount,
-                "amountDue": final_amount,
-                "paid": True,
-            }
-        ]
-
-        # Create unique month identifier
-        month_identifier = (
-            f"csv_{payment.id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        )
-
-        # Create Payment with correct fields (no 'tenants' parameter in constructor)
+        # Create payment record - REMOVED tenant_id parameter (FIXED)
         new_payment = Payment(
             apartment_id=apartment_id,
-            month=final_date.month,
-            year=final_date.year,
-            amount=final_amount,
-            payment_date=final_date,
-            payment_method=payment_method,
-            payment_type="rent",
-            internet=0.0,
-            electricity=0.0,
-            other=0.0,
+            amount=float(amount),
+            payment_date=datetime.fromisoformat(payment_date) if payment_date else payment.payment_date,
+            month=payment.payment_date.month if payment.payment_date else None,
+            year=payment.payment_date.year if payment.payment_date else None,
             status="paid",
-            notes=notes or f"CSV import: {payment.name_from_csv}",
-            contract_period_id=current_contract.id if current_contract else None,
+            payment_method="bank_transfer",
+            payment_type="rent",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
         )
 
-        # Set tenants JSON field after creation
-        new_payment.tenants = json.dumps(tenant_data)
-        new_payment.extraPayments = "{}"
+        # Set optional fields
+        if hasattr(new_payment, 'paymentStatus'):
+            new_payment.paymentStatus = "Completed"
+
+        if hasattr(new_payment, 'notes'):
+            new_payment.notes = notes
 
         db.session.add(new_payment)
 
@@ -1349,268 +932,131 @@ def assign_previous_payment(payment_id):
         db.session.commit()
 
         log_csv_activity(
-            action="assign_payment",
+            action="manual_assignment",
             details={
                 "payment_id": payment_id,
-                "tenant_name": tenant.name,
-                "apartment_id": apartment_id,
-            },
+                "tenant_id": tenant_id,
+                "apartment_id": apartment_id
+            }
         )
 
-        return jsonify(
-            {
-                "success": True,
-                "message": f"Payment assigned to {tenant.name}",
-                "payment_id": new_payment.id,
-                "amount": final_amount,
-                "date": final_date.isoformat(),
-            }
-        ), 200
+        return jsonify({"success": True, "message": "Payment assigned successfully"}), 200
 
     except Exception as e:
         db.session.rollback()
         log_csv_activity(
             action="assign_payment_error",
             details={"payment_id": payment_id, "error": str(e)},
-            success=False,
-        )
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@csv_payments_bp.route("/tenants/search", methods=["GET"])
-@token_required
-def search_tenants():
-    """Search tenants with their current apartment info"""
-    try:
-        query = request.args.get("query", "").strip()
-        limit = min(int(request.args.get("limit", 20)), 50)  # Max 50 results
-
-        if not query or len(query) < 2:
-            return jsonify([]), 200
-
-        # Search tenants by name (case-insensitive, partial match)
-        tenants = (
-            db.session.query(Tenant)
-            .filter(Tenant.name.ilike(f"%{query}%"))
-            .limit(limit)
-            .all()
-        )
-
-        results = []
-        for tenant in tenants:
-            # Find current apartment through active contract
-            current_apartment = get_tenant_current_apartment(tenant.id)
-
-            results.append(
-                {
-                    "id": tenant.id,
-                    "name": tenant.name,
-                    "email": tenant.email,
-                    "phone": tenant.phone,
-                    "current_apartment": current_apartment,
-                }
-            )
-
-        log_csv_activity(
-            action="search_tenants",
-            details={"query": query, "results_count": len(results)},
-        )
-        return jsonify(results), 200
-
-    except Exception as e:
-        log_csv_activity(
-            action="search_tenants_error",
-            details={"query": query, "error": str(e)},
-            success=False,
-        )
-        return jsonify({"error": str(e)}), 500
-
-
-@csv_payments_bp.route("/apartments/search", methods=["GET"])
-@token_required
-def search_apartments():
-    """Search apartments with current tenant info"""
-    try:
-        query = request.args.get("query", "").strip()
-        limit = min(int(request.args.get("limit", 20)), 50)  # Max 50 results
-
-        if not query or len(query) < 2:
-            return jsonify([]), 200
-
-        # Search apartments by address (case-insensitive, partial match)
-        apartments = (
-            Apartment.query.filter(Apartment.address.ilike(f"%{query}%"))
-            .limit(limit)
-            .all()
-        )
-
-        results = []
-        for apartment in apartments:
-            # Get current tenants
-            current_tenants = (
-                db.session.query(Tenant)
-                .join(ContractTenant)
-                .join(ContractPeriod)
-                .filter(
-                    ContractPeriod.apartment_id == apartment.id,
-                    ContractTenant.move_out_date.is_(None),
-                    ContractPeriod.status == "active",
-                )
-                .all()
-            )
-
-            tenant_names = [tenant.name for tenant in current_tenants]
-
-            results.append(
-                {
-                    "id": apartment.id,
-                    "address": apartment.get_short_address(),
-                    "rent": float(apartment.rent) if apartment.rent else 0,
-                    "rooms": apartment.rooms,
-                    "current_tenants": tenant_names,
-                    "tenant_count": len(current_tenants),
-                }
-            )
-
-        log_csv_activity(
-            action="search_apartments",
-            details={"query": query, "results_count": len(results)},
-        )
-        return jsonify(results), 200
-
-    except Exception as e:
-        log_csv_activity(
-            action="search_apartments_error",
-            details={"query": query, "error": str(e)},
-            success=False,
+            success=False
         )
         return jsonify({"error": str(e)}), 500
 
 
 @csv_payments_bp.route("/reject/<int:payment_id>", methods=["POST"])
 @token_required
-def reject_previous_payment(payment_id):
-    """Reject a previous upload payment - alternative endpoint naming"""
-    return reject_payment(payment_id)
-
-@csv_payments_bp.route('/reject-all', methods=['POST'])
-@token_required
-def reject_all_payments():
-    """Reject all unassigned and matched payments matching the provided filters."""
+def reject_payment(payment_id):
+    """Delete an unassigned payment"""
     try:
-        show_all = request.args.get('show_all', 'false').lower() == 'true'
-        user_id = request.args.get('user_id')
-        current_user = g.user
+        payment = UnassignedPayment.query.get(payment_id)
+        if not payment:
+            return jsonify({"error": "Payment not found"}), 404
 
-        # Build query for payments to reject (unassigned or matched)
-        query = UnassignedPayment.query.filter(UnassignedPayment.status.in_(['unassigned', 'matched']))
+        db.session.delete(payment)
+        db.session.commit()
 
-        # Apply filters based on user role and parameters
-        if not show_all or current_user.get('role') != 'admin':
-            query = query.filter(UnassignedPayment.uploaded_by == current_user.get('id'))
-        elif user_id and user_id != 'legacy':
-            query = query.filter(UnassignedPayment.uploaded_by == user_id)
+        log_csv_activity(
+            action="delete_payment",
+            details={"payment_id": payment_id}
+        )
 
-        # Get payments to reject
-        payments_to_reject = query.all()
+        return jsonify({"success": True, "message": "Payment deleted"}), 200
 
-        if not payments_to_reject:
-            ActivityLogger.log_activity(
-                action='reject_all_payments',
-                entity_type='csv_payment',
-                entity_id=None,
-                details={
-                    'rejected_count': 0,
-                    'filters': {'show_all': show_all, 'user_id': user_id},
-                    'user_id': current_user.get('id')
-                },
-                status='success'
-            )
-            return jsonify({
-                'success': True,
-                'message': 'No payments to reject',
-                'rejected_count': 0
-            }), 200
+    except Exception as e:
+        db.session.rollback()
+        log_csv_activity(
+            action="delete_payment_error",
+            details={"payment_id": payment_id, "error": str(e)},
+            success=False
+        )
+        return jsonify({"error": str(e)}), 500
 
-        # Reject payments in a transaction
-        rejected_count = 0
-        for payment in payments_to_reject:
-            payment.status = 'rejected'
-            payment.updated_at = datetime.utcnow()
-            rejected_count += 1
+
+@csv_payments_bp.route("/reject-multiple", methods=["POST"])
+@token_required
+def reject_multiple_payments():
+    """Delete multiple payments at once"""
+    try:
+        data = request.get_json()
+        payment_ids = data.get("payment_ids", [])
+
+        if not payment_ids:
+            return jsonify({"error": "No payment IDs provided"}), 400
+
+        deleted_count = UnassignedPayment.query.filter(
+            UnassignedPayment.id.in_(payment_ids)
+        ).delete(synchronize_session=False)
 
         db.session.commit()
 
-        ActivityLogger.log_activity(
-            action='reject_all_payments',
-            entity_type='csv_payment',
-            entity_id=None,
+        log_csv_activity(
+            action="delete_multiple_payments",
             details={
-                'rejected_count': rejected_count,
-                'filters': {'show_all': show_all, 'user_id': user_id},
-                'user_id': current_user.get('id'),
-                'username': current_user.get('sub')
-            },
-            status='success'
+                "payment_ids": payment_ids,
+                "deleted_count": deleted_count
+            }
         )
 
         return jsonify({
-            'success': True,
-            'message': f'Successfully rejected {rejected_count} payments',
-            'rejected_count': rejected_count
+            "success": True,
+            "message": f"Deleted {deleted_count} payments"
         }), 200
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f'Error rejecting all payments: {e}')
-        ActivityLogger.log_activity(
-            action='reject_all_payments',
-            entity_type='csv_payment',
-            entity_id=None,
-            details={
-                'error': str(e),
-                'filters': {'show_all': show_all, 'user_id': user_id},
-                'user_id': current_user.get('id')
-            },
-            status='failed',
-            error=e
-        )
-        return jsonify({'error': f'Failed to reject payments: {str(e)}'}), 500
-
-@csv_payments_bp.route("/previous-uploads/<int:payment_id>/reject", methods=["POST"])
-@token_required
-def reject_payment(payment_id):
-    """Reject an unassigned payment"""
-    try:
-        current_user_id = g.user.get("id")
-        if not current_user_id:
-            return jsonify(
-                {"success": False, "error": "User authentication required"}
-            ), 401
-
-        # Admins can reject any payment
-        payment = UnassignedPayment.query.get(payment_id)
-
-        if not payment:
-            return jsonify({"success": False, "error": "Payment not found"}), 404
-
-        payment.status = "rejected"
-        db.session.commit()
-
         log_csv_activity(
-            action="reject_payment",
-            details={"payment_id": payment_id, "user_id": current_user_id},
+            action="delete_multiple_payments_error",
+            details={"error": str(e)},
+            success=False
         )
+        return jsonify({"error": str(e)}), 500
 
-        return jsonify(
-            {"success": True, "message": "Payment rejected successfully"}
-        ), 200
+
+@csv_payments_bp.route("/match-tenant", methods=["POST"])
+@token_required
+def match_tenant():
+    """Find potential tenant matches for a name"""
+    try:
+        data = request.get_json()
+        name = data.get("name", "")
+
+        if not name:
+            return jsonify({"error": "Name is required"}), 400
+
+        matches = fuzzy_match_tenant(name, limit=10)
+
+        return jsonify({"matches": matches}), 200
 
     except Exception as e:
-        db.session.rollback()
-        log_csv_activity(
-            action="reject_payment_error",
-            details={"payment_id": payment_id, "error": str(e)},
-            success=False,
-        )
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"error": str(e)}), 500
+
+
+@csv_payments_bp.route("/statistics", methods=["GET"])
+@token_required
+def get_statistics():
+    """Get CSV payment statistics"""
+    try:
+        total_unassigned = UnassignedPayment.query.filter_by(status="unassigned").count()
+        total_assigned = UnassignedPayment.query.filter_by(status="assigned").count()
+
+        total_amount_unassigned = db.session.query(
+            func.sum(UnassignedPayment.amount)
+        ).filter_by(status="unassigned").scalar() or 0
+
+        return jsonify({
+            "total_unassigned": total_unassigned,
+            "total_assigned": total_assigned,
+            "total_amount_unassigned": float(total_amount_unassigned)
+        }), 200
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500

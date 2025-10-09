@@ -243,7 +243,6 @@ const CSVPaymentProcessor = () => {
     if (!apartmentSearchQuery) return false;
     const query = apartmentSearchQuery.toLowerCase();
 
-    // Search by address fields
     const addressMatch = (
       apartment.address?.toLowerCase().includes(query) ||
       apartment.street_name?.toLowerCase().includes(query) ||
@@ -251,7 +250,6 @@ const CSVPaymentProcessor = () => {
       apartment.full_address?.toLowerCase().includes(query)
     );
 
-    // Search by contract numbers - check all contract periods for this apartment
     const contractMatch = apartment.contract_periods?.some(contract =>
       contract.contract_number?.toLowerCase().includes(query)
     ) || false;
@@ -281,7 +279,6 @@ const CSVPaymentProcessor = () => {
   const loadApartments = async () => {
     try {
       const token = localStorage.getItem('token');
-      // Use the new endpoint that includes contract periods
       const response = await fetch('/api/apartments/list-with-contracts', {
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -339,11 +336,13 @@ const CSVPaymentProcessor = () => {
     setApartmentSearchQuery(apartment.address);
   };
 
+  // FIXED: handleAssignmentSubmit to support Unknown Tenant
   const handleAssignmentSubmit = async () => {
     const { transaction, selectedTenant, selectedApartment, customAmount, customDate, notes, paymentMethod } = assignmentDialog;
 
-    if (!selectedTenant || !selectedApartment) {
-      alert('Please select both tenant and apartment');
+    // Only apartment is required - tenant can be null for "Unknown"
+    if (!selectedApartment) {
+      alert('Please select an apartment');
       return;
     }
 
@@ -371,7 +370,7 @@ const CSVPaymentProcessor = () => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          tenant_id: selectedTenant.id,
+          tenant_id: selectedTenant ? selectedTenant.id : null,  // Can be null for unknown tenant
           apartment_id: selectedApartment.id,
           amount: parseFloat(customAmount),
           payment_date: customDate,
@@ -388,7 +387,9 @@ const CSVPaymentProcessor = () => {
       const data = await response.json();
 
       if (data.success) {
-        alert(`Payment assigned successfully to ${selectedTenant.name}!`);
+        const tenantName = selectedTenant ? selectedTenant.name : 'Unknown Tenant';
+        alert(`Payment assigned successfully to ${tenantName}!`);
+
         setAssignmentDialog({
           open: false,
           transaction: null,
@@ -451,7 +452,6 @@ const CSVPaymentProcessor = () => {
     try {
       const token = localStorage.getItem('token');
 
-      // Get ALL payment IDs by fetching all pages
       let allPaymentIds = [];
       const totalPages = previousUploads.pagination.total_pages;
 
@@ -476,7 +476,6 @@ const CSVPaymentProcessor = () => {
         allPaymentIds = [...allPaymentIds, ...pageIds];
       }
 
-      // Now reject all IDs
       const deleteResponse = await fetch('/api/csv-payments/reject-multiple', {
         method: 'POST',
         headers: {
@@ -599,7 +598,6 @@ const CSVPaymentProcessor = () => {
         gap: '20px',
         marginBottom: '32px'
       }}>
-        {/* Auto-Assigned Box */}
         <div style={{
           backgroundColor: 'white',
           padding: '24px',
@@ -624,7 +622,6 @@ const CSVPaymentProcessor = () => {
           </div>
         </div>
 
-        {/* Manual Review Box */}
         <div style={{
           backgroundColor: 'white',
           padding: '24px',
@@ -802,7 +799,7 @@ const CSVPaymentProcessor = () => {
         )}
       </div>
 
-      {/* Assignment Dialog */}
+      {/* Assignment Dialog - FIXED WITH UNKNOWN TENANT SUPPORT */}
       {assignmentDialog.open && (
         <div style={{
           position: 'fixed',
@@ -853,27 +850,72 @@ const CSVPaymentProcessor = () => {
               </div>
             </div>
 
-            {/* Tenant Search */}
+            {/* FIXED: Tenant Search with Unknown Option */}
             <div style={{ marginBottom: '24px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>
-                Search and Select Tenant *
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                fontWeight: '500',
+                color: '#374151'
+              }}>
+                Search and Select Tenant (Optional - leave blank for Unknown)
               </label>
-              <input
-                type="text"
-                value={tenantSearchQuery}
-                onChange={(e) => setTenantSearchQuery(e.target.value)}
-                placeholder="Type to search by name, email, or phone..."
-                style={{
-                  width: '100%',
-                  padding: '12px 16px',
-                  border: '2px solid #e2e8f0',
-                  borderRadius: 8,
-                  fontSize: '1rem',
-                  outline: 'none'
-                }}
-              />
 
-              {/* Selected Tenant Display */}
+              {/* Clear/Unknown Button */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+                <button
+                  onClick={() => {
+                    setAssignmentDialog(prev => ({ ...prev, selectedTenant: null }));
+                    setTenantSearchQuery('');
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: assignmentDialog.selectedTenant ? '#f3f4f6' : '#3b82f6',
+                    color: assignmentDialog.selectedTenant ? '#374151' : 'white',
+                    border: '2px solid #e2e8f0',
+                    borderRadius: 6,
+                    fontSize: '0.9rem',
+                    cursor: 'pointer',
+                    fontWeight: '500'
+                  }}
+                >
+                  {assignmentDialog.selectedTenant ? 'Clear Selection' : 'Unknown Tenant'}
+                </button>
+
+                {!assignmentDialog.selectedTenant && (
+                  <div style={{
+                    padding: '8px 12px',
+                    backgroundColor: '#fef3c7',
+                    borderRadius: 6,
+                    fontSize: '0.85rem',
+                    color: '#92400e',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}>
+                    ℹ️ Payment will be assigned to apartment with unknown tenant
+                  </div>
+                )}
+              </div>
+
+              {/* Only show search if no tenant selected */}
+              {!assignmentDialog.selectedTenant && (
+                <input
+                  type="text"
+                  value={tenantSearchQuery}
+                  onChange={(e) => setTenantSearchQuery(e.target.value)}
+                  placeholder="Type to search by name, email, or phone..."
+                  style={{
+                    width: '100%',
+                    padding: '12px 16px',
+                    border: '2px solid #e2e8f0',
+                    borderRadius: 8,
+                    fontSize: '1rem',
+                    outline: 'none'
+                  }}
+                />
+              )}
+
+              {/* Show selected tenant */}
               {assignmentDialog.selectedTenant && (
                 <div style={{
                   marginTop: '12px',
@@ -900,7 +942,7 @@ const CSVPaymentProcessor = () => {
                       setTenantSearchQuery('');
                     }}
                     style={{
-                      padding: '4px 8px',
+                      padding: '6px 12px',
                       backgroundColor: '#ef4444',
                       color: 'white',
                       border: 'none',
@@ -914,7 +956,7 @@ const CSVPaymentProcessor = () => {
                 </div>
               )}
 
-              {/* Tenant Search Results */}
+              {/* Tenant search results */}
               {!assignmentDialog.selectedTenant && tenantSearchQuery && filteredTenants.length > 0 && (
                 <div style={{
                   marginTop: '8px',
@@ -1007,13 +1049,9 @@ const CSVPaymentProcessor = () => {
                     <div style={{ fontSize: '0.85rem', color: '#1e40af', marginTop: '4px' }}>
                       €{assignmentDialog.selectedApartment.rent}/month • {assignmentDialog.selectedApartment.rooms} rooms
                     </div>
-                    {assignmentDialog.selectedApartment.contract_periods &&
-                     assignmentDialog.selectedApartment.contract_periods.length > 0 && (
+                    {assignmentDialog.selectedApartment.contract_periods && assignmentDialog.selectedApartment.contract_periods.length > 0 && (
                       <div style={{ fontSize: '0.8rem', color: '#1e40af', marginTop: '4px' }}>
-                        Contract: {assignmentDialog.selectedApartment.contract_periods
-                          .filter(c => c.status === 'active')
-                          .map(c => c.contract_number)
-                          .join(', ')}
+                        Contract: {assignmentDialog.selectedApartment.contract_periods[0].contract_number}
                       </div>
                     )}
                   </div>
@@ -1023,7 +1061,7 @@ const CSVPaymentProcessor = () => {
                       setApartmentSearchQuery('');
                     }}
                     style={{
-                      padding: '4px 8px',
+                      padding: '6px 12px',
                       backgroundColor: '#ef4444',
                       color: 'white',
                       border: 'none',
@@ -1064,18 +1102,10 @@ const CSVPaymentProcessor = () => {
                       <div style={{ fontWeight: '500', color: '#1e293b' }}>{apartment.address}</div>
                       <div style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '4px' }}>
                         €{apartment.rent}/month • {apartment.rooms} rooms
-                        {apartment.tenants && apartment.tenants.length > 0 && (
-                          <span style={{ color: '#059669', marginLeft: '8px' }}>
-                            • Current: {apartment.tenants.map(t => t.name).join(', ')}
-                          </span>
-                        )}
                       </div>
                       {apartment.contract_periods && apartment.contract_periods.length > 0 && (
-                        <div style={{ fontSize: '0.8rem', color: '#7c3aed', marginTop: '4px' }}>
-                          Contracts: {apartment.contract_periods
-                            .filter(c => c.status === 'active')
-                            .map(c => c.contract_number)
-                            .join(', ') || 'None active'}
+                        <div style={{ fontSize: '0.8rem', color: '#059669', marginTop: '4px' }}>
+                          Contract: {apartment.contract_periods[0].contract_number}
                         </div>
                       )}
                     </div>
@@ -1100,7 +1130,7 @@ const CSVPaymentProcessor = () => {
             {/* Amount */}
             <div style={{ marginBottom: '24px' }}>
               <label style={{ display: 'block', marginBottom: '8px', fontWeight: '500', color: '#374151' }}>
-                Payment Amount *
+                Amount *
               </label>
               <input
                 type="number"

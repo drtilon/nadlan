@@ -885,23 +885,24 @@ def get_uploaders():
 @csv_payments_bp.route("/assign/<int:payment_id>", methods=["POST"])
 @token_required
 def assign_payment(payment_id):
-    """Assign an unassigned payment to a tenant and apartment"""
+    """Assign an unassigned payment to a tenant and apartment - SUPPORTS UNKNOWN TENANT"""
     try:
         payment = UnassignedPayment.query.get(payment_id)
         if not payment:
             return jsonify({"error": "Payment not found"}), 404
 
         data = request.get_json()
-        tenant_id = data.get("tenant_id")
+        tenant_id = data.get("tenant_id")  # Can be None for "Unknown"
         apartment_id = data.get("apartment_id")
         amount = data.get("amount")
         payment_date = data.get("payment_date")
         notes = data.get("notes", "")
 
-        if not tenant_id or not apartment_id:
-            return jsonify({"error": "Tenant and apartment are required"}), 400
+        # apartment_id is REQUIRED, but tenant_id is OPTIONAL
+        if not apartment_id:
+            return jsonify({"error": "Apartment is required"}), 400
 
-        # Create payment record - REMOVED tenant_id parameter (FIXED)
+        # Create payment record - tenant_id can be None for unknown tenant
         new_payment = Payment(
             apartment_id=apartment_id,
             amount=float(amount),
@@ -920,13 +921,17 @@ def assign_payment(payment_id):
             new_payment.paymentStatus = "Completed"
 
         if hasattr(new_payment, 'notes'):
-            new_payment.notes = notes
+            # Add indication if this is an unknown tenant payment
+            if tenant_id is None:
+                new_payment.notes = f"[Unknown Tenant] {notes}".strip()
+            else:
+                new_payment.notes = notes
 
         db.session.add(new_payment)
 
         # Update unassigned payment status
         payment.status = "assigned"
-        payment.matched_tenant_id = tenant_id
+        payment.matched_tenant_id = tenant_id  # Can be None for unknown
         payment.matched_apartment_id = apartment_id
 
         db.session.commit()
@@ -935,12 +940,17 @@ def assign_payment(payment_id):
             action="manual_assignment",
             details={
                 "payment_id": payment_id,
-                "tenant_id": tenant_id,
-                "apartment_id": apartment_id
+                "tenant_id": tenant_id if tenant_id else "unknown",
+                "apartment_id": apartment_id,
+                "is_unknown_tenant": tenant_id is None
             }
         )
 
-        return jsonify({"success": True, "message": "Payment assigned successfully"}), 200
+        tenant_label = "Unknown Tenant" if tenant_id is None else f"Tenant ID {tenant_id}"
+        return jsonify({
+            "success": True,
+            "message": f"Payment assigned successfully to {tenant_label}"
+        }), 200
 
     except Exception as e:
         db.session.rollback()
@@ -950,7 +960,6 @@ def assign_payment(payment_id):
             success=False
         )
         return jsonify({"error": str(e)}), 500
-
 
 @csv_payments_bp.route("/reject/<int:payment_id>", methods=["POST"])
 @token_required

@@ -322,7 +322,7 @@ def process_csv_content(file_content):
                 # Extract sender name
                 sender = str(row.iloc[sender_col]).strip()
                 if not sender or sender.lower() in ['nan', 'none', '']:
-                    continue
+                    sender = ""
 
                 # Extract amount
                 amount = 0.0
@@ -431,6 +431,44 @@ def fuzzy_match_tenant(name, limit=5):
     return matches[:limit]
 
 
+def fuzzy_match_tenant_from_payment(payment_data, limit=5):
+    """
+    MODIFIED: Find tenants matching either the name OR description field
+    Returns best matches with source field indicated
+    """
+    name = payment_data.get("name", "")
+    description = payment_data.get("description", "")
+
+    all_matches = []
+
+    # Match from name field
+    if name:
+        name_matches = fuzzy_match_tenant(name, limit=limit * 2)
+        for match in name_matches:
+            match["matched_from"] = "name"
+            all_matches.append(match)
+
+    # Match from description/notes field
+    if description:
+        desc_matches = fuzzy_match_tenant(description, limit=limit * 2)
+        for match in desc_matches:
+            match["matched_from"] = "description"
+            all_matches.append(match)
+
+    # Remove duplicates, keeping highest score
+    seen_tenants = {}
+    for match in all_matches:
+        tenant_id = match["id"]
+        if tenant_id not in seen_tenants or match["score"] > seen_tenants[tenant_id]["score"]:
+            seen_tenants[tenant_id] = match
+
+    # Convert back to list and sort by score
+    unique_matches = list(seen_tenants.values())
+    unique_matches.sort(key=lambda x: x["score"], reverse=True)
+
+    return unique_matches[:limit]
+
+
 def get_tenant_current_apartment(tenant_id):
     """Get the current apartment for a tenant"""
     try:
@@ -464,8 +502,11 @@ def get_tenant_current_apartment(tenant_id):
         return None
 
 
-def create_automatic_payment_record(tenant, payment_data, current_user_id):
-    """Create payment record automatically for perfect match"""
+def create_automatic_payment_record(tenant, payment_data, current_user_id, matched_from="name"):
+    """
+    MODIFIED: Create payment record automatically for good match
+    Added matched_from parameter to track where the match came from
+    """
     try:
         apartment_id = get_current_apartment_for_tenant(tenant.id)
         if not apartment_id:
@@ -474,7 +515,7 @@ def create_automatic_payment_record(tenant, payment_data, current_user_id):
         amount = float(payment_data["amount"])
         payment_date = payment_data["date"]
 
-        # Create payment record - REMOVED tenant_id parameter (FIXED)
+        # Create payment record
         new_payment = Payment(
             apartment_id=apartment_id,
             amount=amount,
@@ -493,7 +534,8 @@ def create_automatic_payment_record(tenant, payment_data, current_user_id):
             new_payment.paymentStatus = "Completed"
 
         if hasattr(new_payment, 'notes'):
-            new_payment.notes = f"Auto-assigned from CSV: {tenant.name}"
+            match_source = f"Matched from {matched_from} field" if matched_from == "description" else ""
+            new_payment.notes = f"Auto-assigned from CSV: {tenant.name}. {match_source}".strip()
 
         db.session.add(new_payment)
         db.session.flush()
@@ -503,8 +545,8 @@ def create_automatic_payment_record(tenant, payment_data, current_user_id):
             payment_date=payment_date,
             amount=amount,
             status="assigned",
-            sender=payment_data["name"][:255],
-            name_from_csv=payment_data["name"][:255],
+            sender=payment_data["name"][:255] if payment_data["name"] else "",
+            name_from_csv=payment_data["name"][:255] if payment_data["name"] else "",
             reference=payment_data.get("description", "")[:500] if payment_data.get("description") else None,
             matched_tenant_id=tenant.id,
             matched_apartment_id=apartment_id,
@@ -521,6 +563,7 @@ def create_automatic_payment_record(tenant, payment_data, current_user_id):
                 "tenant_name": tenant.name,
                 "amount": amount,
                 "apartment_id": apartment_id,
+                "matched_from": matched_from,
             }
         )
         return True
@@ -565,7 +608,11 @@ def get_current_apartment_for_tenant(tenant_id):
 @csv_payments_bp.route("/process-csv-simple", methods=["POST"])
 @token_required
 def process_csv_simple():
-    """Enhanced CSV processing with automatic assignment and duplicate prevention"""
+    """
+    MODIFIED: Enhanced CSV processing with:
+    - 75% threshold for auto-assignment (changed from 95%)
+    - Matching from both name AND description fields
+    """
     try:
         if "file" not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
@@ -613,7 +660,7 @@ def process_csv_simple():
             existing = UnassignedPayment.query.filter_by(
                 payment_date=payment_data["date"],
                 amount=float(payment_data["amount"]),
-                sender=payment_data["name"][:255]
+                sender=payment_data["name"][:255] if payment_data["name"] else ""
             ).first()
 
             if existing:
@@ -625,18 +672,23 @@ def process_csv_simple():
                 })
                 continue
 
-            # Try to auto-assign
-            matches = fuzzy_match_tenant(payment_data["name"], limit=1)
+            # MODIFIED: Try to auto-assign using BOTH name and description
+            matches = fuzzy_match_tenant_from_payment(payment_data, limit=1)
 
-            if matches and matches[0]["score"] >= 0.95:
-                # Perfect match - auto assign
+            # MODIFIED: Changed threshold from 0.95 to 0.75 (75%)
+            if matches and matches[0]["score"] >= 0.75:
+                # Good match - auto assign
                 tenant = Tenant.query.get(matches[0]["id"])
-                if create_automatic_payment_record(tenant, payment_data, current_user_id):
+                matched_from = matches[0].get("matched_from", "name")
+
+                if create_automatic_payment_record(tenant, payment_data, current_user_id, matched_from):
                     auto_assigned += 1
                     auto_assigned_details.append({
                         "tenant_name": tenant.name,
                         "amount": payment_data["amount"],
-                        "date": str(payment_data["date"])
+                        "date": str(payment_data["date"]),
+                        "matched_from": matched_from,
+                        "score": matches[0]["score"]
                     })
                     continue
 
@@ -645,8 +697,8 @@ def process_csv_simple():
                 payment_date=payment_data["date"],
                 amount=float(payment_data["amount"]),
                 status="unassigned",
-                sender=payment_data["name"][:255],
-                name_from_csv=payment_data["name"][:255],
+                sender=payment_data["name"][:255] if payment_data["name"] else "",
+                name_from_csv=payment_data["name"][:255] if payment_data["name"] else "",
                 reference=payment_data.get("description", "")[:500] if payment_data.get("description") else None,
                 description=payment_data.get("description", "")[:500] if payment_data.get("description") else None,
                 csv_line=payment_data.get("row_number", i + 1),
@@ -661,8 +713,8 @@ def process_csv_simple():
                 "date": payment_data["date"].isoformat(),
                 "payment_date": payment_data["date"].isoformat(),
                 "amount": float(payment_data["amount"]),
-                "sender": payment_data["name"],
-                "name_from_csv": payment_data["name"],
+                "sender": payment_data["name"] or "",
+                "name_from_csv": payment_data["name"] or "",
                 "reference": payment_data.get("description", "") or "",
                 "description": payment_data.get("description", "") or "",
                 "csv_line": payment_data.get("row_number", i + 1),
@@ -678,6 +730,7 @@ def process_csv_simple():
                     "auto_assigned": auto_assigned,
                     "unassigned": len(unassigned_transactions),
                     "duplicates_skipped": skipped_duplicates,
+                    "threshold_used": "75%"
                 }
             )
         except Exception as e:
@@ -696,7 +749,7 @@ def process_csv_simple():
             "duplicates_skipped": skipped_duplicates,
             "duplicate_details": duplicate_details,
             "total_processed": len(result["payments"]),
-            "message": f"Processed {len(result['payments'])} payments: {auto_assigned} auto-assigned, {len(unassigned_transactions)} require review, {skipped_duplicates} duplicates skipped",
+            "message": f"Processed {len(result['payments'])} payments: {auto_assigned} auto-assigned (75% threshold), {len(unassigned_transactions)} require review, {skipped_duplicates} duplicates skipped",
         }), 200
 
     except Exception as e:
@@ -732,7 +785,12 @@ def get_unassigned_payments():
 
         results = []
         for payment in payments:
-            potential_matches = fuzzy_match_tenant(payment.name_from_csv, limit=5)
+            # MODIFIED: Use new function that checks both name and description
+            payment_data = {
+                "name": payment.name_from_csv or "",
+                "description": payment.description or payment.reference or ""
+            }
+            potential_matches = fuzzy_match_tenant_from_payment(payment_data, limit=5)
 
             payment_dict = payment.to_dict()
             payment_dict["potential_matches"] = potential_matches
@@ -1069,4 +1127,3 @@ def get_statistics():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-

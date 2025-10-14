@@ -339,7 +339,7 @@ def get_financial_overview():
 @token_required
 @role_required("admin")
 def get_outstanding_payments():
-    """FIXED: Enhanced outstanding payments with proper tenant relationships"""
+    """FIXED: Enhanced outstanding payments with proper current month calculation"""
     try:
         # Pagination parameters
         page = request.args.get("page", 1, type=int) - 1  # Convert to 0-based
@@ -396,7 +396,7 @@ def get_outstanding_payments():
         # FIXED: Get all apartments with proper search filtering
         apartments_query = Apartment.query
 
-        # Apply search filter - FIXED to not use non-existent tenant relationship
+        # Apply search filter
         if search_term:
             apartments_query = apartments_query.filter(
                 or_(
@@ -418,7 +418,7 @@ def get_outstanding_payments():
                 if not current_contract:
                     continue  # Skip apartments without active contracts
 
-                # Calculate outstanding amount
+                # Calculate outstanding amount (all time for this contract)
                 outstanding = calculate_outstanding_for_contract(apartment, current_contract, end_period)
 
                 # Apply minimum outstanding filter
@@ -435,15 +435,19 @@ def get_outstanding_payments():
 
                 paid_amount_this_month = sum(extract_payment_amount(p) for p in paid_this_month)
 
-                # FIXED: Get tenant information through proper relationship
+                # FIXED: Calculate outstanding for current month only
+                outstanding_this_month = max(0, float(current_contract.monthly_rent) - paid_amount_this_month)
+
+                # Get tenant information through proper relationship
                 tenant_names = get_apartment_tenants(apartment.id)
 
                 apartment_data = {
                     "apartment_id": apartment.id,
                     "address": apartment.get_short_address(),
                     "monthly_rent": float(current_contract.monthly_rent),
-                    "total_outstanding": float(outstanding),
+                    "total_outstanding": float(outstanding),  # All time
                     "paid_this_month": float(paid_amount_this_month),
+                    "outstanding_this_month": float(outstanding_this_month),  # FIXED: Current month only
                     "tenants": tenant_names,
                     "contract_number": current_contract.contract_number,
                     "contract_start": current_contract.start_date.isoformat(),
@@ -452,7 +456,7 @@ def get_outstanding_payments():
                     "last_payment_date": None
                 }
 
-                # Get last payment date for this apartment - FIXED field handling
+                # Get last payment date for this apartment
                 last_payment = Payment.query.filter(
                     Payment.apartment_id == apartment.id,
                     Payment.status.in_(["paid", "completed", "partial"])
@@ -487,10 +491,11 @@ def get_outstanding_payments():
         total_pages = math.ceil(total_count / limit) if total_count > 0 else 1
         paginated_apartments = apartments_data[offset:offset + limit]
 
-        # Calculate summary statistics
+        # FIXED: Calculate summary statistics including current month outstanding
         total_outstanding = sum(apt["total_outstanding"] for apt in apartments_data)
         total_expected = sum(apt["monthly_rent"] for apt in apartments_data)
         total_paid_this_month = sum(apt["paid_this_month"] for apt in apartments_data)
+        total_outstanding_this_month = sum(apt.get("outstanding_this_month", 0) for apt in apartments_data)  # FIXED: New calculation
         apartments_with_debt = len([apt for apt in apartments_data if apt["total_outstanding"] > 0])
 
         response = {
@@ -513,7 +518,8 @@ def get_outstanding_payments():
                 "end_date": end_period.isoformat()
             },
             "summary": {
-                "total_outstanding": total_outstanding,
+                "total_outstanding": total_outstanding,  # All time
+                "total_outstanding_this_month": total_outstanding_this_month,  # FIXED: Current month only
                 "total_expected": total_expected,
                 "total_paid_this_month": total_paid_this_month,
                 "collection_rate": ((total_expected - total_outstanding) / total_expected * 100) if total_expected > 0 else 100,
@@ -538,7 +544,6 @@ def get_outstanding_payments():
     except Exception as e:
         current_app.logger.error(f"Error in outstanding payments: {e}")
         return jsonify({"message": "Error retrieving outstanding payments", "error": str(e)}), 500
-
 # ========== NET PROFIT DETAILED ENDPOINT ==========
 @fast_analytics_bp.route("/analytics/net-profit-detailed", methods=["GET"])
 @token_required

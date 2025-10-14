@@ -156,13 +156,14 @@ function OutstandingPaymentsTab({
       setDetailDialog({ open: true, apartment, details: detailsResponse.data });
     } catch (error) {
       console.error('Error fetching apartment details:', error);
+      // Fallback data if API fails
       const currentDate = new Date();
       const currentMonth = currentDate.toLocaleDateString('en-US', { month: 'long' });
       const currentYear = currentDate.getFullYear();
 
       const monthlyRent = apartment.monthly_rent || 0;
       const paidThisMonth = apartment.paid_this_month || 0;
-      const totalOutstanding = apartment.total_outstanding || 0;
+      const outstandingThisMonth = apartment.outstanding_this_month || 0;
       const expectedAmount = monthlyRent;
       const collectionRate = expectedAmount > 0 ? ((paidThisMonth / expectedAmount) * 100) : 100;
 
@@ -192,7 +193,7 @@ function OutstandingPaymentsTab({
           tenant_name: "Unknown Tenant",
           total_paid: paidThisMonth,
           total_due: expectedAmount,
-          outstanding: totalOutstanding,
+          outstanding: outstandingThisMonth,
           payment_count: paidThisMonth > 0 ? 1 : 0,
           payments: paidThisMonth > 0 ? [{
             id: null,
@@ -202,30 +203,29 @@ function OutstandingPaymentsTab({
           }] : []
         }];
 
-      const fallbackDetails = {
-        apartment: {
-          id: apartment.apartment_id,
-          address: apartment.address,
-          monthly_rent: monthlyRent,
-          status: apartment.status
-        },
-        period: {
-          type: 'current_month',
-          label: `${currentMonth} ${currentYear}`,
-          start_date: new Date(currentYear, currentDate.getMonth(), 1).toISOString().split('T')[0],
-          end_date: new Date(currentYear, currentDate.getMonth() + 1, 0).toISOString().split('T')[0]
-        },
-        summary: {
-          expected_amount: expectedAmount,
-          total_paid: paidThisMonth,
-          total_outstanding: totalOutstanding,
-          collection_rate: collectionRate,
-          payment_count: paidThisMonth > 0 ? 1 : 0
-        },
-        tenant_breakdown: tenantBreakdown
-      };
-
-      setDetailDialog({ open: true, apartment, details: fallbackDetails });
+      setDetailDialog({
+        open: true,
+        apartment,
+        details: {
+          apartment: {
+            id: apartment.apartment_id,
+            address: apartment.address
+          },
+          period: {
+            type: 'current_month',
+            label: `${currentMonth} ${currentYear}`,
+            start_date: new Date(currentYear, currentDate.getMonth(), 1).toISOString().split('T')[0],
+            end_date: new Date(currentYear, currentDate.getMonth() + 1, 0).toISOString().split('T')[0]
+          },
+          summary: {
+            expected_amount: expectedAmount,
+            total_paid: paidThisMonth,
+            total_outstanding: outstandingThisMonth,
+            collection_rate: collectionRate
+          },
+          tenant_breakdown: tenantBreakdown
+        }
+      });
     } finally {
       setDetailLoading(false);
     }
@@ -245,17 +245,22 @@ function OutstandingPaymentsTab({
 
   useEffect(() => {
     fetchData();
-  }, [outstandingSearch, outstandingSort, outstandingPage, outstandingRowsPerPage]);
+  }, [outstandingPage, outstandingRowsPerPage, outstandingSearch, outstandingSort]);
 
-  const filteredApartments = data?.apartments?.filter(apartment => !showOnlyDebt || apartment.total_outstanding > 0) || [];
+  const filteredData = showOnlyDebt && data?.apartments
+    ? { ...data, apartments: data.apartments.filter(apt => apt.total_outstanding > 0) }
+    : data;
 
   return (
-    <Box sx={{ py: 4, px: { xs: 2, sm: 3, md: 4 } }}>
-      {/* Controls Row */}
-      <Grid container spacing={2} sx={{ mb: 4 }} alignItems="center">
-        <Grid item xs={12} sm={6} md={3}>
+    <Box sx={{ p: 3 }}>
+      {/* Header */}
+      <Grid container spacing={2} sx={{ mb: 4 }}>
+        <Grid item xs={12} md={3}>
           <Typography variant="h5" fontWeight={700} color={COLORS.text}>
-            Payments: {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+            Outstanding Payments
+          </Typography>
+          <Typography variant="body2" color={COLORS.muted}>
+            {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
           </Typography>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
@@ -325,12 +330,12 @@ function OutstandingPaymentsTab({
         </Grid>
       </Grid>
 
-      {/* Summary Cards */}
+      {/* Summary Cards - FIXED */}
       {data?.summary && (
         <Grid container spacing={2} sx={{ mb: 4 }}>
           {[
             {
-              title: 'Total Outstanding',
+              title: 'Total Outstanding (All Time)',
               value: formatCurrency(data.summary.total_outstanding),
               color: COLORS.error,
               icon: <WarningIcon />
@@ -343,70 +348,56 @@ function OutstandingPaymentsTab({
             },
             {
               title: 'Outstanding This Month',
-              value: formatCurrency(data.summary.total_outstanding),
-              color: data.summary.total_outstanding > 0 ? COLORS.error : COLORS.success,
+              value: formatCurrency(data.summary.total_outstanding_this_month), // FIXED: Use correct field
+              color: data.summary.total_outstanding_this_month > 0 ? COLORS.error : COLORS.success,
               icon: <WarningIcon />
             },
             {
-              title: 'Apartments with Debt',
-              value: data.summary.apartments_with_debt,
-              color: COLORS.text,
+              title: 'Collection Rate',
+              value: `${(data.summary.collection_rate || 0).toFixed(1)}%`,
+              color: (data.summary.collection_rate || 0) >= 80 ? COLORS.success : COLORS.warning,
               icon: <BarChartIcon />
             }
-          ].map((item, index) => (
-            <Grid item xs={12} sm={6} md={3} key={index}>
+          ].map((card, idx) => (
+            <Grid item xs={12} sm={6} md={3} key={idx}>
               <Paper
+                elevation={0}
                 sx={{
-                  p: 2,
+                  p: 3,
                   borderRadius: 2,
                   bgcolor: COLORS.surface,
                   border: `1px solid ${COLORS.border}`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 2,
-                  transition: 'transform 0.2s ease-in-out',
-                  '&:hover': {
-                    transform: 'translateY(-4px)',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                  }
+                  transition: 'all 0.2s',
+                  '&:hover': { transform: 'translateY(-2px)', boxShadow: 2 }
                 }}
               >
-                {item.icon}
-                <Box>
-                  <Typography variant="caption" color={COLORS.muted} fontWeight={500}>
-                    {item.title}
-                  </Typography>
-                  <Typography variant="h6" fontWeight={600} color={item.color}>
-                    {item.value}
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                  <Box sx={{ color: card.color }}>{card.icon}</Box>
+                  <Typography variant="body2" color={COLORS.muted} fontWeight={500}>
+                    {card.title}
                   </Typography>
                 </Box>
+                <Typography variant="h5" fontWeight={700} color={card.color}>
+                  {card.value}
+                </Typography>
               </Paper>
             </Grid>
           ))}
         </Grid>
       )}
 
-      {/* Main Table */}
-      <Paper sx={{ borderRadius: 2, overflow: 'hidden', bgcolor: COLORS.surface }}>
+      {/* Table */}
+      <Paper elevation={0} sx={{ borderRadius: 2, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
         <TableContainer>
           <Table>
-            <TableHead>
-              <TableRow sx={{
-                bgcolor: COLORS.background,
-                '& th': {
-                  fontWeight: 600,
-                  color: COLORS.text,
-                  py: 2,
-                  px: 2,
-                  borderBottom: `2px solid ${COLORS.border}`
-                }
-              }}>
-                <TableCell>Apartment</TableCell>
-                <TableCell>Tenants</TableCell>
-                <TableCell align="right">Monthly Rent</TableCell>
-                <TableCell align="right">Paid</TableCell>
-                <TableCell align="right">Outstanding</TableCell>
-                <TableCell align="center">Actions</TableCell>
+            <TableHead sx={{ bgcolor: COLORS.background }}>
+              <TableRow>
+                <TableCell><Typography variant="subtitle2" fontWeight={700}>Apartment</Typography></TableCell>
+                <TableCell><Typography variant="subtitle2" fontWeight={700}>Tenants</Typography></TableCell>
+                <TableCell align="right"><Typography variant="subtitle2" fontWeight={700}>Monthly Rent</Typography></TableCell>
+                <TableCell align="right"><Typography variant="subtitle2" fontWeight={700}>Paid This Month</Typography></TableCell>
+                <TableCell align="right"><Typography variant="subtitle2" fontWeight={700}>Total Outstanding</Typography></TableCell>
+                <TableCell align="center"><Typography variant="subtitle2" fontWeight={700}>Actions</Typography></TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -414,83 +405,47 @@ function OutstandingPaymentsTab({
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 8 }}>
                     <CircularProgress size={40} sx={{ color: COLORS.primary }} />
-                    <Typography color={COLORS.muted} sx={{ mt: 2 }}>
-                      Loading payments...
-                    </Typography>
                   </TableCell>
                 </TableRow>
-              ) : filteredApartments.length === 0 ? (
+              ) : !filteredData?.apartments || filteredData.apartments.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} align="center" sx={{ py: 8 }}>
-                    <WarningIcon sx={{ fontSize: 40, color: COLORS.warning, mb: 2 }} />
-                    <Typography variant="h6" color={COLORS.text}>
-                      No Outstanding Payments
-                    </Typography>
-                    <Typography color={COLORS.muted}>
-                      All apartments are current with their payments
-                    </Typography>
+                    <Typography color={COLORS.muted}>No outstanding payments found</Typography>
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredApartments.map((apartment, index) => (
+                filteredData.apartments.map((apartment) => (
                   <TableRow
                     key={apartment.apartment_id}
+                    hover
                     sx={{
+                      cursor: 'pointer',
                       '&:hover': { bgcolor: COLORS.highlight },
-                      '& td': { py: 1.5, px: 2 },
-                      backgroundColor: apartment.total_outstanding > 0 ? '#ffebee' : 'inherit'
+                      transition: 'background-color 0.2s'
                     }}
                     onClick={() => handleRowClick(apartment)}
                   >
                     <TableCell>
-                      <Typography variant="body2" fontWeight={500} color={COLORS.text}>
+                      <Typography variant="body2" fontWeight={600}>
                         {apartment.address}
-                      </Typography>
-                      <Typography variant="caption" color={COLORS.muted}>
-                        ID: {apartment.apartment_id}
                       </Typography>
                     </TableCell>
                     <TableCell>
-                      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
-                        {apartment.tenants && apartment.tenants.length > 0 ? (
-                          apartment.tenants.map((tenant, idx) => (
-                            <Tooltip key={idx} title="View Tenant Profile">
-                              <Chip
-                                label={tenant}
-                                size="small"
-                                sx={{
-                                  bgcolor: COLORS.surface,
-                                  borderColor: COLORS.border,
-                                  color: COLORS.text,
-                                  cursor: 'pointer',
-                                  '&:hover': {
-                                    bgcolor: COLORS.highlight,
-                                    borderColor: COLORS.primary
-                                  }
-                                }}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleTenantClick(null, tenant);
-                                }}
-                              />
-                            </Tooltip>
-                          ))
-                        ) : (
-                          <Typography variant="caption" color={COLORS.muted}>
-                            No tenants
-                          </Typography>
-                        )}
-                      </Box>
+                      <Typography variant="body2" color={COLORS.muted}>
+                        {apartment.tenants && apartment.tenants.length > 0
+                          ? apartment.tenants.join(', ')
+                          : 'No Tenants'}
+                      </Typography>
                     </TableCell>
                     <TableCell align="right">
-                      <Typography variant="body2" fontWeight={500}>
+                      <Typography variant="body2" fontWeight={600}>
                         {formatCurrency(apartment.monthly_rent)}
                       </Typography>
                     </TableCell>
                     <TableCell align="right">
                       <Typography
                         variant="body2"
-                        fontWeight={500}
+                        fontWeight={600}
                         color={apartment.paid_this_month > 0 ? COLORS.success : COLORS.muted}
                       >
                         {formatCurrency(apartment.paid_this_month)}
@@ -616,26 +571,21 @@ function OutstandingPaymentsTab({
                       value: `${(detailDialog.details.summary?.collection_rate || 0).toFixed(1)}%`,
                       color: (detailDialog.details.summary?.collection_rate || 0) >= 80 ? COLORS.success : COLORS.warning
                     }
-                  ].map((item, index) => (
-                    <Grid item xs={12} sm={6} md={3} key={index}>
+                  ].map((item, idx) => (
+                    <Grid item xs={6} sm={3} key={idx}>
                       <Paper
+                        elevation={0}
                         sx={{
                           p: 2,
+                          bgcolor: COLORS.background,
                           borderRadius: 2,
-                          bgcolor: COLORS.surface,
-                          border: `1px solid ${COLORS.border}`,
-                          textAlign: 'center',
-                          transition: 'transform 0.2s ease-in-out',
-                          '&:hover': {
-                            transform: 'translateY(-4px)',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-                          }
+                          border: `1px solid ${COLORS.border}`
                         }}
                       >
-                        <Typography variant="caption" color={COLORS.muted}>
+                        <Typography variant="caption" color={COLORS.muted} sx={{ mb: 0.5, display: 'block' }}>
                           {item.title}
                         </Typography>
-                        <Typography variant="h6" fontWeight={600} color={item.color}>
+                        <Typography variant="h6" fontWeight={700} color={item.color}>
                           {item.value}
                         </Typography>
                       </Paper>
@@ -645,75 +595,41 @@ function OutstandingPaymentsTab({
               </Box>
 
               {/* Tenant Breakdown */}
-              <Box>
-                <Typography
-                  variant="h6"
-                  fontWeight={600}
-                  sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}
-                >
-                  <BarChartIcon sx={{ color: COLORS.muted }} />
-                  Tenant Breakdown ({detailDialog.details.tenant_breakdown?.length || 0})
-                </Typography>
-                {detailDialog.details.tenant_breakdown && detailDialog.details.tenant_breakdown.length > 0 ? (
-                  <TableContainer component={Paper} sx={{ borderRadius: 2, bgcolor: COLORS.surface }}>
-                    <Table>
-                      <TableHead>
-                        <TableRow sx={{
-                          bgcolor: COLORS.background,
-                          '& th': { fontWeight: 600, py: 2, px: 2 }
-                        }}>
-                          <TableCell>Tenant</TableCell>
-                          <TableCell align="center">Payments</TableCell>
-                          <TableCell align="right">Due</TableCell>
-                          <TableCell align="right">Paid</TableCell>
-                          <TableCell align="right">Outstanding</TableCell>
-                          <TableCell align="center">Recent Payments</TableCell>
+              {detailDialog.details.tenant_breakdown && detailDialog.details.tenant_breakdown.length > 0 && (
+                <Box>
+                  <Typography
+                    variant="h6"
+                    fontWeight={600}
+                    sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}
+                  >
+                    <InfoIcon sx={{ color: COLORS.muted }} />
+                    Tenant Payment Breakdown
+                  </Typography>
+                  <TableContainer component={Paper} elevation={0} sx={{ border: `1px solid ${COLORS.border}` }}>
+                    <Table size="small">
+                      <TableHead sx={{ bgcolor: COLORS.background }}>
+                        <TableRow>
+                          <TableCell><Typography variant="subtitle2" fontWeight={700}>Tenant</Typography></TableCell>
+                          <TableCell align="right"><Typography variant="subtitle2" fontWeight={700}>Due</Typography></TableCell>
+                          <TableCell align="right"><Typography variant="subtitle2" fontWeight={700}>Paid</Typography></TableCell>
+                          <TableCell align="right"><Typography variant="subtitle2" fontWeight={700}>Outstanding</Typography></TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
-                        {detailDialog.details.tenant_breakdown.map((tenant, index) => (
-                          <TableRow
-                            key={index}
-                            sx={{
-                              '&:hover': { bgcolor: COLORS.highlight },
-                              '& td': { py: 1.5, px: 2 }
-                            }}
-                          >
+                        {detailDialog.details.tenant_breakdown.map((tenant, idx) => (
+                          <TableRow key={idx} hover>
                             <TableCell>
-                              <Typography
-                                variant="body2"
-                                fontWeight={500}
-                                sx={{
-                                  cursor: tenant.tenant_id ? 'pointer' : 'default',
-                                  '&:hover': { color: tenant.tenant_id ? COLORS.primary : COLORS.text }
-                                }}
-                                onClick={() => tenant.tenant_id && handleTenantClick(tenant.tenant_id, tenant.tenant_name)}
-                              >
-                                {tenant.tenant_name}
-                                {!tenant.tenant_id && (
-                                  <Typography variant="caption" color={COLORS.muted} sx={{ ml: 1 }}>
-                                    (estimated)
-                                  </Typography>
-                                )}
+                              <Typography variant="body2" fontWeight={600}>
+                                {tenant.tenant_name || 'Unknown'}
                               </Typography>
                             </TableCell>
-                            <TableCell align="center">
-                              <Chip
-                                label={`${tenant.payment_count || 0} payments`}
-                                size="small"
-                                sx={{
-                                  bgcolor: (tenant.payment_count || 0) > 0 ? '#e8f5e9' : '#fff3e0',
-                                  color: (tenant.payment_count || 0) > 0 ? COLORS.success : COLORS.warning
-                                }}
-                              />
-                            </TableCell>
                             <TableCell align="right">
-                              <Typography variant="body2" fontWeight={500}>
+                              <Typography variant="body2">
                                 {formatCurrency(tenant.total_due || 0)}
                               </Typography>
                             </TableCell>
                             <TableCell align="right">
-                              <Typography variant="body2" color={COLORS.success} fontWeight={500}>
+                              <Typography variant="body2" color={COLORS.success}>
                                 {formatCurrency(tenant.total_paid || 0)}
                               </Typography>
                             </TableCell>
@@ -726,67 +642,38 @@ function OutstandingPaymentsTab({
                                 {formatCurrency(tenant.outstanding || 0)}
                               </Typography>
                             </TableCell>
-                            <TableCell align="center">
-                              {tenant.payments && tenant.payments.length > 0 ? (
-                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                                  {tenant.payments.slice(0, 3).map((payment, paymentIndex) => (
-                                    <Chip
-                                      key={paymentIndex}
-                                      label={`${formatCurrency(payment.amount)} - ${formatDate(payment.date)}`}
-                                      size="small"
-                                      sx={{
-                                        bgcolor: payment.status === 'paid' ? '#e8f5e9' : '#fff3e0',
-                                        color: payment.status === 'paid' ? COLORS.success : COLORS.warning
-                                      }}
-                                    />
-                                  ))}
-                                </Box>
-                              ) : (
-                                <Typography variant="caption" color={COLORS.muted}>
-                                  No payments
-                                </Typography>
-                              )}
-                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
                   </TableContainer>
-                ) : (
-                  <Paper sx={{ p: 4, borderRadius: 2, bgcolor: COLORS.surface, textAlign: 'center' }}>
-                    <WarningIcon sx={{ fontSize: 40, color: COLORS.warning, mb: 2 }} />
-                    <Typography variant="h6" color={COLORS.text}>
-                      No Tenant Data Available
-                    </Typography>
-                    <Typography variant="body2" color={COLORS.muted}>
-                      Unable to load tenant payment details
-                    </Typography>
-                  </Paper>
-                )}
-              </Box>
+                </Box>
+              )}
             </Box>
           ) : (
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', py: 6 }}>
-              <WarningIcon sx={{ fontSize: 40, color: COLORS.warning, mb: 2 }} />
-              <Typography variant="h6" color={COLORS.text}>
-                No Payment Details Available
-              </Typography>
-            </Box>
+            <Typography color={COLORS.muted} align="center">No details available</Typography>
           )}
         </DialogContent>
 
-        <DialogActions sx={{ p: 2, bgcolor: COLORS.background, borderTop: `1px solid ${COLORS.border}` }}>
+        <DialogActions sx={{ p: 3, borderTop: `1px solid ${COLORS.border}` }}>
           <Button
             onClick={() => setDetailDialog({ open: false, apartment: null, details: null })}
-            variant="contained"
-            sx={{
-              borderRadius: 2,
-              px: 4,
-              bgcolor: COLORS.primary,
-              '&:hover': { bgcolor: '#1565c0' }
-            }}
+            sx={{ color: COLORS.muted }}
           >
             Close
+          </Button>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setDetailDialog({ open: false, apartment: null, details: null });
+              navigate(`/apartments/${detailDialog.apartment?.apartment_id}`);
+            }}
+            sx={{
+              bgcolor: COLORS.primary,
+              '&:hover': { bgcolor: COLORS.primary, opacity: 0.9 }
+            }}
+          >
+            View Apartment
           </Button>
         </DialogActions>
       </Dialog>

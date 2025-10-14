@@ -666,7 +666,7 @@ function OutstandingPaymentsTab({
             variant="contained"
             onClick={() => {
               setDetailDialog({ open: false, apartment: null, details: null });
-              navigate(`/apartments/${detailDialog.apartment?.apartment_id}`);
+              navigate(`/payments/${detailDialog.apartment?.apartment_id}`);
             }}
             sx={{
               bgcolor: COLORS.primary,

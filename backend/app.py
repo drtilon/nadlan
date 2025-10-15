@@ -173,9 +173,11 @@ def create_app():
             from routes.csv_payments import csv_payments_bp
             from routes.health import health_bp
             from routes.adminPanel.user_actions import adminPanel_bp
+            from routes.user_analytics import user_analytics_bp
 
             # Register all blueprints
             app.register_blueprint(contract_periods_bp, url_prefix="/api")
+            app.register_blueprint(user_analytics_bp, url_prefix="/api/")
             app.register_blueprint(health_bp, url_prefix="/api")
             app.register_blueprint(auth_bp, url_prefix="/api/auth")
             app.register_blueprint(adminPanel_bp, url_prefix="/api/adminPanel")

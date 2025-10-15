@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Container,
   Grid,
@@ -58,14 +58,14 @@ function UserAnalyticsPanel({ showNotification }) {
   const [filteredApartments, setFilteredApartments] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [filteredTenants, setFilteredTenants] = useState([]);
-  const [vacantUnits, setVacantUnits] = useState([]);
-  const [expiringContracts, setExpiringContracts] = useState([]);
-  const [paymentStatus, setPaymentStatus] = useState({
-    paid: [],
-    pending: [],
-    overdue: []
-  });
+  const [summary, setSummary] = useState(null);
   const [statusFilter, setStatusFilter] = useState('all');
+
+  // Infinite scroll state
+  const [apartmentPage, setApartmentPage] = useState(0);
+  const [hasMoreApartments, setHasMoreApartments] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const observerTarget = useRef(null);
 
   // Outstanding Payments Tab State
   const [outstandingData, setOutstandingData] = useState(null);
@@ -79,120 +79,122 @@ function UserAnalyticsPanel({ showNotification }) {
   const userData = getUserData();
   const isAdmin = userData && userData.role === 'admin';
 
-  // Fetch data on component mount
+  // Fetch initial data on component mount
   useEffect(() => {
-    fetchData();
+    fetchInitialData();
   }, []);
 
-  // Fetch all necessary data
-  const fetchData = async () => {
+  // Fetch initial data (summary and first page of apartments)
+  const fetchInitialData = async () => {
     setLoading(true);
     try {
-      // Get apartments
-      const apartmentsResponse = await api.get('/list');
-      let apartmentsData = apartmentsResponse.data || [];
+      // Fetch summary statistics
+      const summaryResponse = await api.get('/user-analytics/summary');
+      setSummary(summaryResponse.data);
 
-      // Ensure apartmentsData is an array
-      if (!Array.isArray(apartmentsData)) {
-        console.warn('Apartments data is not an array:', apartmentsData);
-        // Check if it's wrapped in an object
-        if (apartmentsData.apartments && Array.isArray(apartmentsData.apartments)) {
-          apartmentsData = apartmentsData.apartments;
-        } else {
-          apartmentsData = [];
-        }
-      }
+      // Fetch first page of apartments
+      await fetchApartments(0, true);
 
-      setApartments(apartmentsData);
-      setFilteredApartments(apartmentsData);
+      // Fetch tenants (lightweight)
+      await fetchTenants();
 
-      // Get tenants
-      const tenantsResponse = await api.get('/tenants/list');
-      let tenantsData = tenantsResponse.data || [];
-
-      // Ensure tenantsData is an array
-      if (!Array.isArray(tenantsData)) {
-        console.warn('Tenants data is not an array:', tenantsData);
-        if (tenantsData.tenants && Array.isArray(tenantsData.tenants)) {
-          tenantsData = tenantsData.tenants;
-        } else {
-          tenantsData = [];
-        }
-      }
-
-      setTenants(tenantsData);
-      setFilteredTenants(tenantsData);
-
-      // Process vacant units (only if apartmentsData is valid array)
-      const vacant = Array.isArray(apartmentsData) ? apartmentsData.filter(apt =>
-        apt.status === 'vacant' || apt.status === 'פנוי' || apt.status === 'Available'
-      ) : [];
-      setVacantUnits(vacant);
-
-      // Process expiring contracts
-      const today = new Date();
-      const thirtyDaysFromNow = new Date();
-      thirtyDaysFromNow.setDate(today.getDate() + 30);
-
-      const expiring = Array.isArray(apartmentsData) ? apartmentsData.filter(apt => {
-        if (!apt.contractEndDate) return false;
-        const endDate = new Date(apt.contractEndDate);
-        return endDate > today && endDate <= thirtyDaysFromNow;
-      }) : [];
-      setExpiringContracts(expiring);
-
-      // Fetch payment information (simplified for user view)
-      try {
-        const occupiedApartments = Array.isArray(apartmentsData) ? apartmentsData.filter(apt =>
-          apt.status === 'occupied' || apt.status === 'משוכר' || apt.status === 'Rented'
-        ) : [];
-
-        const paymentPromises = occupiedApartments.map(apt => api.get(`/payments/${apt.id}`));
-
-        const paymentResponses = await Promise.allSettled(paymentPromises);
-        const paid = [];
-        const pending = [];
-        const overdue = [];
-
-        paymentResponses.forEach((result, index) => {
-          if (result.status === 'fulfilled') {
-            const apartment = occupiedApartments[index];
-            const paymentData = result.value.data;
-
-            if (paymentData?.status === 'paid') {
-              paid.push(apartment);
-            } else if (paymentData?.status === 'pending' || paymentData?.status === 'partial') {
-              pending.push(apartment);
-            } else if (paymentData?.status === 'overdue' ||
-                      (new Date().getDate() > 5 && !paymentData?.status)) {
-              overdue.push(apartment);
-            } else {
-              pending.push(apartment);
-            }
-          }
-        });
-
-        setPaymentStatus({ paid, pending, overdue });
-      } catch (error) {
-        console.error('Error fetching payment data:', error);
-        setPaymentStatus({ paid: [], pending: [], overdue: [] });
-      }
     } catch (error) {
-      console.error('Error fetching data:', error);
+      console.error('Error fetching initial data:', error);
       showNotification && showNotification('Error loading analytics data', 'error');
-
-      // Set safe fallback data
-      setApartments([]);
-      setFilteredApartments([]);
-      setTenants([]);
-      setFilteredTenants([]);
-      setVacantUnits([]);
-      setExpiringContracts([]);
-      setPaymentStatus({ paid: [], pending: [], overdue: [] });
     } finally {
       setLoading(false);
     }
   };
+
+  // Fetch apartments with pagination
+  const fetchApartments = async (page = 0, reset = false) => {
+    try {
+      if (reset) {
+        setLoadingMore(false);
+      } else {
+        setLoadingMore(true);
+      }
+
+      const params = {
+        page,
+        limit: 50,
+        search: searchTerm,
+        status: statusFilter !== 'all' ? statusFilter : ''
+      };
+
+      const response = await api.get('/user-analytics/apartments', { params });
+      const newApartments = response.data.apartments || [];
+
+      if (reset) {
+        setApartments(newApartments);
+        setFilteredApartments(newApartments);
+        setApartmentPage(0);
+      } else {
+        setApartments(prev => [...prev, ...newApartments]);
+        setFilteredApartments(prev => [...prev, ...newApartments]);
+      }
+
+      setHasMoreApartments(response.data.pagination?.has_next_page || false);
+      setApartmentPage(page);
+
+    } catch (error) {
+      console.error('Error fetching apartments:', error);
+      showNotification && showNotification('Error loading apartments', 'error');
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  // Fetch tenants
+  const fetchTenants = async () => {
+    try {
+      const params = { search: searchTerm };
+      const response = await api.get('/user-analytics/tenants', { params });
+      const tenantsData = response.data || [];
+      setTenants(tenantsData);
+      setFilteredTenants(tenantsData);
+    } catch (error) {
+      console.error('Error fetching tenants:', error);
+      showNotification && showNotification('Error loading tenants', 'error');
+    }
+  };
+
+  // Infinite scroll observer
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0].isIntersecting && hasMoreApartments && !loadingMore && tabIndex === 0) {
+          fetchApartments(apartmentPage + 1, false);
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    if (observerTarget.current) {
+      observer.observe(observerTarget.current);
+    }
+
+    return () => {
+      if (observerTarget.current) {
+        observer.unobserve(observerTarget.current);
+      }
+    };
+  }, [hasMoreApartments, loadingMore, apartmentPage, tabIndex]);
+
+  // Handle search and filter changes
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      if (tabIndex === 0) {
+        // Re-fetch apartments with new filters
+        fetchApartments(0, true);
+      } else if (tabIndex === 2) {
+        // Re-fetch tenants with new search
+        fetchTenants();
+      }
+    }, 500);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchTerm, statusFilter]);
 
   // Fetch outstanding payments data
   const fetchOutstandingPayments = async () => {
@@ -211,7 +213,6 @@ function UserAnalyticsPanel({ showNotification }) {
     } catch (error) {
       console.error('Error fetching outstanding payments:', error);
       showNotification && showNotification('Error loading outstanding payments', 'error');
-      // Set fallback data
       setOutstandingData({
         apartments: [],
         pagination: {
@@ -234,42 +235,10 @@ function UserAnalyticsPanel({ showNotification }) {
 
   // Fetch outstanding data when tab changes
   useEffect(() => {
-    if (tabIndex === 4) { // Outstanding Payments tab
+    if (tabIndex === 4) {
       fetchOutstandingPayments();
     }
   }, [tabIndex, outstandingPage, outstandingRowsPerPage, outstandingSearch, outstandingSort]);
-
-  // Filter data based on search term and status filter
-  useEffect(() => {
-    // Ensure apartments is an array before filtering
-    let filtered = Array.isArray(apartments) ? apartments : [];
-
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(apt =>
-        apt.address && apt.address.toLowerCase().includes(term) ||
-        (apt.notes && apt.notes.toLowerCase().includes(term))
-      );
-    }
-
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(apt => apt.status === statusFilter);
-    }
-
-    setFilteredApartments(filtered);
-
-    // Filter tenants
-    let filteredTnts = Array.isArray(tenants) ? tenants : [];
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
-      filteredTnts = filteredTnts.filter(tenant =>
-        (tenant.name && tenant.name.toLowerCase().includes(term)) ||
-        (tenant.email && tenant.email.toLowerCase().includes(term)) ||
-        (tenant.phone && tenant.phone.toLowerCase().includes(term))
-      );
-    }
-    setFilteredTenants(filteredTnts);
-  }, [searchTerm, apartments, tenants, statusFilter]);
 
   // Format date for display
   const formatDate = (dateString) => {
@@ -320,6 +289,14 @@ function UserAnalyticsPanel({ showNotification }) {
     navigate('/analytics');
   };
 
+  // Refresh all data
+  const handleRefresh = () => {
+    fetchInitialData();
+    if (tabIndex === 4) {
+      fetchOutstandingPayments();
+    }
+  };
+
   // Outstanding payments handlers
   const handleOutstandingPageChange = (newPage) => {
     setOutstandingPage(newPage);
@@ -331,7 +308,6 @@ function UserAnalyticsPanel({ showNotification }) {
   };
 
   const handleOpenDetails = (apartment) => {
-    // For user panel, just navigate to apartment details
     navigate(`/dashboard?apartment=${apartment.apartment_id || apartment.id}`);
   };
 
@@ -357,7 +333,7 @@ function UserAnalyticsPanel({ showNotification }) {
           </Typography>
           <Box sx={{ display: 'flex', gap: 2 }}>
             <Tooltip title="Refresh Data">
-              <IconButton onClick={fetchData} disabled={loading}>
+              <IconButton onClick={handleRefresh} disabled={loading}>
                 <RefreshIcon />
               </IconButton>
             </Tooltip>
@@ -397,104 +373,103 @@ function UserAnalyticsPanel({ showNotification }) {
             }}
             sx={{ maxWidth: 600 }}
           />
-          <FormControl variant="outlined" sx={{ minWidth: 180 }}>
-            <InputLabel>Property Status</InputLabel>
-            <Select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              label="Property Status"
-            >
-              <MenuItem value="all">All Properties</MenuItem>
-              <MenuItem value="occupied">Occupied</MenuItem>
-              <MenuItem value="vacant">Vacant</MenuItem>
-              <MenuItem value="משוכר">משוכר</MenuItem>
-              <MenuItem value="פנוי">פנוי</MenuItem>
-              <MenuItem value="contract_sent">Contract Sent</MenuItem>
-            </Select>
-          </FormControl>
+          {tabIndex === 0 && (
+            <FormControl variant="outlined" sx={{ minWidth: 180 }}>
+              <InputLabel>Property Status</InputLabel>
+              <Select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                label="Property Status"
+              >
+                <MenuItem value="all">All Properties</MenuItem>
+                <MenuItem value="occupied">Occupied</MenuItem>
+                <MenuItem value="vacant">Vacant</MenuItem>
+              </Select>
+            </FormControl>
+          )}
         </Box>
 
-        {/* Overview Cards - NO FINANCIAL DATA */}
-        <Grid container spacing={3} sx={{ mb: 4 }}>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{
-              bgcolor: 'primary.main',
-              color: 'white',
-              borderRadius: 2,
-              background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
-              boxShadow: 3
-            }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Box>
-                    <Typography variant="h4" fontWeight="bold">{Array.isArray(apartments) ? apartments.length : 0}</Typography>
-                    <Typography variant="body2" sx={{ opacity: 0.9 }}>Total Properties</Typography>
+        {/* Overview Cards */}
+        {summary && (
+          <Grid container spacing={3} sx={{ mb: 4 }}>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card sx={{
+                bgcolor: 'primary.main',
+                color: 'white',
+                borderRadius: 2,
+                background: 'linear-gradient(135deg, #1976d2 0%, #1565c0 100%)',
+                boxShadow: 3
+              }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box>
+                      <Typography variant="h4" fontWeight="bold">{summary.total_apartments}</Typography>
+                      <Typography variant="body2" sx={{ opacity: 0.9 }}>Total Properties</Typography>
+                    </Box>
+                    <ApartmentIcon sx={{ fontSize: 48, opacity: 0.8 }} />
                   </Box>
-                  <ApartmentIcon sx={{ fontSize: 48, opacity: 0.8 }} />
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{
-              bgcolor: 'success.main',
-              color: 'white',
-              borderRadius: 2,
-              background: 'linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%)',
-              boxShadow: 3
-            }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Box>
-                    <Typography variant="h4" fontWeight="bold">
-                      {Array.isArray(apartments) ? apartments.filter(apt => apt.status === 'occupied' || apt.status === 'משוכר' || apt.status === 'Rented').length : 0}
-                    </Typography>
-                    <Typography variant="body2" sx={{ opacity: 0.9 }}>Occupied Properties</Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card sx={{
+                bgcolor: 'success.main',
+                color: 'white',
+                borderRadius: 2,
+                background: 'linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%)',
+                boxShadow: 3
+              }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box>
+                      <Typography variant="h4" fontWeight="bold">{summary.total_apartments - summary.vacant.count}</Typography>
+                      <Typography variant="body2" sx={{ opacity: 0.9 }}>Occupied Units</Typography>
+                    </Box>
+                    <HomeIcon sx={{ fontSize: 48, opacity: 0.8 }} />
                   </Box>
-                  <HomeIcon sx={{ fontSize: 48, opacity: 0.8 }} />
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{
-              bgcolor: 'warning.main',
-              color: 'white',
-              borderRadius: 2,
-              background: 'linear-gradient(135deg, #ed6c02 0%, #e65100 100%)',
-              boxShadow: 3
-            }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Box>
-                    <Typography variant="h4" fontWeight="bold">{Array.isArray(vacantUnits) ? vacantUnits.length : 0}</Typography>
-                    <Typography variant="body2" sx={{ opacity: 0.9 }}>Vacant Units</Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card sx={{
+                bgcolor: 'warning.main',
+                color: 'white',
+                borderRadius: 2,
+                background: 'linear-gradient(135deg, #ed6c02 0%, #e65100 100%)',
+                boxShadow: 3
+              }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box>
+                      <Typography variant="h4" fontWeight="bold">{summary.vacant.count}</Typography>
+                      <Typography variant="body2" sx={{ opacity: 0.9 }}>Vacant Units</Typography>
+                    </Box>
+                    <VacantIcon sx={{ fontSize: 48, opacity: 0.8 }} />
                   </Box>
-                  <VacantIcon sx={{ fontSize: 48, opacity: 0.8 }} />
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Card sx={{
-              bgcolor: 'error.main',
-              color: 'white',
-              borderRadius: 2,
-              background: 'linear-gradient(135deg, #d32f2f 0%, #c62828 100%)',
-              boxShadow: 3
-            }}>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Box>
-                    <Typography variant="h4" fontWeight="bold">{Array.isArray(expiringContracts) ? expiringContracts.length : 0}</Typography>
-                    <Typography variant="body2" sx={{ opacity: 0.9 }}>Contracts Expiring Soon</Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12} sm={6} md={3}>
+              <Card sx={{
+                bgcolor: 'error.main',
+                color: 'white',
+                borderRadius: 2,
+                background: 'linear-gradient(135deg, #d32f2f 0%, #c62828 100%)',
+                boxShadow: 3
+              }}>
+                <CardContent>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Box>
+                      <Typography variant="h4" fontWeight="bold">{summary.expiring_contracts.count}</Typography>
+                      <Typography variant="body2" sx={{ opacity: 0.9 }}>Contracts Expiring Soon</Typography>
+                    </Box>
+                    <RenewalIcon sx={{ fontSize: 48, opacity: 0.8 }} />
                   </Box>
-                  <RenewalIcon sx={{ fontSize: 48, opacity: 0.8 }} />
-                </Box>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </Grid>
           </Grid>
-        </Grid>
+        )}
 
         {/* Tabs for different data views */}
         <Box sx={{ mb: 3 }}>
@@ -520,19 +495,19 @@ function UserAnalyticsPanel({ showNotification }) {
           <Divider />
         </Box>
 
-        {/* Property Status Tab */}
+        {/* Property Status Tab with Infinite Scroll */}
         {tabIndex === 0 && (
           <Box>
             <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
               <HomeIcon color="primary" fontSize="small" />
-              Property Overview ({Array.isArray(filteredApartments) ? filteredApartments.length : 0} properties)
+              Property Overview ({filteredApartments.length}+ properties)
             </Typography>
             <TableContainer component={Paper} variant="outlined" sx={{ mb: 4, borderRadius: 2 }}>
               <Table>
                 <TableHead>
                   <TableRow sx={{ bgcolor: 'grey.50' }}>
                     <TableCell sx={{ fontWeight: 600 }}>Address</TableCell>
-                    <TableCell sx={{ fontWeight: 600 }}>Size</TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>City</TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>Rooms</TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
                     <TableCell sx={{ fontWeight: 600 }}>Tenants</TableCell>
@@ -540,66 +515,35 @@ function UserAnalyticsPanel({ showNotification }) {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {!Array.isArray(filteredApartments) || filteredApartments.length === 0 ? (
+                  {filteredApartments.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={6} align="center" sx={{ py: 4 }}>
                         <Alert severity="info">No properties match your search criteria</Alert>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    Array.isArray(filteredApartments) && filteredApartments.map(apartment => (
-                      <TableRow key={apartment.id} hover sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
+                    filteredApartments.map(apt => (
+                      <TableRow key={apt.id} hover sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
                         <TableCell>
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <ApartmentIcon color="primary" fontSize="small" />
-                            <Typography variant="body2" fontWeight="medium">
-                              {apartment.address}
-                            </Typography>
-                          </Box>
+                          <Typography variant="body2" fontWeight="medium">{apt.address}</Typography>
                         </TableCell>
-                        <TableCell>
-                          <Typography variant="body2">
-                            {apartment.size ? `${apartment.size} m²` : 'N/A'}
-                          </Typography>
-                        </TableCell>
-                        <TableCell>
-                          <Typography variant="body2">
-                            {apartment.rooms ? `${apartment.rooms} rooms` : 'N/A'}
-                          </Typography>
-                        </TableCell>
+                        <TableCell>{apt.city || 'N/A'}</TableCell>
+                        <TableCell>{apt.rooms}</TableCell>
                         <TableCell>
                           <Chip
-                            label={apartment.status === 'occupied' ? 'Occupied' :
-                                  apartment.status === 'vacant' ? 'Vacant' :
-                                  apartment.status === 'משוכר' ? 'משוכר' :
-                                  apartment.status === 'פנוי' ? 'פנוי' :
-                                  apartment.status === 'contract_sent' ? 'Contract Sent' :
-                                  apartment.status}
+                            label={apt.status}
                             size="small"
-                            color={apartment.status === 'occupied' || apartment.status === 'משוכר' ? 'success' :
-                                  apartment.status === 'vacant' || apartment.status === 'פנוי' ? 'primary' :
-                                  apartment.status === 'contract_sent' ? 'warning' :
-                                  'default'}
+                            color={apt.status === 'occupied' ? 'success' : 'default'}
                             sx={{ fontWeight: 500 }}
                           />
                         </TableCell>
-                        <TableCell>
-                          <Typography variant="body2">
-                            {Array.isArray(apartment.tenants) ?
-                              apartment.tenants.map(tenant =>
-                                typeof tenant === 'object' ?
-                                  (tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim()) :
-                                  tenant
-                              ).join(', ') :
-                              apartment.tenants || 'None'}
-                          </Typography>
-                        </TableCell>
+                        <TableCell>{apt.current_tenant_count || 0}</TableCell>
                         <TableCell align="right">
                           <Button
                             variant="outlined"
                             size="small"
                             endIcon={<ArrowForwardIcon />}
-                            onClick={() => handleViewApartment(apartment.id)}
+                            onClick={() => handleViewApartment(apt.id)}
                             sx={{ textTransform: 'none', fontWeight: 500 }}
                           >
                             Details
@@ -611,27 +555,44 @@ function UserAnalyticsPanel({ showNotification }) {
                 </TableBody>
               </Table>
             </TableContainer>
+
+            {/* Infinite scroll loading indicator */}
+            {hasMoreApartments && (
+              <Box ref={observerTarget} sx={{ py: 3, display: 'flex', justifyContent: 'center' }}>
+                {loadingMore ? (
+                  <CircularProgress size={40} />
+                ) : (
+                  <Typography color="text.secondary">Scroll for more...</Typography>
+                )}
+              </Box>
+            )}
+
+            {!hasMoreApartments && filteredApartments.length > 0 && (
+              <Box sx={{ py: 2, textAlign: 'center' }}>
+                <Typography color="text.secondary">All apartments loaded ({filteredApartments.length} total)</Typography>
+              </Box>
+            )}
           </Box>
         )}
 
         {/* Attention Needed Tab */}
-        {tabIndex === 1 && (
+        {tabIndex === 1 && summary && (
           <Box>
             <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
-              <WarningIcon color="primary" fontSize="small" />
-              Attention Needed
+              <WarningIcon color="warning" fontSize="small" />
+              Items Requiring Attention
             </Typography>
             <Grid container spacing={3}>
               <Grid item xs={12} md={6}>
                 <Typography variant="subtitle1" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <VacantIcon color="primary" fontSize="small" />
+                  <VacantIcon color="secondary" fontSize="small" />
                   Vacant Properties
                 </Typography>
                 <Paper variant="outlined" sx={{ p: 2, mb: 3, borderRadius: 2 }}>
-                  {!Array.isArray(vacantUnits) || vacantUnits.length === 0 ? (
+                  {summary.vacant.apartments.length === 0 ? (
                     <Alert severity="success">No vacant properties at the moment</Alert>
                   ) : (
-                    Array.isArray(vacantUnits) && vacantUnits.map(unit => (
+                    summary.vacant.apartments.map(unit => (
                       <Box key={unit.id} sx={{
                         p: 2,
                         mb: 1,
@@ -643,12 +604,7 @@ function UserAnalyticsPanel({ showNotification }) {
                         justifyContent: 'space-between',
                         alignItems: 'center'
                       }}>
-                        <Box>
-                          <Typography variant="subtitle2">{unit.address}</Typography>
-                          <Typography variant="caption" color="text.secondary">
-                            {unit.rooms ? `${unit.rooms} rooms • ` : ''}{unit.size ? `${unit.size} m²` : 'N/A'}
-                          </Typography>
-                        </Box>
+                        <Typography variant="subtitle2">{unit.address}</Typography>
                         <Button
                           size="small"
                           variant="outlined"
@@ -668,10 +624,10 @@ function UserAnalyticsPanel({ showNotification }) {
                   Contracts Expiring Soon
                 </Typography>
                 <Paper variant="outlined" sx={{ p: 2, mb: 3, borderRadius: 2 }}>
-                  {!Array.isArray(expiringContracts) || expiringContracts.length === 0 ? (
+                  {summary.expiring_contracts.contracts.length === 0 ? (
                     <Alert severity="success">No contracts expiring in the next 30 days</Alert>
                   ) : (
-                    Array.isArray(expiringContracts) && expiringContracts.map(contract => (
+                    summary.expiring_contracts.contracts.map(contract => (
                       <Box key={contract.id} sx={{
                         p: 2,
                         mb: 1,
@@ -687,7 +643,7 @@ function UserAnalyticsPanel({ showNotification }) {
                           <Typography variant="subtitle2">{contract.address}</Typography>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                             <Chip
-                              label={`Expires in ${getDaysUntilExpiration(contract.contractEndDate)} days`}
+                              label={`Expires in ${contract.daysUntil} days`}
                               size="small"
                               color="error"
                             />
@@ -715,66 +671,38 @@ function UserAnalyticsPanel({ showNotification }) {
                   Payment Status Overview
                 </Typography>
                 <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-                  {paymentStatus.overdue.length === 0 && paymentStatus.pending.length === 0 ? (
+                  {summary.payments.overdue === 0 && summary.payments.pending === 0 ? (
                     <Alert severity="success">All payments appear to be up to date</Alert>
                   ) : (
                     <Grid container spacing={2}>
-                      {paymentStatus.overdue.length > 0 && (
-                        <Grid item xs={12} md={6}>
-                          <Typography variant="subtitle2" gutterBottom>Properties with Payment Issues</Typography>
-                          {paymentStatus.overdue.map(apt => (
-                            <Box key={apt.id} sx={{
-                              p: 2,
-                              mb: 1,
-                              borderRadius: 1,
-                              border: '1px solid',
-                              borderColor: 'error.light',
-                              bgcolor: 'error.light',
-                              color: 'error.contrastText',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center'
-                            }}>
-                              <Typography>{apt.address}</Typography>
-                              <Button
-                                size="small"
-                                variant="contained"
-                                color="error"
-                                onClick={() => handleViewApartment(apt.id)}
-                              >
-                                View
-                              </Button>
-                            </Box>
-                          ))}
+                      {summary.payments.overdue > 0 && (
+                        <Grid item xs={12} md={4}>
+                          <Card sx={{ bgcolor: 'error.light', color: 'error.contrastText' }}>
+                            <CardContent>
+                              <Typography variant="h4" fontWeight="bold">{summary.payments.overdue}</Typography>
+                              <Typography variant="body2">Properties with Overdue Payments</Typography>
+                            </CardContent>
+                          </Card>
                         </Grid>
                       )}
-                      {paymentStatus.pending.length > 0 && (
-                        <Grid item xs={12} md={6}>
-                          <Typography variant="subtitle2" gutterBottom>Pending Payments</Typography>
-                          {paymentStatus.pending.map(apt => (
-                            <Box key={apt.id} sx={{
-                              p: 2,
-                              mb: 1,
-                              borderRadius: 1,
-                              border: '1px solid',
-                              borderColor: 'warning.light',
-                              bgcolor: 'warning.light',
-                              color: 'warning.contrastText',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center'
-                            }}>
-                              <Typography>{apt.address}</Typography>
-                              <Button
-                                size="small"
-                                variant="contained"
-                                color="warning"
-                                onClick={() => handleViewApartment(apt.id)}
-                              >
-                                View
-                              </Button>
-                            </Box>
-                          ))}
+                      {summary.payments.pending > 0 && (
+                        <Grid item xs={12} md={4}>
+                          <Card sx={{ bgcolor: 'warning.light', color: 'warning.contrastText' }}>
+                            <CardContent>
+                              <Typography variant="h4" fontWeight="bold">{summary.payments.pending}</Typography>
+                              <Typography variant="body2">Pending Payments</Typography>
+                            </CardContent>
+                          </Card>
+                        </Grid>
+                      )}
+                      {summary.payments.paid > 0 && (
+                        <Grid item xs={12} md={4}>
+                          <Card sx={{ bgcolor: 'success.light', color: 'success.contrastText' }}>
+                            <CardContent>
+                              <Typography variant="h4" fontWeight="bold">{summary.payments.paid}</Typography>
+                              <Typography variant="body2">Paid This Month</Typography>
+                            </CardContent>
+                          </Card>
                         </Grid>
                       )}
                     </Grid>
@@ -790,7 +718,7 @@ function UserAnalyticsPanel({ showNotification }) {
           <Box>
             <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 3 }}>
               <PersonIcon color="primary" fontSize="small" />
-              Tenant Overview ({Array.isArray(filteredTenants) ? filteredTenants.length : 0} tenants)
+              Tenant Overview ({filteredTenants.length} tenants)
             </Typography>
             <TableContainer component={Paper} variant="outlined" sx={{ mb: 4, borderRadius: 2 }}>
               <Table>
@@ -804,83 +732,47 @@ function UserAnalyticsPanel({ showNotification }) {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {!Array.isArray(filteredTenants) || filteredTenants.length === 0 ? (
+                  {filteredTenants.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
                         <Alert severity="info">No tenants match your search criteria</Alert>
                       </TableCell>
                     </TableRow>
                   ) : (
-                    Array.isArray(filteredTenants) && filteredTenants.map(tenant => {
-                      const tenantApartment = Array.isArray(apartments) ? apartments.find(apt =>
-                        apt.id === tenant.apartment_id ||
-                        (Array.isArray(apt.tenants) && apt.tenants.some(t =>
-                          (typeof t === 'object' && t.id === tenant.id) ||
-                          (typeof t === 'string' && t === tenant.name)
-                        ))
-                      ) : null;
-
-                      return (
-                        <TableRow key={tenant.id} hover sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
-                          <TableCell>
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <PersonIcon color="primary" fontSize="small" />
-                              <Typography variant="body2" fontWeight="medium">
-                                {tenant.name}
-                              </Typography>
-                            </Box>
-                          </TableCell>
-                          <TableCell>
+                    filteredTenants.map(tenant => (
+                      <TableRow key={tenant.id} hover sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
+                        <TableCell>
+                          <Typography variant="body2" sx={{ fontWeight: 600 }}>{tenant.name}</Typography>
+                        </TableCell>
+                        <TableCell>
+                          <Typography variant="body2">{tenant.email}</Typography>
+                          <Typography variant="caption" color="text.secondary">{tenant.phone}</Typography>
+                        </TableCell>
+                        <TableCell>
+                          {tenant.apartment_address ? (
                             <Box>
-                              {tenant.email && (
-                                <Typography variant="body2">{tenant.email}</Typography>
-                              )}
-                              {tenant.phone && (
-                                <Typography variant="body2">{tenant.phone}</Typography>
-                              )}
-                              {!tenant.email && !tenant.phone && (
-                                <Typography variant="body2" color="text.secondary">
-                                  No contact information
-                                </Typography>
-                              )}
+                              <Typography variant="body2">{tenant.apartment_address}</Typography>
+                              <Chip label="Active" size="small" color="success" sx={{ mt: 0.5 }} />
                             </Box>
-                          </TableCell>
-                          <TableCell>
-                            {tenantApartment ? (
-                              <Chip
-                                icon={<HomeIcon />}
-                                label={tenantApartment.address}
-                                size="small"
-                                color="primary"
-                                variant="outlined"
-                              />
-                            ) : (
-                              <Chip
-                                label="Not Assigned"
-                                size="small"
-                                variant="outlined"
-                              />
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="body2">
-                              {tenantApartment?.moveInDate ? formatDate(tenantApartment.moveInDate) : 'Not specified'}
-                            </Typography>
-                          </TableCell>
-                          <TableCell align="right">
-                            <Button
-                              variant="outlined"
-                              size="small"
-                              endIcon={<ArrowForwardIcon />}
-                              onClick={() => handleViewTenant(tenant.id)}
-                              sx={{ textTransform: 'none', fontWeight: 500 }}
-                            >
-                              Details
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
+                          ) : (
+                            <Chip label="No active contract" size="small" color="default" />
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {tenant.move_in_date ? formatDate(tenant.move_in_date) : 'N/A'}
+                        </TableCell>
+                        <TableCell align="right">
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => handleViewTenant(tenant.id)}
+                            endIcon={<ArrowForwardIcon />}
+                          >
+                            View
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
                   )}
                 </TableBody>
               </Table>
@@ -895,7 +787,7 @@ function UserAnalyticsPanel({ showNotification }) {
               <CalendarIcon color="primary" fontSize="small" />
               Contract Timeline
             </Typography>
-            {Array.isArray(apartments) && apartments.filter(apt => apt.contractEndDate).length === 0 ? (
+            {filteredApartments.filter(apt => apt.contractEndDate).length === 0 ? (
               <Alert severity="info">No contract end dates found for any properties</Alert>
             ) : (
               <TableContainer component={Paper} variant="outlined" sx={{ mb: 4, borderRadius: 2 }}>
@@ -903,22 +795,31 @@ function UserAnalyticsPanel({ showNotification }) {
                   <TableHead>
                     <TableRow sx={{ bgcolor: 'grey.50' }}>
                       <TableCell sx={{ fontWeight: 600 }}>Property</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Tenant(s)</TableCell>
-                      <TableCell sx={{ fontWeight: 600 }}>Move-in Date</TableCell>
+                      <TableCell sx={{ fontWeight: 600 }}>City</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Contract End Date</TableCell>
                       <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
                       <TableCell align="right" sx={{ fontWeight: 600 }}>Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {Array.isArray(filteredApartments) && filteredApartments
+                    {filteredApartments
                       .filter(apt => apt.contractEndDate)
                       .sort((a, b) => new Date(a.contractEndDate) - new Date(b.contractEndDate))
                       .map(apartment => {
                         const daysLeft = getDaysUntilExpiration(apartment.contractEndDate);
                         let statusColor = 'success';
-                        if (daysLeft < 0) statusColor = 'error';
-                        else if (daysLeft < 30) statusColor = 'warning';
+                        let statusLabel = 'Active';
+
+                        if (daysLeft < 0) {
+                          statusColor = 'error';
+                          statusLabel = 'Expired';
+                        } else if (daysLeft < 30) {
+                          statusColor = 'warning';
+                          statusLabel = `Expires in ${daysLeft} days`;
+                        } else if (daysLeft < 60) {
+                          statusColor = 'info';
+                          statusLabel = `${daysLeft} days remaining`;
+                        }
 
                         return (
                           <TableRow key={apartment.id} hover sx={{ '&:hover': { bgcolor: 'action.hover' } }}>
@@ -930,35 +831,14 @@ function UserAnalyticsPanel({ showNotification }) {
                                 </Typography>
                               </Box>
                             </TableCell>
-                            <TableCell>
-                              <Typography variant="body2">
-                                {Array.isArray(apartment.tenants) ?
-                                  apartment.tenants.map(tenant =>
-                                    typeof tenant === 'object' ?
-                                      (tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim()) :
-                                      tenant
-                                  ).join(', ') :
-                                  apartment.tenants || 'None'}
-                              </Typography>
-                            </TableCell>
-                            <TableCell>
-                              <Typography variant="body2">
-                                {formatDate(apartment.moveInDate)}
-                              </Typography>
-                            </TableCell>
+                            <TableCell>{apartment.city || 'N/A'}</TableCell>
                             <TableCell>
                               <Typography variant="body2">
                                 {formatDate(apartment.contractEndDate)}
                               </Typography>
                             </TableCell>
                             <TableCell>
-                              {daysLeft < 0 ? (
-                                <Chip label="Expired" size="small" color="error" />
-                              ) : daysLeft < 30 ? (
-                                <Chip label={`Expires in ${daysLeft} days`} size="small" color="warning" />
-                              ) : (
-                                <Chip label="Active" size="small" color="success" />
-                              )}
+                              <Chip label={statusLabel} size="small" color={statusColor} />
                             </TableCell>
                             <TableCell align="right">
                               <Button
@@ -989,7 +869,6 @@ function UserAnalyticsPanel({ showNotification }) {
               Outstanding Payments Overview
             </Typography>
 
-            {/* Note for users about data limitations */}
             <Alert severity="info" sx={{ mb: 3 }}>
               <Typography variant="body2">
                 This view shows properties with outstanding payment balances. Financial amounts are visible but detailed payment management requires admin access.
@@ -1003,8 +882,8 @@ function UserAnalyticsPanel({ showNotification }) {
               outstandingRowsPerPage={outstandingRowsPerPage}
               outstandingSearch={outstandingSearch}
               outstandingSort={outstandingSort}
-              setOutstandingSearch={setOutstandingSearch}
-              setOutstandingSort={setOutstandingSort}
+              setOutstandingSearch={(search) => setOutstandingSearch(search)}
+              setOutstandingSort={(sort) => setOutstandingSort(sort)}
               handleOutstandingPageChange={handleOutstandingPageChange}
               handleOutstandingRowsPerPageChange={handleOutstandingRowsPerPageChange}
               handleOpenDetails={handleOpenDetails}

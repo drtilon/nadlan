@@ -583,7 +583,7 @@ def add_tenant_payment(tenant_id):
             year=payment_date.year,
             amount=float(amount),
             status='PAID',
-            description=description
+            notes=description
         )
 
         # Set payment_date field if it exists

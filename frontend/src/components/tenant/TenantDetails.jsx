@@ -302,7 +302,7 @@ const TenantDetails = ({ showNotification }) => {
 
     setFormSubmitting(true);
     try {
-      await api.put(`/tenants/${tenantId}`, editFormData);
+      await api.put(`/tenants/update/${tenantId}`, editFormData);
       showNotification('Tenant updated successfully', 'success');
       setEditDialogOpen(false);
       fetchTenantData();

@@ -45,80 +45,80 @@ import ErrorIcon from '@mui/icons-material/Error';
 import CheckIcon from '@mui/icons-material/Check';
 import BusinessIcon from '@mui/icons-material/Business';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import TuneIcon from '@mui/icons-material/Tune';
 import ClearIcon from '@mui/icons-material/Clear';
 
-import api from '../../utils/api';
+import api, { getUserData } from '../../utils/api';
 import ApartmentCard from './ApartmentCard';
-import ApartmentFilters from './ApartmentFilters';
 import ApartmentDetailsDialog from './ApartmentDetailsDialog';
 import ContractExtensionDialog from '../contract/ContractExtensionDialog';
 import ContractManagementDialog from '../contract/ContractManagementDialog';
-import debounce from 'lodash/debounce';
-
-const PAGE_SIZE_OPTIONS = [12, 24, 48, 96];
+import { APARTMENT_STATUS, PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../../utils/constants';
+import ApartmentFilters from './ApartmentFilters';
+import { FILTER_OPTIONS, getFilterDisplayValue, getFilterLabel } from '../../utils/filterConstants';
 
 function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
-  const navigate = useNavigate();
-
-  // State management
+  // Core state
   const [displayedApartments, setDisplayedApartments] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  // UI state
+  const [selectedApartment, setSelectedApartment] = useState(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+
+  // Filter and search state
   const [searchTerm, setSearchTerm] = useState('');
   const [filters, setFilters] = useState({});
-  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterOptions, setFilterOptions] = useState({});
+  const [sortBy, setSortBy] = useState('expiry');
   const [filterMenuAnchor, setFilterMenuAnchor] = useState(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [selectedApartment, setSelectedApartment] = useState(null);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [totalCount, setTotalCount] = useState(0);
+
+  // Contract dialogs state
+  const [contractDialogOpen, setContractDialogOpen] = useState(false);
   const [extendContractOpen, setExtendContractOpen] = useState(false);
   const [selectedApartmentForExtension, setSelectedApartmentForExtension] = useState(null);
   const [isExtendingContract, setIsExtendingContract] = useState(false);
-  const [contractDialogOpen, setContractDialogOpen] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [sortBy, setSortBy] = useState('alphabetical');
-  const [filterOptions, setFilterOptions] = useState({});
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
 
-  // Ref for search input to maintain focus on mobile
-  const searchInputRef = useRef(null);
+  // Get user data to check if admin
+  const userData = getUserData();
+  const isAdmin = userData && userData.role === 'admin';
 
-  // Check if user is admin
+  // Navigation hook
+  const navigate = useNavigate();
+
+  // Debounce utility
+  const debounce = (func, delay) => {
+    let timeoutId;
+    return (...args) => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => func(...args), delay);
+    };
+  };
+
+  // Fetch filter options on mount
   useEffect(() => {
-    const checkAdminStatus = () => {
+    async function fetchFilterOptions() {
       try {
-        const userStr = localStorage.getItem('user');
-        if (userStr) {
-          const user = JSON.parse(userStr);
-          console.log('User data from localStorage:', user); // Debug log
-          setIsAdmin(user.role === 'admin');
-        } else {
-          console.log('No user data found in localStorage'); // Debug log
-          setIsAdmin(false);
-        }
+        const response = await api.get('/filter-options');
+        setFilterOptions(response.data);
       } catch (error) {
-        console.error('Error parsing user data:', error);
-        setIsAdmin(false);
+        console.error('Error fetching filter options:', error);
+        showNotification('Failed to load filter options', 'error');
       }
-    };
+    }
+    fetchFilterOptions();
+  }, [showNotification]);
 
-    checkAdminStatus();
-
-    // Also check on storage changes (if user logs in/out in another tab)
-    const handleStorageChange = (e) => {
-      if (e.key === 'user') {
-        checkAdminStatus();
-      }
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
-
-  // Fetch apartments
-  const fetchApartments = useCallback(async (page, size, search, sort, filters, forceRefresh = false) => {
-    if (forceRefresh) {
+  // Fetch apartments with pagination, search, sort, and filters
+  const fetchApartments = useCallback(async (page = 1, size = pageSize, search = '', sort = sortBy, filters = {}, refresh = false) => {
+    if (refresh) {
       setIsRefreshing(true);
     } else {
       setIsLoading(true);
@@ -126,7 +126,8 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
 
     const token = localStorage.getItem('token');
     if (!token) {
-      showNotification('Please log in again.', 'error');
+      console.error('No authentication token found');
+      showNotification('Authentication required. Please log in again.', 'error');
       setIsLoading(false);
       setIsRefreshing(false);
       return;
@@ -197,20 +198,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
       setIsRefreshing(false);
     }
   }, [pageSize, sortBy, showNotification]);
-
-  // Fetch filter options
-  useEffect(() => {
-    const fetchFilterOptions = async () => {
-      try {
-        const response = await api.get('/filter-options');
-        setFilterOptions(response.data);
-      } catch (error) {
-        console.error('Error fetching filter options:', error);
-        showNotification('Failed to load filter options', 'error');
-      }
-    };
-    fetchFilterOptions();
-  }, [showNotification]);
 
   // Debounced fetch function
   const debouncedFetchApartments = useRef(debounce((page, size, search, sort, filters) => {
@@ -287,17 +274,9 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
     fetchApartments(1, pageSize, searchTerm, newSortBy, filters);
   }, [fetchApartments, pageSize, searchTerm, filters]);
 
-  // Handle search input changes - FIXED for mobile
+  // Handle search input changes
   const handleSearchChange = useCallback((event) => {
-    const newValue = event.target.value;
-    setSearchTerm(newValue);
-
-    // Maintain focus on mobile after state update
-    setTimeout(() => {
-      if (searchInputRef.current) {
-        searchInputRef.current.focus();
-      }
-    }, 0);
+    setSearchTerm(event.target.value);
   }, []);
 
   // Handle contract extension
@@ -374,28 +353,6 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
   // Get active filter count
   const getActiveFilterCount = () => Object.values(filters).filter(value => value && value.trim()).length + (searchTerm ? 1 : 0);
 
-  // Get filter label
-  const getFilterLabel = (key) => ({
-    landlord: 'Landlord',
-    city: 'City',
-    state: 'State',
-    zip_code: 'Zip Code',
-    rooms: 'Rooms',
-    size_range: 'Size',
-    status: 'Status',
-    gender: 'Gender',
-    floor: 'Floor'
-  }[key] || key);
-
-  // Get filter display value
-  const getFilterDisplayValue = (key, value, options) => {
-    if (key === 'landlord' && options.landlords) {
-      const landlord = options.landlords.find(l => l.id === parseInt(value));
-      return landlord ? landlord.name : value;
-    }
-    return value;
-  };
-
   if (isLoading && !isRefreshing) {
     return (
       <Container maxWidth={false} sx={{ py: 4, display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
@@ -411,75 +368,46 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
           Properties {isRefreshing && <RefreshIcon sx={{ ml: 1, fontSize: '1.5rem', color: 'primary.main' }} />}
         </Typography>
         <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' }, width: { xs: '100%', md: 'auto' } }}>
-          <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, height: '48px', borderColor: 'divider' }}
-          >
+          <Button variant="outlined" startIcon={<RefreshIcon />} onClick={handleRefresh} disabled={isRefreshing} sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, height: '48px', borderColor: 'divider' }}>
             Refresh
           </Button>
-          {isAdmin && (
-            <Button
-              variant="contained"
-              startIcon={<ApartmentIcon />}
-              onClick={() => onEdit(null)}
-              sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, backgroundColor: 'primary.main', px: 3, height: '48px', boxShadow: 2 }}
-            >
-              Add Property
-            </Button>
-          )}
+          <Button variant="contained" startIcon={<ApartmentIcon />} onClick={() => onEdit(null)} sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, backgroundColor: 'primary.main', px: 3, height: '48px', boxShadow: 2 }}>
+            Add Property
+          </Button>
         </Box>
       </Box>
 
       <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, mb: 4, width: '100%' }}>
         <TextField
           fullWidth
-          inputRef={searchInputRef}
           placeholder="Search by address"
           value={searchTerm}
           onChange={handleSearchChange}
           InputProps={{
             startAdornment: <InputAdornment position="start"><SearchIcon sx={{ color: 'text.secondary' }} /></InputAdornment>,
-            endAdornment: searchTerm && (
-              <InputAdornment position="end">
-                <IconButton size="small" onClick={() => setSearchTerm('')}>
-                  <ClearIcon fontSize="small" />
-                </IconButton>
-              </InputAdornment>
-            ),
-            sx: { borderRadius: 1, height: '48px', backgroundColor: 'background.paper' }
+            sx: { borderRadius: 1, height: '48px', backgroundColor: 'background.paper', '& fieldset': { borderColor: 'divider' } }
           }}
+          sx={{ flexGrow: 1 }}
+          autoFocus // Ensure focus on mount
         />
-        <Button
-          variant="outlined"
-          startIcon={<FilterListIcon />}
-          onClick={() => setFilterOpen(true)}
-          sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, height: '48px', minWidth: { xs: '100%', sm: '150px' }, borderColor: 'divider' }}
-        >
-          Filters {getActiveFilterCount() > 0 && `(${getActiveFilterCount()})`}
-        </Button>
-        <Button
-          variant="outlined"
-          endIcon={<SortByAlphaIcon />}
-          onClick={handleFilterClick}
-          sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, height: '48px', minWidth: { xs: '100%', sm: '150px' }, borderColor: 'divider' }}
-        >
+        <Button variant="outlined" startIcon={<FilterListIcon />} onClick={handleFilterClick} sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, height: '48px', minWidth: '140px', borderColor: 'divider' }}>
           Sort: {getSortDisplayText(sortBy)}
         </Button>
-        <Menu anchorEl={filterMenuAnchor} open={Boolean(filterMenuAnchor)} onClose={handleFilterClose}>
-          <MenuItem onClick={() => handleSortChange('alphabetical')}>
-            <ListItemIcon><SortByAlphaIcon fontSize="small" /></ListItemIcon>
-            <ListItemText>Alphabetical {sortBy === 'alphabetical' && <CheckIcon fontSize="small" sx={{ ml: '1rem' }} />}</ListItemText>
-          </MenuItem>
-          <MenuItem onClick={() => handleSortChange('expiry')}>
+        <Button variant="outlined" startIcon={<TuneIcon />} onClick={() => setFilterOpen(true)} sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, height: '48px', minWidth: '140px', borderColor: 'divider' }}>
+          Filters {getActiveFilterCount() > 0 && `(${getActiveFilterCount()})`}
+        </Button>
+        <Menu anchorEl={filterMenuAnchor} open={Boolean(filterMenuAnchor)} onClose={handleFilterClose} PaperProps={{ sx: { borderRadius: 1, minWidth: 200, mt: 1 } }}>
+          <MenuItem onClick={() => handleSortChange('expiry')} selected={sortBy === 'expiry'}>
             <ListItemIcon><DateRangeIcon fontSize="small" /></ListItemIcon>
-            <ListItemText>Contract Expiry {sortBy === 'expiry' && <CheckIcon fontSize="small" sx={{ ml: '1rem' }} />}</ListItemText>
+            <ListItemText>By Expiry Date{sortBy === 'expiry' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}</ListItemText>
           </MenuItem>
-          <MenuItem onClick={() => handleSortChange('occupancy')}>
+          <MenuItem onClick={() => handleSortChange('alphabetical')} selected={sortBy === 'alphabetical'}>
+            <ListItemIcon><SortByAlphaIcon fontSize="small" /></ListItemIcon>
+            <ListItemText>Alphabetical (A-Z){sortBy === 'alphabetical' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}</ListItemText>
+          </MenuItem>
+          <MenuItem onClick={() => handleSortChange('occupancy')} selected={sortBy === 'occupancy'}>
             <ListItemIcon><People fontSize="small" /></ListItemIcon>
-            <ListItemText>Occupancy {sortBy === 'occupancy' && <CheckIcon fontSize="small" sx={{ ml: '1rem' }} />}</ListItemText>
+            <ListItemText>By Occupancy Level{sortBy === 'occupancy' && <CheckIcon sx={{ ml: 1, fontSize: '1rem' }} />}</ListItemText>
           </MenuItem>
         </Menu>
       </Box>

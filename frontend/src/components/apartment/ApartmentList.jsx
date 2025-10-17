@@ -86,15 +86,34 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
 
   // Check if user is admin
   useEffect(() => {
-    const userStr = localStorage.getItem('user');
-    if (userStr) {
+    const checkAdminStatus = () => {
       try {
-        const user = JSON.parse(userStr);
-        setIsAdmin(user.role === 'admin');
+        const userStr = localStorage.getItem('user');
+        if (userStr) {
+          const user = JSON.parse(userStr);
+          console.log('User data from localStorage:', user); // Debug log
+          setIsAdmin(user.role === 'admin');
+        } else {
+          console.log('No user data found in localStorage'); // Debug log
+          setIsAdmin(false);
+        }
       } catch (error) {
         console.error('Error parsing user data:', error);
+        setIsAdmin(false);
       }
-    }
+    };
+
+    checkAdminStatus();
+
+    // Also check on storage changes (if user logs in/out in another tab)
+    const handleStorageChange = (e) => {
+      if (e.key === 'user') {
+        checkAdminStatus();
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   // Fetch apartments
@@ -178,6 +197,20 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
       setIsRefreshing(false);
     }
   }, [pageSize, sortBy, showNotification]);
+
+  // Fetch filter options
+  useEffect(() => {
+    const fetchFilterOptions = async () => {
+      try {
+        const response = await api.get('/filter-options');
+        setFilterOptions(response.data);
+      } catch (error) {
+        console.error('Error fetching filter options:', error);
+        showNotification('Failed to load filter options', 'error');
+      }
+    };
+    fetchFilterOptions();
+  }, [showNotification]);
 
   // Debounced fetch function
   const debouncedFetchApartments = useRef(debounce((page, size, search, sort, filters) => {
@@ -378,11 +411,22 @@ function ApartmentList({ onEdit, onGoToPayments, showNotification }) {
           Properties {isRefreshing && <RefreshIcon sx={{ ml: 1, fontSize: '1.5rem', color: 'primary.main' }} />}
         </Typography>
         <Box sx={{ display: 'flex', gap: 2, flexDirection: { xs: 'column', sm: 'row' }, width: { xs: '100%', md: 'auto' } }}>
-          <Button variant="outlined" startIcon={<RefreshIcon />} onClick={handleRefresh} disabled={isRefreshing} sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, height: '48px', borderColor: 'divider' }}>
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, height: '48px', borderColor: 'divider' }}
+          >
             Refresh
           </Button>
           {isAdmin && (
-            <Button variant="contained" startIcon={<ApartmentIcon />} onClick={() => onEdit(null)} sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, backgroundColor: 'primary.main', px: 3, height: '48px', boxShadow: 2 }}>
+            <Button
+              variant="contained"
+              startIcon={<ApartmentIcon />}
+              onClick={() => onEdit(null)}
+              sx={{ borderRadius: 1, textTransform: 'none', fontWeight: 500, backgroundColor: 'primary.main', px: 3, height: '48px', boxShadow: 2 }}
+            >
               Add Property
             </Button>
           )}

@@ -1,4 +1,4 @@
-// components/tenant/TenantDetails.jsx - FIXED: Property Details + EUR currency + Transfer bug fix
+// components/tenant/TenantDetails.jsx - CORRECTED for Real DB Schema
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -8,22 +8,17 @@ import {
   Button,
   Box,
   Grid,
-  Card,
-  CardContent,
   Divider,
   Chip,
   Stack,
-  IconButton,
   Alert,
   CircularProgress,
-  Avatar,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Tooltip,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -42,30 +37,23 @@ import {
 import {
   ArrowBack as BackIcon,
   Person as PersonIcon,
-  Home as HomeIcon,
   Phone as PhoneIcon,
   Email as EmailIcon,
   Cake as BirthdayIcon,
   Wc as GenderIcon,
-  Schedule as ContractIcon,
-  AttachMoney as MoneyIcon,
   Payment as PaymentIcon,
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
   History as HistoryIcon,
   SwapHoriz as TransferIcon,
   ExitToApp as MoveOutIcon,
-  LocationOn as LocationIcon,
   ContactPage as PassportIcon,
   Edit as EditIcon,
-  Apartment as ApartmentIcon,
-  CalendarToday as CalendarIcon,
-  Euro as EuroIcon,
-  Business as BusinessIcon,
-  Add as AddIcon
-} from '@mui/icons-material'; // FIXED: Import Add from @mui/icons-material
-import { green, red, orange, blue, grey } from '@mui/material/colors';
+  Euro as EuroIcon
+} from '@mui/icons-material';
 import api from '../../utils/api';
+import PaymentComponent from './PaymentComponent';
+
 const TenantDetails = ({ showNotification }) => {
   const { tenantId } = useParams();
   const navigate = useNavigate();
@@ -73,7 +61,7 @@ const TenantDetails = ({ showNotification }) => {
   // State
   const [tenant, setTenant] = useState(null);
   const [paymentHistory, setPaymentHistory] = useState([]);
-  const [moveHistory, setMoveHistory] = useState([]);
+  const [contractHistory, setContractHistory] = useState([]); // FIXED: Use contractHistory instead of moveHistory
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -94,16 +82,11 @@ const TenantDetails = ({ showNotification }) => {
     refund_iban: ''
   });
 
-  const [paymentForm, setPaymentForm] = useState({
-    amount: '',
-    payment_date: new Date().toISOString().split('T')[0],
-    description: 'Rent Payment',
-    method: 'bank_transfer'
-  });
-
   const [transferForm, setTransferForm] = useState({
     new_apartment_id: '',
     transfer_date: new Date().toISOString().split('T')[0],
+    move_out_date: new Date().toISOString().split('T')[0],
+    move_in_date: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Next day
     notes: ''
   });
 
@@ -119,19 +102,19 @@ const TenantDetails = ({ showNotification }) => {
   const [isSearchingApartments, setIsSearchingApartments] = useState(false);
   const [formSubmitting, setFormSubmitting] = useState(false);
 
-  // Computed values - FIXED to handle different data structures
+  // FIXED: Computed values using contractHistory instead of moveHistory
   const currentContract = tenant?.current_contracts?.[0];
   let currentApartment = currentContract?.apartment || tenant?.current_apartment;
 
-  // If no current apartment from contracts, try to get it from move history
-  if (!currentApartment && moveHistory.length > 0) {
-    const currentMove = moveHistory.find(move => move.is_current);
-    if (currentMove) {
+  // If no current apartment from contracts, try to get it from contract history
+  if (!currentApartment && contractHistory.length > 0) {
+    const currentContract = contractHistory.find(contract => contract.is_current);
+    if (currentContract) {
       currentApartment = {
-        id: currentMove.apartment_id,
-        address: currentMove.apartment_address,
-        monthly_rent: currentMove.monthly_rent || 0,
-        rent: currentMove.monthly_rent || 0
+        id: currentContract.apartment_id,
+        address: currentContract.apartment_address,
+        monthly_rent: currentContract.monthly_rent || 0,
+        rent: currentContract.monthly_rent || 0
       };
     }
   }
@@ -165,7 +148,7 @@ const TenantDetails = ({ showNotification }) => {
     }
   };
 
-  // Search apartments on server side as user types
+  // Search apartments function
   const searchApartments = async (searchQuery) => {
     if (!searchQuery.trim()) {
       setApartmentSearchResults([]);
@@ -174,20 +157,12 @@ const TenantDetails = ({ showNotification }) => {
 
     setIsSearchingApartments(true);
     try {
-      console.log('Searching apartments with query:', searchQuery);
-
-      // Use the search parameter from the backend API
       const response = await api.get(`/list?search=${encodeURIComponent(searchQuery)}&limit=20`);
-      console.log('Search response:', response.data);
-
       let apartmentData = response.data;
 
-      // Based on backend code, the response structure is { apartments: [...] }
       if (apartmentData && apartmentData.apartments) {
         apartmentData = apartmentData.apartments;
       }
-
-      console.log('Search results:', apartmentData?.length, 'apartments');
 
       if (Array.isArray(apartmentData)) {
         setApartmentSearchResults(apartmentData);
@@ -197,7 +172,6 @@ const TenantDetails = ({ showNotification }) => {
     } catch (error) {
       console.error('Error searching apartments:', error);
       setApartmentSearchResults([]);
-
       if (showNotification) {
         showNotification('Failed to search apartments', 'error');
       }
@@ -216,12 +190,12 @@ const TenantDetails = ({ showNotification }) => {
 
     const timeout = setTimeout(() => {
       searchApartments(query);
-    }, 500); // Wait 500ms after user stops typing
+    }, 500);
 
     setSearchTimeout(timeout);
   };
 
-  // Data fetching
+  // FIXED: Data fetching using correct endpoints
   const fetchTenantData = async () => {
     setLoading(true);
     setError(null);
@@ -249,26 +223,35 @@ const TenantDetails = ({ showNotification }) => {
         refund_iban: tenantData.refund_iban || ''
       });
 
-      // Fetch payment history
+      // FIXED: Fetch payment history using the correct endpoint
       try {
         const paymentResponse = await api.get(`/tenants/${tenantId}/payment-history`);
         if (paymentResponse.data) {
-          setPaymentHistory(paymentResponse.data.payments || paymentResponse.data.payment_history || []);
+          // Handle multiple possible response structures
+          const payments = paymentResponse.data.payments ||
+                          paymentResponse.data.payment_history ||
+                          paymentResponse.data.paymentHistory ||
+                          [];
+          setPaymentHistory(payments);
+          console.log('Payment history loaded:', payments.length, 'payments');
         }
       } catch (error) {
         console.error('Error fetching payment history:', error);
         setPaymentHistory([]);
+        if (showNotification) {
+          showNotification('Could not load payment history', 'warning');
+        }
       }
 
-      // Fetch move history
+      // FIXED: Fetch contract history (not move history)
       try {
-        const moveResponse = await api.get(`/tenants/${tenantId}/move-history`);
-        if (moveResponse.data) {
-          setMoveHistory(moveResponse.data.move_history || []);
+        const contractResponse = await api.get(`/tenants/${tenantId}/move-history`);
+        if (contractResponse.data) {
+          setContractHistory(contractResponse.data.move_history || []);
         }
       } catch (error) {
-        console.error('Error fetching move history:', error);
-        setMoveHistory([]);
+        console.error('Error fetching contract history:', error);
+        setContractHistory([]);
       }
 
     } catch (error) {
@@ -315,78 +298,52 @@ const TenantDetails = ({ showNotification }) => {
     }
   };
 
-  const handleAddPayment = async () => {
-    if (!paymentForm.amount || parseFloat(paymentForm.amount) <= 0) {
-      showNotification('Valid payment amount is required', 'error');
+  // FIXED: Payment success handler
+  const handlePaymentSuccess = (paymentData) => {
+    showNotification('Payment added successfully', 'success');
+    setPaymentDialogOpen(false);
+    // Refresh the tenant data to get updated payment history
+    fetchTenantData();
+  };
+
+  // FIXED: Transfer handler using correct API
+  const handleTransferTenant = async () => {
+    if (!selectedApartment) {
+      showNotification('Please select a new apartment', 'error');
       return;
     }
 
     setFormSubmitting(true);
     try {
-      await api.post(`/tenants/${tenantId}/payments`, paymentForm);
-      showNotification('Payment added successfully', 'success');
-      setPaymentDialogOpen(false);
-      setPaymentForm({
-        amount: '',
-        payment_date: new Date().toISOString().split('T')[0],
-        description: 'Rent Payment',
-        method: 'bank_transfer'
+      const transferData = {
+        new_apartment_id: selectedApartment.id,
+        transfer_date: transferForm.transfer_date,
+        move_out_date: transferForm.move_out_date,
+        move_in_date: transferForm.move_in_date,
+        notes: transferForm.notes
+      };
+
+      await api.post(`/tenants/${tenantId}/transfer`, transferData);
+      showNotification('Tenant transferred successfully', 'success');
+      setTransferDialogOpen(false);
+      setTransferForm({
+        new_apartment_id: '',
+        transfer_date: new Date().toISOString().split('T')[0],
+        move_out_date: new Date().toISOString().split('T')[0],
+        move_in_date: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+        notes: ''
       });
+      setSelectedApartment(null);
+      setApartmentSearchValue('');
       fetchTenantData();
     } catch (error) {
-      console.error('Error adding payment:', error);
-      const errorMessage = error.response?.data?.message || 'Error adding payment';
+      console.error('Error transferring tenant:', error);
+      const errorMessage = error.response?.data?.message || 'Error transferring tenant';
       showNotification(errorMessage, 'error');
     } finally {
       setFormSubmitting(false);
     }
   };
-
-  // FIXED: Transfer handler with proper data structure
-  const handleTransferTenant = async () => {
-  if (!selectedApartment) {
-    showNotification('Please select a new apartment', 'error');
-    return;
-  }
-
-  setFormSubmitting(true);
-  try {
-    // FIXED: Use different dates for move_out and move_in
-    // Move out date should be the transfer date
-    // Move in date should be the day after (or the same day if immediate transfer)
-    const transferDate = new Date(transferForm.transfer_date);
-    const moveInDate = new Date(transferDate);
-    moveInDate.setDate(transferDate.getDate() + 1); // Move in the next day
-
-    const transferData = {
-      new_apartment_id: selectedApartment.id,
-      transfer_date: transferForm.transfer_date,
-      move_out_date: transferForm.transfer_date,
-      move_in_date: moveInDate.toISOString().split('T')[0], // Move in next day
-      notes: transferForm.notes
-    };
-    console.log('Sending transfer data:', transferData);
-
-    await api.post(`/tenants/${tenantId}/transfer`, transferData);
-    showNotification('Tenant transferred successfully', 'success');
-    setTransferDialogOpen(false);
-    setTransferForm({
-      new_apartment_id: '',
-      transfer_date: new Date().toISOString().split('T')[0],
-      notes: ''
-    });
-    setSelectedApartment(null);
-    setApartmentSearchValue('');
-    fetchTenantData();
-  } catch (error) {
-    console.error('Error transferring tenant:', error);
-    const errorMessage = error.response?.data?.message || 'Error transferring tenant';
-    showNotification(errorMessage, 'error');
-  } finally {
-    setFormSubmitting(false);
-  }
-};
-
 
   const handleMoveOut = async () => {
     if (!moveOutForm.move_out_date) {
@@ -413,76 +370,76 @@ const TenantDetails = ({ showNotification }) => {
     }
   };
 
-  // Transfer dialog handlers
-  const openTransferDialog = () => {
-    setTransferDialogOpen(true);
-  };
-
-  const handleCloseTransferDialog = () => {
-    setTransferDialogOpen(false);
-    setSelectedApartment(null);
-    setApartmentSearchValue('');
-    setApartmentSearchResults([]);
-    setTransferForm({
-      new_apartment_id: '',
-      transfer_date: new Date().toISOString().split('T')[0],
-      notes: ''
-    });
-    if (searchTimeout) {
-      clearTimeout(searchTimeout);
-      setSearchTimeout(null);
-    }
-  };
-
   if (loading) {
     return (
-      <Container maxWidth="xl" sx={{ py: 4 }}>
-        <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
           <CircularProgress />
         </Box>
       </Container>
     );
   }
 
-  if (error || !tenant) {
+  if (error) {
     return (
-      <Container maxWidth="xl" sx={{ py: 4 }}>
+      <Container maxWidth="lg" sx={{ py: 4 }}>
         <Alert severity="error" sx={{ mb: 2 }}>
-          {error || 'Tenant not found'}
+          {error}
         </Alert>
-        <Button
-          startIcon={<BackIcon />}
-          onClick={() => navigate('/tenants')}
-          variant="outlined"
-        >
+        <Button variant="outlined" onClick={() => navigate('/tenants')}>
           Back to Tenants
         </Button>
       </Container>
     );
   }
 
+  if (!tenant) {
+    return (
+      <Container maxWidth="lg" sx={{ py: 4 }}>
+        <Alert severity="warning">Tenant not found</Alert>
+      </Container>
+    );
+  }
+
   return (
-    <Container maxWidth="xl" sx={{ py: 4 }}>
-      {/* Header with Back Button and Actions */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <IconButton onClick={() => navigate('/tenants')}>
-            <BackIcon />
-          </IconButton>
-          <Avatar sx={{ bgcolor: 'primary.main', width: 56, height: 56 }}>
-            <PersonIcon />
-          </Avatar>
-          <Box>
-            <Typography variant="h4" component="h1" gutterBottom>
-              {tenant.name}
-            </Typography>
-            <Chip
-              label={currentContract || currentApartment ? 'Active Tenant' : 'Inactive'}
-              color={currentContract || currentApartment ? 'success' : 'default'}
-              icon={currentContract || currentApartment ? <CheckCircleIcon /> : <ErrorIcon />}
-            />
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      {/* Header */}
+      <Box sx={{ mb: 4 }}>
+        <Button
+          startIcon={<BackIcon />}
+          onClick={() => navigate('/tenants')}
+          sx={{ mb: 2 }}
+        >
+          Back to Tenants
+        </Button>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <PersonIcon sx={{ fontSize: 40, color: 'primary.main' }} />
+            <Box>
+              <Typography variant="h4" component="h1">
+                {tenant.name}
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+                <PhoneIcon color="action" fontSize="small" />
+                <Typography variant="body2" color="text.secondary">
+                  {tenant.phone || 'No phone'}
+                </Typography>
+                <EmailIcon color="action" fontSize="small" sx={{ ml: 2 }} />
+                <Typography variant="body2" color="text.secondary">
+                  {tenant.email || 'No email'}
+                </Typography>
+              </Box>
+            </Box>
           </Box>
+
+          <Chip
+            label={currentContract || currentApartment ? 'Active Tenant' : 'Inactive'}
+            color={currentContract || currentApartment ? 'success' : 'default'}
+            icon={currentContract || currentApartment ? <CheckCircleIcon /> : <ErrorIcon />}
+          />
         </Box>
+
         <Stack direction="row" spacing={2}>
           <Button
             variant="outlined"
@@ -502,7 +459,7 @@ const TenantDetails = ({ showNotification }) => {
           <Button
             variant="outlined"
             startIcon={<TransferIcon />}
-            onClick={openTransferDialog}
+            onClick={() => setTransferDialogOpen(true)}
             disabled={!currentContract && !currentApartment}
           >
             Transfer
@@ -548,35 +505,19 @@ const TenantDetails = ({ showNotification }) => {
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                 <PassportIcon color="action" />
                 <Box>
-                  <Typography variant="body2" color="text.secondary">Tenant ID (Passport)</Typography>
+                  <Typography variant="body2" color="text.secondary">Tenant ID</Typography>
                   <Typography variant="body1">{tenant.passport_id || 'N/A'}</Typography>
-                </Box>
-              </Box>
-
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <PhoneIcon color="action" />
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Phone Number</Typography>
-                  <Typography variant="body1">{tenant.phone || 'N/A'}</Typography>
-                </Box>
-              </Box>
-
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                <EmailIcon color="action" />
-                <Box>
-                  <Typography variant="body2" color="text.secondary">Email Address</Typography>
-                  <Typography variant="body1">{tenant.email}</Typography>
                 </Box>
               </Box>
             </Stack>
           </Paper>
         </Grid>
 
-        {/* Property Details */}
+        {/* Current Property */}
         <Grid item xs={12} md={8}>
-          <Paper sx={{ p: 3, mb: 3 }}>
+          <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom color="primary">
-              Property Details
+              Current Property
             </Typography>
             <Divider sx={{ mb: 2 }} />
 
@@ -585,38 +526,22 @@ const TenantDetails = ({ showNotification }) => {
                 <Grid item xs={12} md={6}>
                   <Stack spacing={2}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <LocationIcon color="action" />
-                      <Box>
-                        <Typography variant="body2" color="text.secondary">Address</Typography>
-                        <Typography variant="body1">{currentApartment.address}</Typography>
-                      </Box>
+                      <Typography variant="body2" color="text.secondary">Address</Typography>
+                      <Typography variant="body1">
+                        {currentApartment.address || 'N/A'}
+                      </Typography>
                     </Box>
 
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <ApartmentIcon color="action" />
-                      <Box>
-                        <Typography variant="body2" color="text.secondary">Property ID</Typography>
-                        <Typography variant="body1">#{currentApartment.id}</Typography>
-                      </Box>
-                    </Box>
-                  </Stack>
-                </Grid>
-
-                <Grid item xs={12} md={6}>
-                  <Stack spacing={2}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                      <CalendarIcon color="action" />
-                      <Box>
-                        <Typography variant="body2" color="text.secondary">Contract Period</Typography>
-                        <Typography variant="body1">
-                          {currentContract ?
-                            `${formatDate(currentContract.start_date)} - ${formatDate(currentContract.end_date) || 'Ongoing'}` :
-                            moveHistory.find(move => move.is_current) ?
-                              `${formatDate(moveHistory.find(move => move.is_current).move_in_date)} - Present` :
-                              'N/A'
-                          }
-                        </Typography>
-                      </Box>
+                      <Typography variant="body2" color="text.secondary">Contract Period</Typography>
+                      <Typography variant="body1">
+                        {currentContract ?
+                          `${formatDate(currentContract.start_date)} - ${formatDate(currentContract.end_date) || 'Ongoing'}` :
+                          contractHistory.find(contract => contract.is_current) ?
+                            `${formatDate(contractHistory.find(contract => contract.is_current).move_in_date)} - Present` :
+                            'N/A'
+                        }
+                      </Typography>
                     </Box>
 
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
@@ -637,7 +562,7 @@ const TenantDetails = ({ showNotification }) => {
           </Paper>
 
           {/* Payment History */}
-          <Paper sx={{ p: 3 }}>
+          <Paper sx={{ p: 3, mt: 3 }}>
             <Typography variant="h6" gutterBottom color="primary">
               Payment History
             </Typography>
@@ -659,12 +584,12 @@ const TenantDetails = ({ showNotification }) => {
                     {paymentHistory.map((payment, index) => (
                       <TableRow key={index}>
                         <TableCell>{formatDate(payment.paymentDate || payment.payment_date || payment.date)}</TableCell>
-                        <TableCell>{payment.description || payment.paymentDescription || 'Payment'}</TableCell>
+                        <TableCell>{payment.description || payment.notes || payment.paymentType || 'Payment'}</TableCell>
                         <TableCell align="right">{formatCurrency(payment.amountPaid || payment.amount)}</TableCell>
                         <TableCell>
                           <Chip
-                            label={payment.status || payment.paymentStatus || 'Completed'}
-                            color={getStatusColor(payment.status || payment.paymentStatus)}
+                            label={payment.status || 'Completed'}
+                            color={getStatusColor(payment.status)}
                             size="small"
                           />
                         </TableCell>
@@ -681,37 +606,38 @@ const TenantDetails = ({ showNotification }) => {
         </Grid>
       </Grid>
 
-      {/* Move History */}
-      {moveHistory.length > 0 && (
+      {/* FIXED: Contract History instead of Move History */}
+      {contractHistory.length > 0 && (
         <Paper sx={{ p: 3, mt: 3 }}>
           <Typography variant="h6" gutterBottom color="primary">
-            Move History
+            Contract History
           </Typography>
           <Divider sx={{ mb: 2 }} />
 
           <List>
-            {moveHistory.map((history, index) => (
+            {contractHistory.map((contract, index) => (
               <ListItem key={index} sx={{ border: '1px solid #e0e0e0', borderRadius: 1, mb: 1 }}>
                 <ListItemIcon>
-                  <HistoryIcon color={history.is_current ? 'primary' : 'action'} />
+                  <HistoryIcon color={contract.is_current ? 'primary' : 'action'} />
                 </ListItemIcon>
                 <ListItemText
                   primary={
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
                       <Typography variant="body1">
-                        {history.apartment_address}
+                        {contract.apartment_address}
                       </Typography>
-                      {history.is_current && (
+                      {contract.is_current && (
                         <Chip label="Current" color="primary" size="small" />
                       )}
+                      <Typography variant="body2" color="text.secondary">
+                        {formatCurrency(contract.monthly_rent)}/month
+                      </Typography>
                     </Box>
                   }
                   secondary={
                     <Typography variant="body2" color="text.secondary">
-                      {formatDate(history.move_in_date)} - {history.move_out_date ?
-                        formatDate(history.move_out_date) : 'Present'}
-                      {history.monthly_rent && ` • ${formatCurrency(history.monthly_rent)}/month`}
-                      {history.is_primary && ' • Primary Tenant'}
+                      {formatDate(contract.move_in_date)} - {contract.move_out_date ? formatDate(contract.move_out_date) : 'Present'}
+                      {contract.contract_number && ` • Contract: ${contract.contract_number}`}
                     </Typography>
                   }
                 />
@@ -724,234 +650,176 @@ const TenantDetails = ({ showNotification }) => {
       {/* Edit Dialog */}
       <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Edit Tenant Information</DialogTitle>
-        <DialogContent sx={{ pt: 2 }}>
-          <Stack spacing={3}>
-            <TextField
-              label="Name"
-              fullWidth
-              value={editFormData.name}
-              onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
-              required
-            />
-            <TextField
-              label="Email"
-              type="email"
-              fullWidth
-              value={editFormData.email}
-              onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
-              required
-            />
-            <TextField
-              label="Phone"
-              fullWidth
-              value={editFormData.phone}
-              onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
-            />
-            <TextField
-              label="Date of Birth"
-              type="date"
-              fullWidth
-              InputLabelProps={{ shrink: true }}
-              value={editFormData.date_of_birth}
-              onChange={(e) => setEditFormData({ ...editFormData, date_of_birth: e.target.value })}
-            />
-            <FormControl fullWidth>
-              <InputLabel>Gender</InputLabel>
-              <Select
-                value={editFormData.gender}
-                onChange={(e) => setEditFormData({ ...editFormData, gender: e.target.value })}
-                label="Gender"
-              >
-                <MenuItem value="">Select Gender</MenuItem>
-                <MenuItem value="male">Male</MenuItem>
-                <MenuItem value="female">Female</MenuItem>
-                <MenuItem value="other">Other</MenuItem>
-              </Select>
-            </FormControl>
-            <TextField
-              label="Passport ID"
-              fullWidth
-              value={editFormData.passport_id}
-              onChange={(e) => setEditFormData({ ...editFormData, passport_id: e.target.value })}
-            />
-            <TextField
-              label="Refund IBAN"
-              fullWidth
-              value={editFormData.refund_iban}
-              onChange={(e) => setEditFormData({ ...editFormData, refund_iban: e.target.value })}
-            />
-          </Stack>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Name"
+                value={editFormData.name}
+                onChange={(e) => setEditFormData({ ...editFormData, name: e.target.value })}
+                required
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Email"
+                type="email"
+                value={editFormData.email}
+                onChange={(e) => setEditFormData({ ...editFormData, email: e.target.value })}
+                required
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Phone"
+                value={editFormData.phone}
+                onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                type="date"
+                label="Date of Birth"
+                value={editFormData.date_of_birth}
+                onChange={(e) => setEditFormData({ ...editFormData, date_of_birth: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <FormControl fullWidth>
+                <InputLabel>Gender</InputLabel>
+                <Select
+                  value={editFormData.gender}
+                  onChange={(e) => setEditFormData({ ...editFormData, gender: e.target.value })}
+                  label="Gender"
+                >
+                  <MenuItem value="male">Male</MenuItem>
+                  <MenuItem value="female">Female</MenuItem>
+                  <MenuItem value="other">Other</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Passport/ID"
+                value={editFormData.passport_id}
+                onChange={(e) => setEditFormData({ ...editFormData, passport_id: e.target.value })}
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Refund IBAN"
+                value={editFormData.refund_iban}
+                onChange={(e) => setEditFormData({ ...editFormData, refund_iban: e.target.value })}
+              />
+            </Grid>
+          </Grid>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleEditSubmit} variant="contained" disabled={formSubmitting}>
-            {formSubmitting ? 'Saving...' : 'Save'}
+          <Button
+            onClick={handleEditSubmit}
+            variant="contained"
+            disabled={formSubmitting}
+          >
+            {formSubmitting ? 'Saving...' : 'Save Changes'}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Add Payment Dialog */}
-      <Dialog open={paymentDialogOpen} onClose={() => setPaymentDialogOpen(false)} maxWidth="sm" fullWidth>
+      {/* Payment Dialog - FIXED */}
+      <Dialog open={paymentDialogOpen} onClose={() => setPaymentDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>Add Payment</DialogTitle>
-        <DialogContent sx={{ pt: 2 }}>
-          <Stack spacing={3}>
-            <TextField
-              label="Amount"
-              type="number"
-              fullWidth
-              value={paymentForm.amount}
-              onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
-              InputProps={{ startAdornment: '€' }}
-              required
-            />
-            <TextField
-              label="Payment Date"
-              type="date"
-              fullWidth
-              InputLabelProps={{ shrink: true }}
-              value={paymentForm.payment_date}
-              onChange={(e) => setPaymentForm({ ...paymentForm, payment_date: e.target.value })}
-              required
-            />
-            <TextField
-              label="Description"
-              fullWidth
-              value={paymentForm.description}
-              onChange={(e) => setPaymentForm({ ...paymentForm, description: e.target.value })}
-            />
-            <FormControl fullWidth>
-              <InputLabel>Payment Method</InputLabel>
-              <Select
-                value={paymentForm.method}
-                onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })}
-                label="Payment Method"
-              >
-                <MenuItem value="bank_transfer">Bank Transfer</MenuItem>
-                <MenuItem value="cash">Cash</MenuItem>
-                <MenuItem value="credit_card">Credit Card</MenuItem>
-                <MenuItem value="check">Check</MenuItem>
-              </Select>
-            </FormControl>
-          </Stack>
+        <DialogContent>
+          <PaymentComponent
+            tenantId={parseInt(tenantId)}
+            tenantName={tenant.name}
+            apartmentId={currentApartment?.id}
+            onSuccess={handlePaymentSuccess}
+            onCancel={() => setPaymentDialogOpen(false)}
+            showNotification={showNotification}
+          />
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setPaymentDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleAddPayment} variant="contained" disabled={formSubmitting}>
-            {formSubmitting ? 'Adding...' : 'Add Payment'}
-          </Button>
-        </DialogActions>
       </Dialog>
 
-      {/* Transfer Dialog with Searchable Autocomplete */}
-      <Dialog open={transferDialogOpen} onClose={handleCloseTransferDialog} maxWidth="sm" fullWidth>
+      {/* Transfer Dialog - FIXED */}
+      <Dialog open={transferDialogOpen} onClose={() => setTransferDialogOpen(false)} maxWidth="md" fullWidth>
         <DialogTitle>Transfer Tenant</DialogTitle>
-        <DialogContent sx={{ pt: 2 }}>
-          <Stack spacing={3}>
-            <Autocomplete
-              options={apartmentSearchResults}
-              getOptionLabel={(option) => {
-                return option.address ||
-                       `${option.street_name || ''} ${option.house_number || ''}`.trim() ||
-                       `Apartment ${option.id}`;
-              }}
-              renderOption={(props, option) => (
-                <Box component="li" {...props}>
-                  <Box>
-                    <Typography variant="body1">
-                      {option.address ||
-                       `${option.street_name || ''} ${option.house_number || ''}`.trim() ||
-                       `Apartment ${option.id}`}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {option.city && `${option.city} • `}
-                      Rent: €{option.rent || 0}/month
-                      {option.tenants && option.tenants.length > 0 && (
-                        ` • Current tenants: ${option.tenants.map(t => t.name || t).join(', ')}`
-                      )}
-                      {option.rooms && ` • ${option.rooms} rooms`}
-                    </Typography>
-                  </Box>
-                </Box>
-              )}
-              value={selectedApartment}
-              onChange={(event, newValue) => {
-                setSelectedApartment(newValue);
-              }}
-              inputValue={apartmentSearchValue}
-              onInputChange={(event, newInputValue) => {
-                setApartmentSearchValue(newInputValue);
-
-                // Trigger search when user types (debounced)
-                if (newInputValue.trim().length >= 2) {
-                  debouncedSearchApartments(newInputValue.trim());
-                } else {
-                  setApartmentSearchResults([]);
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid item xs={12}>
+              <Autocomplete
+                options={apartmentSearchResults}
+                getOptionLabel={(option) =>
+                  `${option.full_address || option.address || `Apt ${option.id}`} - ${option.apartment_number || 'N/A'}`
                 }
-              }}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Search Apartment"
-                  placeholder="Type at least 2 characters to search..."
-                  fullWidth
-                  required
-                  helperText={
-                    apartmentSearchValue.length === 0
-                      ? 'Start typing to search apartments'
-                      : apartmentSearchValue.length < 2
-                        ? 'Type at least 2 characters'
-                        : isSearchingApartments
-                          ? 'Searching...'
-                          : `${apartmentSearchResults.length} apartments found`
-                  }
-                  InputProps={{
-                    ...params.InputProps,
-                    endAdornment: (
-                      <>
-                        {isSearchingApartments && <CircularProgress color="inherit" size={20} />}
-                        {params.InputProps.endAdornment}
-                      </>
-                    ),
-                  }}
-                />
-              )}
-              filterOptions={(options) => options}
-              noOptionsText={
-                apartmentSearchValue.length === 0
-                  ? "Start typing to search apartments"
-                  : apartmentSearchValue.length < 2
-                    ? "Type at least 2 characters"
-                    : isSearchingApartments
-                      ? "Searching..."
-                      : "No apartments found"
-              }
-              loading={isSearchingApartments}
-              freeSolo={false}
-            />
-            <TextField
-              label="Transfer Date"
-              type="date"
-              fullWidth
-              InputLabelProps={{ shrink: true }}
-              value={transferForm.transfer_date}
-              onChange={(e) => setTransferForm({ ...transferForm, transfer_date: e.target.value })}
-              required
-            />
-            <TextField
-              label="Notes"
-              fullWidth
-              multiline
-              rows={3}
-              value={transferForm.notes}
-              onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })}
-              placeholder="Reason for transfer, special instructions, etc."
-            />
-          </Stack>
+                value={selectedApartment}
+                onChange={(event, newValue) => setSelectedApartment(newValue)}
+                inputValue={apartmentSearchValue}
+                onInputChange={(event, newInputValue) => {
+                  setApartmentSearchValue(newInputValue);
+                  debouncedSearchApartments(newInputValue);
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    label="Search Destination Apartment"
+                    placeholder="Type address or apartment number..."
+                    required
+                  />
+                )}
+                loading={isSearchingApartments}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                type="date"
+                label="Move Out Date"
+                value={transferForm.move_out_date}
+                onChange={(e) => setTransferForm({ ...transferForm, move_out_date: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                required
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <TextField
+                fullWidth
+                type="date"
+                label="Move In Date"
+                value={transferForm.move_in_date}
+                onChange={(e) => setTransferForm({ ...transferForm, move_in_date: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                required
+                helperText="Move-in date must be after move-out date"
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                multiline
+                rows={3}
+                label="Notes"
+                value={transferForm.notes}
+                onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })}
+              />
+            </Grid>
+          </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleCloseTransferDialog}>Cancel</Button>
-          <Button onClick={handleTransferTenant} variant="contained" disabled={formSubmitting || !selectedApartment}>
-            {formSubmitting ? 'Transferring...' : 'Transfer'}
+          <Button onClick={() => setTransferDialogOpen(false)}>Cancel</Button>
+          <Button
+            onClick={handleTransferTenant}
+            variant="contained"
+            disabled={formSubmitting || !selectedApartment}
+          >
+            {formSubmitting ? 'Transferring...' : 'Transfer Tenant'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -959,31 +827,39 @@ const TenantDetails = ({ showNotification }) => {
       {/* Move Out Dialog */}
       <Dialog open={moveOutDialogOpen} onClose={() => setMoveOutDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Move Out Tenant</DialogTitle>
-        <DialogContent sx={{ pt: 2 }}>
-          <Stack spacing={3}>
-            <TextField
-              label="Move Out Date"
-              type="date"
-              fullWidth
-              InputLabelProps={{ shrink: true }}
-              value={moveOutForm.move_out_date}
-              onChange={(e) => setMoveOutForm({ ...moveOutForm, move_out_date: e.target.value })}
-              required
-            />
-            <TextField
-              label="Notes"
-              fullWidth
-              multiline
-              rows={3}
-              value={moveOutForm.notes}
-              onChange={(e) => setMoveOutForm({ ...moveOutForm, notes: e.target.value })}
-              placeholder="Reason for moving out, condition of property, etc."
-            />
-          </Stack>
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 1 }}>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                type="date"
+                label="Move Out Date"
+                value={moveOutForm.move_out_date}
+                onChange={(e) => setMoveOutForm({ ...moveOutForm, move_out_date: e.target.value })}
+                InputLabelProps={{ shrink: true }}
+                required
+              />
+            </Grid>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                multiline
+                rows={3}
+                label="Notes"
+                value={moveOutForm.notes}
+                onChange={(e) => setMoveOutForm({ ...moveOutForm, notes: e.target.value })}
+              />
+            </Grid>
+          </Grid>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setMoveOutDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleMoveOut} variant="contained" disabled={formSubmitting}>
+          <Button
+            onClick={handleMoveOut}
+            variant="contained"
+            color="error"
+            disabled={formSubmitting}
+          >
             {formSubmitting ? 'Processing...' : 'Move Out'}
           </Button>
         </DialogActions>

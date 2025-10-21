@@ -1,4 +1,4 @@
-// components/tenant/PaymentComponent.jsx
+// components/tenant/PaymentComponent.jsx - FIXED
 import React, { useState } from 'react';
 import {
   Box,
@@ -70,12 +70,20 @@ function PaymentComponent({
       return;
     }
 
+    if (!tenantId || !tenantName) {
+      if (showNotification) {
+        showNotification('Cannot add payment: Missing tenant information', 'error');
+      }
+      return;
+    }
+
     setSubmitting(true);
 
     try {
-      // Use the individual payment endpoint
-      await api.post('/payment/individual', {
+      // FIXED: Use the individual payment endpoint with both tenant_id and tenant_name
+      const response = await api.post('/payment/individual', {
         apartment_id: apartmentId,
+        tenant_id: tenantId,  // FIXED: Include tenant_id
         tenant_name: tenantName,
         amount: parseFloat(paymentForm.amount),
         payment_method: paymentForm.payment_method,
@@ -86,8 +94,12 @@ function PaymentComponent({
         notes: paymentForm.notes
       });
 
+      if (showNotification) {
+        showNotification('Payment added successfully', 'success');
+      }
+
       if (onSuccess) {
-        onSuccess();
+        onSuccess(response.data);
       }
     } catch (error) {
       console.error('Error adding payment:', error);
@@ -130,7 +142,6 @@ function PaymentComponent({
             inputProps={{
               min: 0,
               step: 0.01,
-              placeholder: "0.00"
             }}
             required
           />
@@ -149,36 +160,36 @@ function PaymentComponent({
           />
         </Grid>
 
-        {/* Payment Type */}
-        <Grid item xs={12} sm={6}>
-          <FormControl fullWidth>
-            <InputLabel>Payment Type</InputLabel>
-            <Select
-              value={paymentForm.payment_type}
-              label="Payment Type"
-              onChange={(e) => handleInputChange('payment_type', e.target.value)}
-            >
-              {PAYMENT_TYPES.map((type) => (
-                <MenuItem key={type.value} value={type.value}>
-                  {type.label}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </Grid>
-
         {/* Payment Method */}
         <Grid item xs={12} sm={6}>
           <FormControl fullWidth>
             <InputLabel>Payment Method</InputLabel>
             <Select
               value={paymentForm.payment_method}
-              label="Payment Method"
               onChange={(e) => handleInputChange('payment_method', e.target.value)}
+              label="Payment Method"
             >
               {PAYMENT_METHODS.map((method) => (
                 <MenuItem key={method.value} value={method.value}>
                   {method.label}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </Grid>
+
+        {/* Payment Type */}
+        <Grid item xs={12} sm={6}>
+          <FormControl fullWidth>
+            <InputLabel>Payment Type</InputLabel>
+            <Select
+              value={paymentForm.payment_type}
+              onChange={(e) => handleInputChange('payment_type', e.target.value)}
+              label="Payment Type"
+            >
+              {PAYMENT_TYPES.map((type) => (
+                <MenuItem key={type.value} value={type.value}>
+                  {type.label}
                 </MenuItem>
               ))}
             </Select>
@@ -191,8 +202,8 @@ function PaymentComponent({
             <InputLabel>Month</InputLabel>
             <Select
               value={paymentForm.month}
-              label="Month"
               onChange={(e) => handleInputChange('month', e.target.value)}
+              label="Month"
             >
               {MONTHS.map((month) => (
                 <MenuItem key={month} value={month}>
@@ -213,7 +224,7 @@ function PaymentComponent({
             onChange={(e) => handleInputChange('year', parseInt(e.target.value))}
             inputProps={{
               min: 2020,
-              max: new Date().getFullYear() + 1
+              max: 2030,
             }}
           />
         </Grid>
@@ -227,30 +238,31 @@ function PaymentComponent({
             label="Notes (Optional)"
             value={paymentForm.notes}
             onChange={(e) => handleInputChange('notes', e.target.value)}
-            placeholder="Additional notes about this payment..."
+            placeholder="Additional payment notes..."
           />
         </Grid>
+
+        {/* Action Buttons */}
+        <Grid item xs={12}>
+          <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
+            <Button
+              variant="outlined"
+              onClick={onCancel}
+              disabled={submitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleSubmit}
+              disabled={submitting || !paymentForm.amount}
+              startIcon={submitting ? <CircularProgress size={20} /> : <MoneyIcon />}
+            >
+              {submitting ? 'Adding Payment...' : 'Add Payment'}
+            </Button>
+          </Box>
+        </Grid>
       </Grid>
-
-      <Divider sx={{ my: 3 }} />
-
-      {/* Action Buttons */}
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 2 }}>
-        <Button
-          onClick={onCancel}
-          disabled={submitting}
-        >
-          Cancel
-        </Button>
-        <Button
-          onClick={handleSubmit}
-          variant="contained"
-          disabled={submitting || !paymentForm.amount}
-          startIcon={submitting ? <CircularProgress size={20} /> : <MoneyIcon />}
-        >
-          {submitting ? 'Adding Payment...' : 'Add Payment'}
-        </Button>
-      </Box>
     </Box>
   );
 }

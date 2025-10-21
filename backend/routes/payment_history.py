@@ -13,6 +13,7 @@ from sqlalchemy import case, func
 
 payment_history_bp = Blueprint("payment_history_bp", __name__)
 
+
 @payment_history_bp.route("/payment-receipt/<int:payment_id>", methods=["GET"])
 @token_required
 def get_payment_receipt(payment_id):
@@ -32,25 +33,39 @@ def get_payment_receipt(payment_id):
                 extra_payments = json.loads(payment.extraPayments)
             except:
                 extra_payments = {
-                    "internet": getattr(payment, 'internet', 0) or 0,
-                    "electricity": getattr(payment, 'electricity', 0) or 0,
-                    "other": getattr(payment, 'other', 0) or 0
+                    "internet": getattr(payment, "internet", 0) or 0,
+                    "electricity": getattr(payment, "electricity", 0) or 0,
+                    "other": getattr(payment, "other", 0) or 0,
                 }
 
         # Handle both payment_date and paymentDate fields
-        payment_date_field = payment.payment_date if hasattr(payment, 'payment_date') else payment.paymentDate if hasattr(payment, 'paymentDate') else None
+        payment_date_field = (
+            payment.payment_date
+            if hasattr(payment, "payment_date")
+            else payment.paymentDate
+            if hasattr(payment, "paymentDate")
+            else None
+        )
 
         receipt_data = {
             "receiptNumber": f"R-{payment_id}-{datetime.now().strftime('%Y%m%d')}",
             "apartment_id": payment.apartment_id,
             "month": payment.month,
             "year": payment.year,
-            "status": getattr(payment, 'status', 'paid'),
-            "paymentDate": payment_date_field.isoformat() if payment_date_field else None,
-            "paymentMethod": getattr(payment, "payment_method", getattr(payment, "paymentMethod", "bank_transfer")),
-            "tenants": json.loads(payment.tenants) if hasattr(payment, 'tenants') and payment.tenants else [],
+            "status": getattr(payment, "status", "paid"),
+            "paymentDate": payment_date_field.isoformat()
+            if payment_date_field
+            else None,
+            "paymentMethod": getattr(
+                payment,
+                "payment_method",
+                getattr(payment, "paymentMethod", "bank_transfer"),
+            ),
+            "tenants": json.loads(payment.tenants)
+            if hasattr(payment, "tenants") and payment.tenants
+            else [],
             "extraPayments": extra_payments,
-            "notes": getattr(payment, "notes", "")
+            "notes": getattr(payment, "notes", ""),
         }
 
         return jsonify(receipt_data), 200
@@ -63,135 +78,125 @@ def get_payment_receipt(payment_id):
 @payment_history_bp.route("/tenants/<int:tenant_id>/payment-history", methods=["GET"])
 @token_required
 def get_tenant_payment_history(tenant_id):
-    """Get payment history for a specific tenant - FIXED to show only tenant's payments"""
+    """Get payment history for a specific tenant - CORRECTED for actual Payment model"""
     try:
         tenant = Tenant.query.get(tenant_id)
         if not tenant:
             return jsonify({"message": "Tenant not found"}), 404
 
-        # Get all apartments this tenant has been associated with through contracts
-        tenant_apartments_query = db.session.query(ContractPeriod.apartment_id)\
-            .join(ContractTenant, ContractTenant.contract_period_id == ContractPeriod.id)\
-            .filter(ContractTenant.tenant_id == tenant_id)\
-            .distinct()
+        # Get apartments this tenant has lived in from ContractTenant records
+        contract_tenants = (
+            db.session.query(ContractTenant, ContractPeriod)
+            .join(
+                ContractPeriod, ContractTenant.contract_period_id == ContractPeriod.id
+            )
+            .filter(ContractTenant.tenant_id == tenant_id)
+            .all()
+        )
 
-        apartment_ids = [apt.apartment_id for apt in tenant_apartments_query.all() if apt.apartment_id]
+        apartment_ids = set()
+        for ct, cp in contract_tenants:
+            apartment_ids.add(cp.apartment_id)
 
-        current_app.logger.info(f"Found apartments for tenant {tenant.name}: {apartment_ids}")
+        # Also check legacy apartment_id assignment
+        if hasattr(tenant, "apartment_id") and tenant.apartment_id:
+            apartment_ids.add(tenant.apartment_id)
+
+        # Get all payments for these apartments where this tenant is involved
+        payments_query = Payment.query.filter(Payment.apartment_id.in_(apartment_ids))
+        all_payments = payments_query.all()
 
         payments_history = []
         payment_summary = {
             "total_payments": 0,
-            "total_paid": 0,
-            "total_due": 0,
-            "outstanding": 0
+            "total_paid": 0.0,
+            "total_due": 0.0,
+            "outstanding": 0.0,
         }
 
-        if apartment_ids:
-            # Get all payments for these apartments
+        for payment in all_payments:
             try:
-                payments = Payment.query.filter(
-                    Payment.apartment_id.in_(apartment_ids)
-                ).order_by(
-                    Payment.payment_date.desc() if hasattr(Payment, 'payment_date') else Payment.paymentDate.desc(),
-                    Payment.year.desc(),
-                    Payment.month.desc()
-                ).all()
-            except AttributeError:
-                # Fallback if payment_date field doesn't exist
-                payments = Payment.query.filter(
-                    Payment.apartment_id.in_(apartment_ids)
-                ).order_by(
-                    Payment.paymentDate.desc(),
-                    Payment.year.desc(),
-                    Payment.month.desc()
-                ).all()
+                # FIXED: Parse tenant_payments JSON to find this specific tenant
+                tenant_found = False
+                tenant_amount_paid = 0.0
+                tenant_amount_due = 0.0
 
-            for payment in payments:
-                # FIXED: Only include payments where this specific tenant is mentioned
-                tenant_found_in_payment = False
-                tenant_amount_paid = 0
-                tenant_amount_due = 0
-
-                # Check if tenant is mentioned in the tenants JSON field
-                if hasattr(payment, 'tenants') and payment.tenants:
+                if hasattr(payment, "tenant_payments") and payment.tenant_payments:
                     try:
-                        tenants_data = json.loads(payment.tenants)
-                        if isinstance(tenants_data, list):
-                            for tenant_payment in tenants_data:
-                                if tenant_payment.get('id') == tenant_id or tenant_payment.get('name') == tenant.name:
-                                    tenant_found_in_payment = True
-                                    tenant_amount_paid = float(tenant_payment.get('amountPaid', 0))
-                                    tenant_amount_due = float(tenant_payment.get('amountDue', 0))
-                                    break
-                    except (json.JSONDecodeError, TypeError, ValueError):
-                        current_app.logger.warning(f"Could not parse tenants JSON for payment {payment.id}")
+                        tenants_data = json.loads(payment.tenant_payments)
 
-                # Also check the newer tenant_payments field
-                if not tenant_found_in_payment and hasattr(payment, 'tenant_payments') and payment.tenant_payments:
-                    try:
-                        tenant_payments = json.loads(payment.tenant_payments)
-                        if str(tenant_id) in tenant_payments:
-                            tenant_found_in_payment = True
-                            tenant_data = tenant_payments[str(tenant_id)]
-                            tenant_amount_paid = float(tenant_data.get('amount_paid', 0))
-                            tenant_amount_due = float(tenant_data.get('amount_due', 0))
-                    except (json.JSONDecodeError, TypeError, ValueError):
-                        current_app.logger.warning(f"Could not parse tenant_payments JSON for payment {payment.id}")
+                        for tenant_info in tenants_data:
+                            # Check both tenant ID and name
+                            if (
+                                tenant_info.get("id") == tenant.id
+                                or tenant_info.get("name") == tenant.name
+                            ):
+                                tenant_found = True
+                                tenant_amount_paid = float(
+                                    tenant_info.get("amountPaid", 0)
+                                )
+                                tenant_amount_due = float(
+                                    tenant_info.get("amountDue", 0)
+                                )
+                                break
+                    except (json.JSONDecodeError, TypeError):
+                        # Skip malformed JSON
+                        continue
 
-                # Skip this payment if the tenant is not involved
-                if not tenant_found_in_payment:
-                    continue
+                if not tenant_found:
+                    continue  # Skip this payment if tenant not found in it
 
-                # Get apartment and contract info
+                # Get apartment info
                 apartment = Apartment.query.get(payment.apartment_id)
                 apartment_address = "N/A"
 
                 if apartment:
-                    address_parts = []
-                    if apartment.street_name:
-                        address_parts.append(apartment.street_name)
-                    if apartment.house_number:
-                        address_parts.append(apartment.house_number)
-                    if apartment.city:
-                        address_parts.append(apartment.city)
-                    apartment_address = " ".join(address_parts) if address_parts else f"Apartment {apartment.id}"
+                    if hasattr(apartment, "address") and apartment.address:
+                        apartment_address = apartment.address
+                    elif hasattr(apartment, "full_address") and apartment.full_address:
+                        apartment_address = apartment.full_address
+                    else:
+                        address_parts = []
+                        if hasattr(apartment, "street_name") and apartment.street_name:
+                            address_parts.append(apartment.street_name)
+                        if (
+                            hasattr(apartment, "house_number")
+                            and apartment.house_number
+                        ):
+                            address_parts.append(apartment.house_number)
+                        if hasattr(apartment, "city") and apartment.city:
+                            address_parts.append(apartment.city)
+                        apartment_address = (
+                            " ".join(address_parts)
+                            if address_parts
+                            else f"Apartment {apartment.id}"
+                        )
 
-                # Get contract period information
-                contract_period = None
-                if hasattr(payment, 'contract_period_id') and payment.contract_period_id:
-                    contract_period = ContractPeriod.query.get(payment.contract_period_id)
-
-                # Handle payment date field variations
-                payment_date_field = None
-                if hasattr(payment, 'payment_date') and payment.payment_date:
-                    payment_date_field = payment.payment_date
-                elif hasattr(payment, 'paymentDate') and payment.paymentDate:
-                    payment_date_field = payment.paymentDate
-
-                # Build history entry with tenant-specific amounts
+                # Build history entry with tenant-specific amounts and proper field names
                 entry = {
                     "id": payment.id,
                     "month": payment.month,
                     "year": payment.year,
-                    "status": getattr(payment, 'status', 'paid'),
-                    "amountDue": tenant_amount_due,  # FIXED: Use tenant-specific amount
-                    "amountPaid": tenant_amount_paid,  # FIXED: Use tenant-specific amount
-                    "paymentDate": payment_date_field.isoformat() if payment_date_field else None,
-                    "paymentMethod": getattr(payment, "payment_method", getattr(payment, "paymentMethod", "bank_transfer")),
+                    "status": getattr(payment, "status", "paid"),
+                    "amountDue": tenant_amount_due,
+                    "amountPaid": tenant_amount_paid,
+                    "paymentDate": payment.payment_date.isoformat()
+                    if payment.payment_date
+                    else None,
+                    "payment_date": payment.payment_date.isoformat()
+                    if payment.payment_date
+                    else None,
+                    "paymentMethod": getattr(
+                        payment, "payment_method", "bank_transfer"
+                    ),
+                    "method": getattr(payment, "payment_method", "bank_transfer"),
+                    "paymentType": getattr(payment, "payment_type", "rent"),
+                    "description": getattr(payment, "notes", "") or "Payment",
                     "notes": getattr(payment, "notes", ""),
                     "apartment_address": apartment_address,
-                    "apartment_id": payment.apartment_id
+                    "apartment_id": payment.apartment_id,
+                    "amount": tenant_amount_paid,
                 }
-
-                # Add contract period info if available
-                if contract_period:
-                    entry["contract_period"] = {
-                        "id": contract_period.id,
-                        "contract_number": contract_period.contract_number,
-                        "start_date": contract_period.start_date.isoformat() if contract_period.start_date else None,
-                        "end_date": contract_period.end_date.isoformat() if contract_period.end_date else None,
-                    }
 
                 payments_history.append(entry)
 
@@ -200,30 +205,53 @@ def get_tenant_payment_history(tenant_id):
                 payment_summary["total_paid"] += tenant_amount_paid
                 payment_summary["total_due"] += tenant_amount_due
 
-            # Calculate outstanding amount
-            payment_summary["outstanding"] = payment_summary["total_due"] - payment_summary["total_paid"]
+            except Exception as e:
+                current_app.logger.warning(
+                    f"Skipping payment {payment.id} due to error: {e}"
+                )
+                continue
 
-        current_app.logger.info(f"Returning {len(payments_history)} payments for tenant {tenant.name}")
+        # Calculate outstanding amount
+        payment_summary["outstanding"] = (
+            payment_summary["total_due"] - payment_summary["total_paid"]
+        )
 
-        return jsonify({
-            "tenant": {
-                "id": tenant.id,
-                "name": tenant.name,
-                "email": tenant.email,
-                "status": "active" if apartment_ids else "inactive"
-            },
-            "payments": payments_history,
-            "payment_history": payments_history,  # Alternative field name
-            "summary": payment_summary,
-            "apartments_lived_in": apartment_ids
-        }), 200
+        # Sort by payment date (most recent first)
+        payments_history.sort(
+            key=lambda x: x["paymentDate"] if x["paymentDate"] else "", reverse=True
+        )
+
+        current_app.logger.info(
+            f"Returning {len(payments_history)} payments for tenant {tenant.name}"
+        )
+
+        return jsonify(
+            {
+                "tenant": {
+                    "id": tenant.id,
+                    "name": tenant.name,
+                    "email": tenant.email,
+                    "status": "active" if apartment_ids else "inactive",
+                },
+                "payments": payments_history,
+                "payment_history": payments_history,
+                "paymentHistory": payments_history,
+                "summary": payment_summary,
+                "apartments_lived_in": list(apartment_ids),
+            }
+        ), 200
 
     except Exception as e:
         current_app.logger.error(f"Error retrieving tenant payment history: {e}")
         current_app.logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({"message": "Error retrieving tenant payment history", "error": str(e)}), 500
+        return jsonify(
+            {"message": "Error retrieving tenant payment history", "error": str(e)}
+        ), 500
 
-@payment_history_bp.route("/apartment-tenant-payments/<int:apartment_id>", methods=["GET"])
+
+@payment_history_bp.route(
+    "/apartment-tenant-payments/<int:apartment_id>", methods=["GET"]
+)
 @token_required
 def get_apartment_tenant_payments(apartment_id):
     """
@@ -237,7 +265,7 @@ def get_apartment_tenant_payments(apartment_id):
             return jsonify({"message": "Apartment not found"}), 404
 
         # Get optional year filter from query params
-        year_filter = request.args.get('year', type=int)
+        year_filter = request.args.get("year", type=int)
 
         # Query payments, optionally filtered by year
         query = Payment.query.filter_by(apartment_id=apartment_id)
@@ -249,56 +277,88 @@ def get_apartment_tenant_payments(apartment_id):
 
         for payment in payments:
             # Handle both payment_date and paymentDate fields
-            payment_date_field = payment.payment_date if hasattr(payment, 'payment_date') else payment.paymentDate if hasattr(payment, 'paymentDate') else None
+            payment_date_field = (
+                payment.payment_date
+                if hasattr(payment, "payment_date")
+                else payment.paymentDate
+                if hasattr(payment, "paymentDate")
+                else None
+            )
 
             # Skip if no payment date or status is not_applicable
-            if not payment_date_field or getattr(payment, 'status', '') == "not_applicable":
+            if (
+                not payment_date_field
+                or getattr(payment, "status", "") == "not_applicable"
+            ):
                 continue
 
             # Calculate total amount due and paid from tenants
-            tenants_data = json.loads(payment.tenants) if hasattr(payment, 'tenants') and payment.tenants else []
-            amount_due = sum(float(tenant.get("amountDue", 0)) for tenant in tenants_data)
-            amount_paid = sum(float(tenant.get("amountPaid", 0)) for tenant in tenants_data)
+            tenants_data = (
+                json.loads(payment.tenants)
+                if hasattr(payment, "tenants") and payment.tenants
+                else []
+            )
+            amount_due = sum(
+                float(tenant.get("amountDue", 0)) for tenant in tenants_data
+            )
+            amount_paid = sum(
+                float(tenant.get("amountPaid", 0)) for tenant in tenants_data
+            )
 
             # Add extra payments if they exist
             if hasattr(payment, "extraPayments") and payment.extraPayments:
                 try:
                     extra_payments = json.loads(payment.extraPayments)
                     amount_due += sum(float(value) for value in extra_payments.values())
-                    amount_paid += sum(float(value) for value in extra_payments.values())
+                    amount_paid += sum(
+                        float(value) for value in extra_payments.values()
+                    )
                 except:
                     # Handle malformed JSON
                     extra_payments = {
-                        "internet": getattr(payment, 'internet', 0) or 0,
-                        "electricity": getattr(payment, 'electricity', 0) or 0,
-                        "other": getattr(payment, 'other', 0) or 0
+                        "internet": getattr(payment, "internet", 0) or 0,
+                        "electricity": getattr(payment, "electricity", 0) or 0,
+                        "other": getattr(payment, "other", 0) or 0,
                     }
                     amount_due += sum(float(value) for value in extra_payments.values())
-                    amount_paid += sum(float(value) for value in extra_payments.values())
+                    amount_paid += sum(
+                        float(value) for value in extra_payments.values()
+                    )
 
             # Build history entry
             entry = {
                 "id": payment.id,
                 "month": payment.month,
                 "year": payment.year,
-                "status": getattr(payment, 'status', 'paid'),
+                "status": getattr(payment, "status", "paid"),
                 "amountDue": amount_due,
                 "amountPaid": amount_paid,
-                "paymentDate": payment_date_field.isoformat() if payment_date_field else None,
-                "paymentMethod": getattr(payment, "payment_method", getattr(payment, "paymentMethod", "bank_transfer")),
-                "notes": getattr(payment, "notes", "")
+                "paymentDate": payment_date_field.isoformat()
+                if payment_date_field
+                else None,
+                "paymentMethod": getattr(
+                    payment,
+                    "payment_method",
+                    getattr(payment, "paymentMethod", "bank_transfer"),
+                ),
+                "notes": getattr(payment, "notes", ""),
             }
 
             history.append(entry)
 
         # Sort by payment date (most recent first)
-        history.sort(key=lambda x: x["paymentDate"] if x["paymentDate"] else "", reverse=True)
+        history.sort(
+            key=lambda x: x["paymentDate"] if x["paymentDate"] else "", reverse=True
+        )
 
         return jsonify(history), 200
 
     except Exception as e:
         current_app.logger.error(f"Error retrieving payment history: {e}")
-        return jsonify({"message": "Error retrieving payment history", "error": str(e)}), 500
+        return jsonify(
+            {"message": "Error retrieving payment history", "error": str(e)}
+        ), 500
+
 
 @payment_history_bp.route("/payment-history/tenant/<int:tenant_id>", methods=["GET"])
 @token_required
@@ -318,27 +378,45 @@ def get_tenant_payments_history(tenant_id):
                 if payment.tenants:
                     tenants_data = json.loads(payment.tenants)
                     for tenant_info in tenants_data:
-                        if (tenant_info.get("name") == tenant.name or
-                            tenant_info.get("id") == tenant.id):
-
+                        if (
+                            tenant_info.get("name") == tenant.name
+                            or tenant_info.get("id") == tenant.id
+                        ):
                             # Get apartment info
                             apartment = Apartment.query.get(payment.apartment_id)
 
                             # Handle both payment_date and paymentDate fields
-                            payment_date_field = payment.payment_date if hasattr(payment, 'payment_date') else payment.paymentDate if hasattr(payment, 'paymentDate') else None
+                            payment_date_field = (
+                                payment.payment_date
+                                if hasattr(payment, "payment_date")
+                                else payment.paymentDate
+                                if hasattr(payment, "paymentDate")
+                                else None
+                            )
 
                             payment_record = {
                                 "id": payment.id,
                                 "amount": float(tenant_info.get("amountPaid", 0)),
-                                "payment_date": payment_date_field.isoformat() if payment_date_field else None,
-                                "payment_method": getattr(payment, 'payment_method', getattr(payment, 'paymentMethod', 'N/A')) or 'N/A',
+                                "payment_date": payment_date_field.isoformat()
+                                if payment_date_field
+                                else None,
+                                "payment_method": getattr(
+                                    payment,
+                                    "payment_method",
+                                    getattr(payment, "paymentMethod", "N/A"),
+                                )
+                                or "N/A",
                                 "payment_type": "rent",  # Default type
-                                "notes": getattr(payment, 'notes', '') or '',
-                                "status": "paid" if tenant_info.get("paid", False) else "pending",
+                                "notes": getattr(payment, "notes", "") or "",
+                                "status": "paid"
+                                if tenant_info.get("paid", False)
+                                else "pending",
                                 "apartment_id": payment.apartment_id,
-                                "apartment_address": apartment.address if apartment else "Unknown",
+                                "apartment_address": apartment.address
+                                if apartment
+                                else "Unknown",
                                 "month": payment.month,
-                                "year": payment.year
+                                "year": payment.year,
                             }
                             tenant_payments.append(payment_record)
                             break
@@ -346,41 +424,46 @@ def get_tenant_payments_history(tenant_id):
                 continue
 
         # Sort by payment date (most recent first)
-        tenant_payments.sort(key=lambda x: x["payment_date"] or "1900-01-01", reverse=True)
+        tenant_payments.sort(
+            key=lambda x: x["payment_date"] or "1900-01-01", reverse=True
+        )
 
         # Calculate summary statistics
         total_payments = len(tenant_payments)
         total_paid = sum(p["amount"] for p in tenant_payments)
         average_payment = total_paid / total_payments if total_payments > 0 else 0
-        last_payment_date = tenant_payments[0]["payment_date"] if tenant_payments else None
+        last_payment_date = (
+            tenant_payments[0]["payment_date"] if tenant_payments else None
+        )
 
         summary = {
             "total_payments": total_payments,
             "total_paid": total_paid,
             "average_payment": average_payment,
-            "last_payment_date": last_payment_date
+            "last_payment_date": last_payment_date,
         }
 
-        return jsonify({
-            "tenant": {
-                "id": tenant.id,
-                "name": tenant.name
-            },
-            "payments": tenant_payments,
-            "summary": summary
-        }), 200
+        return jsonify(
+            {
+                "tenant": {"id": tenant.id, "name": tenant.name},
+                "payments": tenant_payments,
+                "summary": summary,
+            }
+        ), 200
 
     except Exception as e:
         current_app.logger.error(f"Error getting tenant payment history: {e}")
         current_app.logger.error(f"Traceback: {traceback.format_exc()}")
-        return jsonify({
-            "message": "Error getting tenant payment history",
-            "error": str(e),
-            "payments": [],
-            "summary": {
-                "total_payments": 0,
-                "total_paid": 0,
-                "average_payment": 0,
-                "last_payment_date": None
+        return jsonify(
+            {
+                "message": "Error getting tenant payment history",
+                "error": str(e),
+                "payments": [],
+                "summary": {
+                    "total_payments": 0,
+                    "total_paid": 0,
+                    "average_payment": 0,
+                    "last_payment_date": None,
+                },
             }
-        }), 500
+        ), 500

@@ -52,12 +52,6 @@ def list_apartments():
         # Check if user is admin
         is_admin = g.user.get("role") == "admin"
 
-        current_app.logger.info(
-            f"Apartment list request - Page: {page}, Limit: {limit}, Search: '{search}', Sort: '{sort}'"
-        )
-        current_app.logger.info(
-            f"Filters - landlord: {landlord}, city: {city}, state: {state}, zip_code: {zip_code}, rooms: {rooms}, size_range: {size_range}, status: {status}, gender: {gender}, floor: {floor}"
-        )
 
         # Start with base query including landlord join
         query = db.session.query(Apartment).outerjoin(Landlord)

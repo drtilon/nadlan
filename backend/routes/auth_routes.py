@@ -2,7 +2,12 @@
 import os
 from flask import Blueprint, request, jsonify, current_app, g
 from flask_bcrypt import Bcrypt
-from flask_jwt_extended import create_access_token, create_refresh_token, get_jwt_identity, jwt_required
+from flask_jwt_extended import (
+    create_access_token,
+    create_refresh_token,
+    get_jwt_identity,
+    jwt_required,
+)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from datetime import timedelta
@@ -10,6 +15,7 @@ from models.models import User
 from extentions import db
 from .auth import token_required, role_required
 from activity_logger import ActivityLogger
+from datetime import datetime
 
 auth_bp = Blueprint("auth_bp", __name__)
 bcrypt = Bcrypt()
@@ -29,7 +35,7 @@ def login():
         ActivityLogger.log_login(
             username=username or "unknown",
             success=False,
-            details={"reason": "Missing username or password"}
+            details={"reason": "Missing username or password"},
         )
         return jsonify({"message": "Missing username or password"}), 400
 
@@ -37,9 +43,7 @@ def login():
     user = User.query.filter_by(username=username).first()
     if not user:
         ActivityLogger.log_login(
-            username=username,
-            success=False,
-            details={"reason": "Invalid username"}
+            username=username, success=False, details={"reason": "Invalid username"}
         )
         return jsonify({"message": "Invalid username or password"}), 401
 
@@ -47,7 +51,7 @@ def login():
         ActivityLogger.log_login(
             username=username,
             success=False,
-            details={"reason": "Account not approved", "user_id": user.id}
+            details={"reason": "Account not approved", "user_id": user.id},
         )
         return jsonify({"message": "Your account is pending admin approval."}), 403
 
@@ -70,7 +74,7 @@ def login():
         ActivityLogger.log_login(
             username=username,
             success=True,
-            details={"user_id": user.id, "role": role, "ip": request.remote_addr}
+            details={"user_id": user.id, "role": role, "ip": request.remote_addr},
         )
 
         return jsonify(
@@ -91,7 +95,7 @@ def login():
     ActivityLogger.log_login(
         username=username,
         success=False,
-        details={"reason": "Invalid password", "user_id": user.id if user else None}
+        details={"reason": "Invalid password", "user_id": user.id if user else None},
     )
     return jsonify({"message": "Invalid username or password"}), 401
 
@@ -114,7 +118,7 @@ def register():
             entity_type="user",
             entity_id=username,
             details={"success": False, "reason": "User already exists"},
-            status="failed"
+            status="failed",
         )
         return jsonify({"message": "User already exists"}), 409
 
@@ -136,8 +140,8 @@ def register():
             "username": username,
             "role": role,
             "is_approved": is_approved,
-            "ip": request.remote_addr
-        }
+            "ip": request.remote_addr,
+        },
     )
 
     # Inform the user that their account is pending admin approval
@@ -164,14 +168,16 @@ def verify_token():
             "user": {
                 "id": user_info.get("id"),
                 "username": user_info.get("sub"),
-                "role": user_info.get("role")
-            }
+                "role": user_info.get("role"),
+            },
         }
 
         # Add cache headers to reduce unnecessary requests
         response = jsonify(response_data)
-        response.headers['Cache-Control'] = 'private, max-age=300'  # Cache for 5 minutes
-        response.headers['ETag'] = f'"{user_info.get("id")}-{user_info.get("role")}"'
+        response.headers["Cache-Control"] = (
+            "private, max-age=300"  # Cache for 5 minutes
+        )
+        response.headers["ETag"] = f'"{user_info.get("id")}-{user_info.get("role")}"'
 
         return response, 200
 
@@ -204,14 +210,12 @@ def auth_health():
     try:
         # Quick database connectivity check
         db.session.execute("SELECT 1")
-        return jsonify({
-            "status": "healthy",
-            "service": "auth",
-            "timestamp": int(time.time())
-        }), 200
+        return jsonify(
+            {
+                "status": "healthy",
+                "service": "auth",
+                "timestamp": int(datetime.utcnow().isoformat()),
+            }
+        ), 200
     except Exception as e:
-        return jsonify({
-            "status": "unhealthy",
-            "service": "auth",
-            "error": str(e)
-        }), 500
+        return jsonify({"status": "unhealthy", "service": "auth", "error": str(e)}), 500

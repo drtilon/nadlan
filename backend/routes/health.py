@@ -2,6 +2,7 @@
 from flask import Blueprint, jsonify
 from extentions import db
 import time
+from datetime import datetime
 
 health_bp = Blueprint("health", __name__)
 
@@ -10,7 +11,7 @@ health_bp = Blueprint("health", __name__)
 def health_check():
     """Simple health check endpoint for Docker health checks"""
     return jsonify(
-        {"status": "healthy", "timestamp": time.time(), "service": "flask_backend"}
+        {"status": "healthy", "timestamp": datetime.utcnow().isoformat(), "service": "flask_backend"}
     ), 200
 
 
@@ -23,7 +24,7 @@ def auth_health_check():
         return jsonify(
             {
                 "status": "healthy",
-                "timestamp": time.time(),
+                "timestamp": datetime.utcnow().isoformat(),
                 "service": "auth",
                 "database": "connected",
             }
@@ -32,7 +33,7 @@ def auth_health_check():
         return jsonify(
             {
                 "status": "unhealthy",
-                "timestamp": time.time(),
+                "timestamp": datetime.utcnow().isoformat(),
                 "service": "auth",
                 "database": "disconnected",
                 "error": str(e),
@@ -43,4 +44,4 @@ def auth_health_check():
 @health_bp.route("/ping")
 def ping():
     """Simple ping endpoint"""
-    return jsonify({"message": "pong", "timestamp": time.time()}), 200
+    return jsonify({"message": "pong", "timestamp": datetime.utcnow().isoformat()}), 200

@@ -181,9 +181,6 @@ def list_apartments():
         # Determine sort order
         is_desc = sort_direction == "-1"
 
-        current_app.logger.info(
-            f"Sorting by: {sort_field}, Direction: {'DESC' if is_desc else 'ASC'}"
-        )
 
         # Apply comprehensive sorting with proper NULL handling
         if sort_field in ["address", "street_name"]:
@@ -298,9 +295,6 @@ def list_apartments():
         offset = page * limit
         apartments = query.offset(offset).limit(limit).all()
 
-        current_app.logger.info(
-            f"Retrieved {len(apartments)} apartments (Total: {total})"
-        )
 
         # Build enhanced response with all data needed for the frontend
         apartments_data = []

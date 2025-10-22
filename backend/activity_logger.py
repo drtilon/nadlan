@@ -1,25 +1,24 @@
-# activity_logger.py
+# activity_logger.py - FIXED VERSION
 import logging
 from datetime import datetime
 from flask import g, request
 import json
 import traceback
 
-# Configure logger
+# Get logger - will inherit root logger's configuration
 logger = logging.getLogger('activity')
-logger.setLevel(logging.INFO)
 
 class ActivityLogger:
     """
     A utility class for logging user activities throughout the application.
     Tracks user actions in a standardized format for auditing and monitoring.
     """
-    
+
     @staticmethod
     def log_activity(action, entity_type, entity_id=None, details=None, status="success", error=None):
         """
         Log a user activity
-        
+
         Args:
             action (str): The action performed (e.g., "create", "update", "delete")
             entity_type (str): The type of entity affected (e.g., "apartment", "tenant", "user")
@@ -32,7 +31,7 @@ class ActivityLogger:
             # Get user information from Flask global context
             user = getattr(g, 'user', None)
             user_info = None
-            
+
             if user:
                 # Handle different user object structures
                 if isinstance(user, dict):
@@ -48,7 +47,7 @@ class ActivityLogger:
                         'username': getattr(user, 'username', 'unknown'),
                         'role': getattr(user, 'role', 'unknown')
                     }
-            
+
             # Build the log entry
             log_entry = {
                 'timestamp': datetime.utcnow().isoformat(),
@@ -60,27 +59,27 @@ class ActivityLogger:
                 'status': status,
                 'details': details or {}
             }
-            
+
             # Add error information if provided
             if error:
                 log_entry['error'] = str(error)
                 log_entry['stack_trace'] = traceback.format_exc()
-            
+
             # Convert to string for logging
             log_message = json.dumps(log_entry)
-            
+
             # Log at appropriate level
             if status == "success":
                 logger.info(f"USER ACTIVITY: {log_message}")
             else:
                 logger.error(f"USER ACTIVITY ERROR: {log_message}")
-                
+
             return True
         except Exception as e:
             # Don't let logging errors affect application flow
             logger.error(f"Error in activity logger: {str(e)}")
             return False
-    
+
     @staticmethod
     def log_login(username, success=True, details=None):
         """Log login attempts"""
@@ -93,7 +92,7 @@ class ActivityLogger:
             details=details,
             status=status
         )
-    
+
     @staticmethod
     def log_logout(username, details=None):
         """Log user logout"""
@@ -103,7 +102,7 @@ class ActivityLogger:
             entity_id=username,
             details=details
         )
-    
+
     @staticmethod
     def log_apartment_action(action, apartment_id, details=None, success=True, error=None):
         """Log apartment-related actions"""
@@ -116,7 +115,7 @@ class ActivityLogger:
             status=status,
             error=error
         )
-    
+
     @staticmethod
     def log_tenant_action(action, tenant_id, details=None, success=True, error=None):
         """Log tenant-related actions"""
@@ -129,7 +128,7 @@ class ActivityLogger:
             status=status,
             error=error
         )
-    
+
     @staticmethod
     def log_payment_action(action, payment_id, apartment_id=None, details=None, success=True, error=None):
         """Log payment-related actions"""
@@ -145,7 +144,7 @@ class ActivityLogger:
             status=status,
             error=error
         )
-    
+
     @staticmethod
     def log_contract_action(action, contract_id=None, apartment_id=None, details=None, success=True, error=None):
         """Log contract-related actions"""
@@ -161,7 +160,7 @@ class ActivityLogger:
             status=status,
             error=error
         )
-    
+
     @staticmethod
     def log_landlord_action(action, landlord_id, details=None, success=True, error=None):
         """Log landlord-related actions"""
@@ -174,7 +173,7 @@ class ActivityLogger:
             status=status,
             error=error
         )
-    
+
     @staticmethod
     def log_user_action(action, user_id, details=None, success=True, error=None):
         """Log user management actions"""
@@ -188,34 +187,11 @@ class ActivityLogger:
             error=error
         )
 
-# Configure file handler
+
+# This function is no longer needed but kept for backward compatibility
 def configure_activity_logger(app):
     """
-    Configure the activity logger with a file handler
-    
-    Args:
-        app: Flask application instance
+    Kept for backward compatibility - logging is now configured in app.py
+    through the root logger configuration.
     """
-    try:
-        # Get log directory from app config
-        log_dir = app.config.get('LOG_DIRECTORY', 'logs')
-        
-        # Create a file handler for activity logs
-        import os
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-            
-        file_handler = logging.FileHandler(os.path.join(log_dir, 'activity.log'))
-        file_handler.setLevel(logging.INFO)
-        
-        # Create formatter
-        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-        file_handler.setFormatter(formatter)
-        
-        # Add handler to logger
-        logger.addHandler(file_handler)
-        
-        app.logger.info("Activity logger configured successfully")
-        
-    except Exception as e:
-        app.logger.error(f"Error configuring activity logger: {e}")
+    app.logger.info("Activity logger will use root logger configuration")

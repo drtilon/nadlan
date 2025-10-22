@@ -625,12 +625,8 @@ def get_entity_logs(entity_type, entity_id):
         return jsonify({"message": "Error retrieving entity logs", "error": str(e)}), 500
 
 def collect_logs_from_file(file_path) -> List[Dict[str, Any]]:
-    """
-    Parse and collect logs from the log file.
-    Returns a list of log entry dictionaries.
-    """
+    """Parse and collect logs from the log file."""
     logs_data = []
-
     try:
         if not os.path.exists(file_path):
             return []
@@ -638,82 +634,59 @@ def collect_logs_from_file(file_path) -> List[Dict[str, Any]]:
         with open(file_path, "r") as f:
             log_lines = f.readlines()
 
-        # Parse each line (assuming a specific log format)
         for i, line in enumerate(log_lines):
             try:
-                # Handle multiline log entries (like stack traces)
-                if line.strip() and re.match(
-                    r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}", line
-                ):
-                    # This is a new log entry starting with a timestamp
+                # Check for new format with brackets
+                if line.strip() and line.startswith('['):
                     log_entry = parse_log_line(line)
                     if log_entry:
                         log_entry["id"] = f"file_{i}"
                         logs_data.append(log_entry)
                 elif logs_data and line.strip():
-                    # This is a continuation of the previous log entry (like a stack trace)
-                    if "message" in logs_data[-1]:
-                        logs_data[-1]["message"] += "\n" + line.strip()
-                    else:
-                        logs_data[-1]["message"] = line.strip()
+                    # Continuation line
+                    logs_data[-1]["message"] += "\n" + line.strip()
             except Exception as e:
-                # Skip lines that can't be parsed
                 current_app.logger.error(f"Error parsing log line: {e}")
                 continue
 
         return logs_data
-
     except Exception as e:
         current_app.logger.error(f"Error collecting logs from file: {e}")
         return []
 
+
+
 def parse_log_line(line: str) -> Dict[str, Any]:
-    """
-    Parse a log line into a structured dictionary.
-    Assumes a format like: "YYYY-MM-DD HH:MM:SS,mmm - LEVEL - MODULE - MESSAGE"
-    """
+    """Parse new log format: [YYYY-MM-DD HH:MM:SS] LEVEL in MODULE: MESSAGE"""
     try:
-        # Example regex for a common log format
-        pattern = (
-            r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) - (\w+) - ([^-]+) - (.*)"
-        )
+        # New format with brackets
+        pattern = r"\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] (\w+) in ([^:]+): (.*)"
         match = re.match(pattern, line)
 
         if match:
             timestamp_str, level, logger, message = match.groups()
-
-            # Convert timestamp string to ISO format
-            timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S,%f")
-
+            timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
             return {
                 "timestamp": timestamp.isoformat(),
                 "level": level.strip(),
                 "logger": logger.strip(),
                 "message": message.strip(),
             }
-        else:
-            # Fallback for lines that don't match the expected format
-            return {
-                "timestamp": datetime.now().isoformat(),
-                "level": "INFO",
-                "logger": "log_parser",
-                "message": line.strip(),
-            }
 
-    except Exception as e:
-        current_app.logger.error(f"Error parsing log line: {e}")
+        # Fallback
         return {
             "timestamp": datetime.now().isoformat(),
-            "level": "ERROR",
-            "logger": "log_parser",
-            "message": f"Failed to parse log line: {line.strip()}. Error: {str(e)}",
+            "level": "INFO",
+            "logger": "unknown",
+            "message": line.strip(),
         }
+    except Exception as e:
+        current_app.logger.error(f"Error parsing log line: {e}")
+        return None
+
 
 def collect_activity_logs_from_file(file_path) -> List[Dict[str, Any]]:
-    """
-    Parse and collect activity logs from the activity log file.
-    These have a different format than regular application logs.
-    """
+    """Parse activity logs from file."""
     logs_data = []
 
     try:
@@ -723,40 +696,36 @@ def collect_activity_logs_from_file(file_path) -> List[Dict[str, Any]]:
         with open(file_path, "r") as f:
             log_lines = f.readlines()
 
-        # Parse each line
         for i, line in enumerate(log_lines):
             try:
-                # Handle multiline log entries
-                if line.strip() and re.match(
-                    r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}", line
-                ):
-                    # Check if this is an activity log
-                    if "USER ACTIVITY" in line:
-                        # Extract the JSON part of the activity log
-                        json_start = line.find('USER ACTIVITY:') + 14
-                        if json_start < 14:  # Not found
-                            json_start = line.find('USER ACTIVITY ERROR:') + 20
+                if line.strip() and "USER ACTIVITY" in line:
+                    # Extract JSON part
+                    json_start = line.find('USER ACTIVITY:')
+                    if json_start == -1:
+                        json_start = line.find('USER ACTIVITY ERROR:')
 
-                        if json_start > 0:  # Found the marker
-                            json_str = line[json_start:].strip()
-                            activity_data = json.loads(json_str)
+                    if json_start != -1:
+                        # Find where JSON starts (after the marker)
+                        marker_end = line.find(':', json_start) + 1
+                        json_str = line[marker_end:].strip()
 
-                            # Add log identifier
-                            activity_data["id"] = f"activity_{i}"
+                        activity_data = json.loads(json_str)
+                        activity_data["id"] = f"activity_{i}"
 
-                            # Add standard log fields for compatibility
-                            if "level" not in activity_data:
-                                activity_data["level"] = "ERROR" if "ERROR" in line else "INFO"
+                        if "level" not in activity_data:
+                            activity_data["level"] = "ERROR" if "ERROR" in line else "INFO"
 
-                            logs_data.append(activity_data)
+                        logs_data.append(activity_data)
 
             except Exception as e:
-                # Skip lines that can't be parsed
-                current_app.logger.error(f"Error parsing activity log line: {e}")
+                current_app.logger.error(f"Error parsing activity log: {e}")
                 continue
 
         return logs_data
 
     except Exception as e:
-        current_app.logger.error(f"Error collecting activity logs from file: {e}")
+        current_app.logger.error(f"Error collecting activity logs: {e}")
         return []
+
+
+

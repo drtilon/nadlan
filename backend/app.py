@@ -1,4 +1,4 @@
-# app.py - UPDATED VERSION with Fast Analytics
+# app.py - FIXED VERSION with proper logging configuration
 from flask import Flask, current_app, request, Response
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
@@ -8,12 +8,88 @@ from extentions import db, jwt, bcrypt
 from sqlalchemy.exc import OperationalError
 import time
 from models.models import Apartment, Tenant, User, Landlord
-from initalized.init_apartment import (
-    initialize_database
-)
+from initalized.init_apartment import initialize_database
 import os
 from dotenv import load_dotenv
 from activity_logger import ActivityLogger, configure_activity_logger
+import logging
+from logging.handlers import RotatingFileHandler
+
+
+def configure_logging(app):
+    """
+    Configure logging to write ALL logs to files.
+    This configures the root logger so all child loggers inherit the file handlers.
+    """
+    try:
+        # Create logs directory if it doesn't exist
+        log_dir = app.config.get('LOG_DIRECTORY', 'logs')
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+
+        # Get the root logger
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.INFO)
+
+        # Remove any existing handlers to avoid duplicates
+        root_logger.handlers = []
+
+        # Create formatter
+        formatter = logging.Formatter(
+            '[%(asctime)s] %(levelname)s in %(name)s: %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+
+        # Create file handler for app.log (general application logs)
+        app_handler = RotatingFileHandler(
+            os.path.join(log_dir, 'app.log'),
+            maxBytes=10485760,  # 10MB
+            backupCount=10
+        )
+        app_handler.setLevel(logging.INFO)
+        app_handler.setFormatter(formatter)
+
+        # Create file handler for activity.log (user activity logs)
+        activity_handler = RotatingFileHandler(
+            os.path.join(log_dir, 'activity.log'),
+            maxBytes=10485760,  # 10MB
+            backupCount=10
+        )
+        activity_handler.setLevel(logging.INFO)
+        activity_handler.setFormatter(formatter)
+
+        # Add a filter to separate activity logs
+        class ActivityFilter(logging.Filter):
+            def filter(self, record):
+                return 'USER ACTIVITY' in record.getMessage()
+
+        class NonActivityFilter(logging.Filter):
+            def filter(self, record):
+                return 'USER ACTIVITY' not in record.getMessage()
+
+        app_handler.addFilter(NonActivityFilter())
+        activity_handler.addFilter(ActivityFilter())
+
+        # Add handlers to root logger (this makes ALL loggers write to files)
+        root_logger.addHandler(app_handler)
+        root_logger.addHandler(activity_handler)
+
+        # Also add handlers to Flask's app logger
+        app.logger.handlers = []
+        app.logger.addHandler(app_handler)
+        app.logger.addHandler(activity_handler)
+        app.logger.setLevel(logging.INFO)
+
+        # Optional: Add console handler for development (you can comment this out in production)
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+
+        app.logger.info("Logging configured successfully - all logs will be written to files")
+
+    except Exception as e:
+        print(f"Error configuring logging: {e}")
 
 
 def wait_for_mysql(app):
@@ -49,6 +125,9 @@ def create_app():
 
         # Additional configuration for better file handling
         app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # Disable caching for file uploads
+
+        # *** CONFIGURE LOGGING FIRST - This is the key fix! ***
+        configure_logging(app)
 
         try:
             # Allow requests from any origin during development
@@ -143,8 +222,9 @@ def create_app():
             jwt.init_app(app)
             bcrypt.init_app(app)
             Swagger(app)
-            configure_activity_logger(app)
-            app.logger.info("Activity logger initialized")
+            # Activity logger is now configured through the root logger
+            app.logger.info("Extensions initialized")
+
         except Exception as e:
             app.logger.error(f"Error initializing extensions: {e}")
 
@@ -152,6 +232,7 @@ def create_app():
             with app.app_context():
                 wait_for_mysql(app)
                 from initalized.init_apartment import ensure_db_schema
+
                 initialize_database()
         except Exception as e:
             app.logger.error(f"Error initializing DB: {e}")
@@ -212,8 +293,8 @@ def create_app():
 if __name__ == "__main__":
     app = create_app()
     if app:
-        # In production, you should disable debug mode
-        app.run(debug=True, host="0.0.0.0", port=5001)
+        port = int(os.environ.get("PORT", 5001))
+        app.logger.info(f"Starting Flask server on port {port}")
+        app.run(host="0.0.0.0", port=port, debug=False)
     else:
-        print("Failed to create Flask app")
-        exit(1)
+        print("Failed to create Flask application!")

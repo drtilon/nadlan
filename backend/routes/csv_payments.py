@@ -24,12 +24,15 @@ import pandas as pd
 from io import StringIO
 
 # Set up basic logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - CSV_PROCESSOR - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)],
-)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('CSV_PROCESSOR')
+logger.setLevel(logging.INFO)
+
+# Only add handler if it doesn't already exist
+if not logger.handlers:
+    handler = logging.StreamHandler(sys.stdout)
+    formatter = logging.Formatter("%(asctime)s - CSV_PROCESSOR - %(levelname)s - %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 # Define blueprint
 csv_payments_bp = Blueprint("csv_payments", __name__, url_prefix="/api/csv-payments")

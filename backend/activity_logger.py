@@ -1,74 +1,181 @@
-# activity_logger.py - FIXED VERSION
+# activity_logger.py - FIXED VERSION with proper IP tracking and readable messages
 import logging
 from datetime import datetime
 from flask import g, request
 import json
 import traceback
 
-# Get logger - will inherit root logger's configuration
 logger = logging.getLogger('activity')
 
 class ActivityLogger:
-    """
-    A utility class for logging user activities throughout the application.
-    Tracks user actions in a standardized format for auditing and monitoring.
-    """
+    """Logs user activities with proper user attribution and IP addresses"""
+
+    @staticmethod
+    def _get_real_ip():
+        """
+        Get the real IP address, handling proxies (nginx, Docker, etc.)
+        Checks X-Forwarded-For and X-Real-IP headers first
+        """
+        # Check for proxy headers first
+        if request.headers.get('X-Forwarded-For'):
+            # X-Forwarded-For can be a comma-separated list, get the first one
+            return request.headers.get('X-Forwarded-For').split(',')[0].strip()
+        elif request.headers.get('X-Real-IP'):
+            return request.headers.get('X-Real-IP')
+        else:
+            # Fallback to remote_addr
+            return request.remote_addr if hasattr(request, 'remote_addr') else 'unknown'
+
+    @staticmethod
+    def _get_user_info():
+        """Extract user information from Flask's global context"""
+        user = getattr(g, 'user', None)
+        user_info = {
+            'id': 'system',
+            'username': 'system',
+            'role': 'system'
+        }
+
+        if user:
+            if isinstance(user, dict):
+                user_info = {
+                    'id': user.get('id') or user.get('sub', 'unknown'),
+                    'username': user.get('username') or user.get('sub', 'unknown'),
+                    'role': user.get('role', 'unknown')
+                }
+            else:
+                user_info = {
+                    'id': getattr(user, 'id', 'unknown'),
+                    'username': getattr(user, 'username', 'unknown'),
+                    'role': getattr(user, 'role', 'unknown')
+                }
+
+        return user_info
+
+    @staticmethod
+    def _format_message(action, entity_type, entity_id, details):
+        """Create human-readable message from log components"""
+        user_info = ActivityLogger._get_user_info()
+        username = user_info['username']
+
+        entity_names = {
+            'apartment': 'Apartment',
+            'tenant': 'Tenant',
+            'user': 'User',
+            'payment': 'Payment',
+            'contract': 'Contract',
+            'landlord': 'Landlord',
+            'auth': 'Authentication'
+        }
+
+        entity_name = entity_names.get(entity_type, entity_type.title())
+
+        # Build message based on action
+        if action == 'create':
+            message = f"{username} created {entity_name}"
+            if entity_id:
+                message += f" (ID: {entity_id})"
+
+        elif action == 'update':
+            message = f"{username} updated {entity_name}"
+            if entity_id:
+                message += f" (ID: {entity_id})"
+
+        elif action == 'delete':
+            message = f"{username} deleted {entity_name}"
+            if entity_id:
+                message += f" (ID: {entity_id})"
+
+        elif action == 'login':
+            if details and details.get('success', True):
+                message = f"{username} logged in successfully"
+            else:
+                message = f"Failed login attempt for {username}"
+
+        elif action == 'logout':
+            message = f"{username} logged out"
+
+        elif action == 'approve':
+            message = f"{username} approved {entity_name}"
+            if details and details.get('username'):
+                message += f" '{details['username']}'"
+
+        elif action == 'update_role':
+            message = f"{username} changed {entity_name} role"
+            if details:
+                if details.get('username'):
+                    message += f" for '{details['username']}'"
+                if details.get('original_role') and details.get('new_role'):
+                    message += f" from '{details['original_role']}' to '{details['new_role']}'"
+
+        elif action == 'change_password':
+            message = f"{username} changed password for {entity_name}"
+            if details and details.get('username'):
+                message += f" '{details['username']}'"
+
+        elif action == 'view':
+            message = f"{username} viewed {entity_name}"
+            if entity_id:
+                message += f" (ID: {entity_id})"
+
+        elif action == 'export':
+            message = f"{username} exported {entity_name} data"
+
+        elif action == 'import':
+            message = f"{username} imported {entity_name} data"
+
+        else:
+            message = f"{username} performed '{action}' on {entity_name}"
+            if entity_id:
+                message += f" (ID: {entity_id})"
+
+        # Add important details
+        if details:
+            important_details = []
+
+            if details.get('contract_number'):
+                important_details.append(f"Contract: {details['contract_number']}")
+            if details.get('apartment_address'):
+                important_details.append(f"Address: {details['apartment_address']}")
+            if details.get('tenant_name'):
+                important_details.append(f"Tenant: {details['tenant_name']}")
+            if details.get('amount'):
+                important_details.append(f"Amount: {details['amount']}")
+            if details.get('reason'):
+                important_details.append(f"Reason: {details['reason']}")
+
+            if important_details:
+                message += " | " + " | ".join(important_details)
+
+        return message
 
     @staticmethod
     def log_activity(action, entity_type, entity_id=None, details=None, status="success", error=None):
-        """
-        Log a user activity
-
-        Args:
-            action (str): The action performed (e.g., "create", "update", "delete")
-            entity_type (str): The type of entity affected (e.g., "apartment", "tenant", "user")
-            entity_id (int/str, optional): ID of the affected entity
-            details (dict, optional): Additional details about the action
-            status (str): Outcome of the action - "success" or "failed"
-            error (Exception, optional): Exception if the action failed
-        """
+        """Log a user activity with user info and IP address"""
         try:
-            # Get user information from Flask global context
-            user = getattr(g, 'user', None)
-            user_info = None
+            user_info = ActivityLogger._get_user_info()
+            ip_address = ActivityLogger._get_real_ip()
+            formatted_message = ActivityLogger._format_message(action, entity_type, entity_id, details)
 
-            if user:
-                # Handle different user object structures
-                if isinstance(user, dict):
-                    user_info = {
-                        'id': user.get('id', user.get('sub', 'unknown')),
-                        'username': user.get('sub', user.get('username', 'unknown')),
-                        'role': user.get('role', 'unknown')
-                    }
-                else:
-                    # Assuming it's a User model instance
-                    user_info = {
-                        'id': getattr(user, 'id', 'unknown'),
-                        'username': getattr(user, 'username', 'unknown'),
-                        'role': getattr(user, 'role', 'unknown')
-                    }
-
-            # Build the log entry
             log_entry = {
                 'timestamp': datetime.utcnow().isoformat(),
                 'action': action,
                 'entity_type': entity_type,
                 'entity_id': entity_id,
                 'user': user_info,
-                'ip_address': request.remote_addr if hasattr(request, 'remote_addr') else None,
+                'ip_address': ip_address,  # Now gets real IP behind proxies
                 'status': status,
+                'message': formatted_message,
                 'details': details or {}
             }
 
-            # Add error information if provided
             if error:
                 log_entry['error'] = str(error)
                 log_entry['stack_trace'] = traceback.format_exc()
+                log_entry['message'] += f" | ERROR: {str(error)}"
 
-            # Convert to string for logging
             log_message = json.dumps(log_entry)
 
-            # Log at appropriate level
             if status == "success":
                 logger.info(f"USER ACTIVITY: {log_message}")
             else:
@@ -76,8 +183,8 @@ class ActivityLogger:
 
             return True
         except Exception as e:
-            # Don't let logging errors affect application flow
             logger.error(f"Error in activity logger: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
     @staticmethod
@@ -85,6 +192,10 @@ class ActivityLogger:
         """Log login attempts"""
         action = "login"
         status = "success" if success else "failed"
+        if details is None:
+            details = {}
+        details['success'] = success
+
         ActivityLogger.log_activity(
             action=action,
             entity_type="auth",
@@ -133,14 +244,15 @@ class ActivityLogger:
     def log_payment_action(action, payment_id, apartment_id=None, details=None, success=True, error=None):
         """Log payment-related actions"""
         status = "success" if success else "failed"
+        if details is None:
+            details = {}
+        details['apartment_id'] = apartment_id
+
         ActivityLogger.log_activity(
             action=action,
             entity_type="payment",
             entity_id=payment_id,
-            details={
-                'apartment_id': apartment_id,
-                **(details or {})
-            },
+            details=details,
             status=status,
             error=error
         )
@@ -149,14 +261,15 @@ class ActivityLogger:
     def log_contract_action(action, contract_id=None, apartment_id=None, details=None, success=True, error=None):
         """Log contract-related actions"""
         status = "success" if success else "failed"
+        if details is None:
+            details = {}
+        details['apartment_id'] = apartment_id
+
         ActivityLogger.log_activity(
             action=action,
             entity_type="contract",
             entity_id=contract_id,
-            details={
-                'apartment_id': apartment_id,
-                **(details or {})
-            },
+            details=details,
             status=status,
             error=error
         )
@@ -188,10 +301,6 @@ class ActivityLogger:
         )
 
 
-# This function is no longer needed but kept for backward compatibility
 def configure_activity_logger(app):
-    """
-    Kept for backward compatibility - logging is now configured in app.py
-    through the root logger configuration.
-    """
+    """Kept for backward compatibility"""
     app.logger.info("Activity logger will use root logger configuration")

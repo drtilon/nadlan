@@ -71,14 +71,16 @@ function ContractGenerator({ showNotification }) {
 
   // Filter apartments based on search query
   useEffect(() => {
+    const apartmentsArray = Array.isArray(apartments) ? apartments : [];
+
     if (!searchQuery) {
-      setFilteredApartments(apartments);
+      setFilteredApartments(apartmentsArray);
       return;
     }
 
     const query = searchQuery.toLowerCase();
-    const filtered = apartments.filter(apt =>
-      apt.address.toLowerCase().includes(query)
+    const filtered = apartmentsArray.filter(apt =>
+      apt && apt.address && apt.address.toLowerCase().includes(query)
     );
     setFilteredApartments(filtered);
   }, [searchQuery, apartments]);
@@ -87,11 +89,14 @@ function ContractGenerator({ showNotification }) {
     setLoading(true);
     try {
       const response = await api.get('/list');
-      setApartments(response.data || []);
-      setFilteredApartments(response.data || []);
+      const apartmentsData = Array.isArray(response.data) ? response.data : (response.data?.apartments || []);
+      setApartments(apartmentsData);
+      setFilteredApartments(apartmentsData);
     } catch (error) {
       console.error('Error fetching apartments:', error);
       showNotification('Failed to load apartments', 'error');
+      setApartments([]);
+      setFilteredApartments([]);
     } finally {
       setLoading(false);
     }
@@ -101,16 +106,17 @@ function ContractGenerator({ showNotification }) {
     setTemplatesLoading(true);
     try {
       const response = await api.get('/documents/templates');
-      setTemplates(response.data || []);
+      const templatesData = Array.isArray(response.data) ? response.data : [];
+      setTemplates(templatesData);
 
       // Find default template
-      const defaultTemplate = response.data.find(t => t.is_default);
+      const defaultTemplate = templatesData.find(t => t.is_default);
       if (defaultTemplate) {
         setDefaultTemplate(defaultTemplate);
         setSelectedTemplate(defaultTemplate.id);
-      } else if (response.data.length > 0) {
+      } else if (templatesData.length > 0) {
         // If no default, set the first template as selected
-        setSelectedTemplate(response.data[0].id);
+        setSelectedTemplate(templatesData[0].id);
       } else {
         // No templates available
         setSelectedTemplate('');
@@ -118,6 +124,7 @@ function ContractGenerator({ showNotification }) {
     } catch (error) {
       console.error('Error fetching templates:', error);
       showNotification('Failed to load contract templates', 'error');
+      setTemplates([]);
     } finally {
       setTemplatesLoading(false);
     }
@@ -130,7 +137,8 @@ function ContractGenerator({ showNotification }) {
       return;
     }
 
-    const apartment = apartments.find(apt => apt.id === selectedApartment);
+    const apartmentsArray = Array.isArray(apartments) ? apartments : [];
+    const apartment = apartmentsArray.find(apt => apt.id === selectedApartment);
     if (apartment) {
       // Handle different tenant data formats
       if (Array.isArray(apartment.tenants)) {
@@ -246,7 +254,8 @@ function ContractGenerator({ showNotification }) {
       const link = document.createElement('a');
 
       // Get apartment details for filename
-      const apartment = apartments.find(apt => apt.id === selectedApartment);
+      const apartmentsArray = Array.isArray(apartments) ? apartments : [];
+      const apartment = apartmentsArray.find(apt => apt.id === selectedApartment);
       const fileName = `Rental_Contract_${apartment ? (apartment.address || 'Apartment').replace(/[^a-zA-Z0-9]/g, '_') : 'Apartment'}.docx`;
 
       link.href = url;
@@ -284,6 +293,9 @@ function ContractGenerator({ showNotification }) {
       setUploadProgress(0);
     }
   };
+
+  const safeFilteredApartments = Array.isArray(filteredApartments) ? filteredApartments : [];
+  const safeApartments = Array.isArray(apartments) ? apartments : [];
 
   return (
     <>
@@ -395,8 +407,8 @@ function ContractGenerator({ showNotification }) {
                       2. Select Property
                     </Typography>
                     <Autocomplete
-                      options={filteredApartments}
-                      getOptionLabel={(option) => option.address}
+                      options={safeFilteredApartments}
+                      getOptionLabel={(option) => option?.address || ''}
                       onChange={handleApartmentChange}
                       renderInput={(params) => (
                         <TextField
@@ -426,11 +438,11 @@ function ContractGenerator({ showNotification }) {
                           3. Review Details
                         </Typography>
                         <Paper variant="outlined" sx={{ p: 2 }}>
-                          {apartments.find(apt => apt.id === selectedApartment) && (
+                          {safeApartments.find(apt => apt.id === selectedApartment) && (
                             <>
                               <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
                                 <ApartmentIcon sx={{ mr: 1 }} />
-                                {apartments.find(apt => apt.id === selectedApartment).address}
+                                {safeApartments.find(apt => apt.id === selectedApartment).address}
                               </Typography>
 
                               <Grid container spacing={2}>
@@ -461,13 +473,13 @@ function ContractGenerator({ showNotification }) {
                                     Contract Details:
                                   </Typography>
                                   <Typography variant="body2">
-                                    Move-in Date: {apartments.find(apt => apt.id === selectedApartment).moveInDate || 'Not specified'}
+                                    Move-in Date: {safeApartments.find(apt => apt.id === selectedApartment).moveInDate || 'Not specified'}
                                   </Typography>
                                   <Typography variant="body2">
-                                    Contract End: {apartments.find(apt => apt.id === selectedApartment).contractEndDate || 'Not specified'}
+                                    Contract End: {safeApartments.find(apt => apt.id === selectedApartment).contractEndDate || 'Not specified'}
                                   </Typography>
                                   <Typography variant="body2">
-                                    Rent: {apartments.find(apt => apt.id === selectedApartment).rent || 'Not specified'}
+                                    Rent: {safeApartments.find(apt => apt.id === selectedApartment).rent || 'Not specified'}
                                   </Typography>
                                 </Grid>
                               </Grid>

@@ -410,6 +410,8 @@ function ContractGenerator({ showNotification }) {
                       options={safeFilteredApartments}
                       getOptionLabel={(option) => option?.address || ''}
                       onChange={handleApartmentChange}
+                      getOptionKey={(option) => option?.id || option?.address || Math.random()}
+                      isOptionEqualToValue={(option, value) => option?.id === value?.id}
                       renderInput={(params) => (
                         <TextField
                           {...params}
@@ -454,7 +456,7 @@ function ContractGenerator({ showNotification }) {
                                     {tenants.length > 0 ? (
                                       tenants.map((tenant, index) => (
                                         <Chip
-                                          key={index}
+                                          key={`tenant-${selectedApartment}-${index}`}
                                           label={tenant.name || `${tenant.firstName || ''} ${tenant.lastName || ''}`.trim() || tenant}
                                           size="small"
                                           variant="outlined"

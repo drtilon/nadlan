@@ -646,11 +646,13 @@ class ContractTemplate(db.Model):
     description = db.Column(db.Text, nullable=True)
     file_path = db.Column(db.String(255), nullable=False)
     file_name = db.Column(db.String(255), nullable=False)
+    file_size = db.Column(db.Integer, nullable=True)  # ADDED: File size in bytes
     is_default = db.Column(db.Boolean, default=False)
     language = db.Column(db.String(10), default="en")
     version = db.Column(db.String(20), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = db.Column(db.String(100), nullable=True)  # ADDED: User who created the template
 
     def to_dict(self):
         """Convert to dictionary"""
@@ -666,6 +668,13 @@ class ContractTemplate(db.Model):
     def __repr__(self):
         default_str = " (DEFAULT)" if self.is_default else ""
         return f"<ContractTemplate {self.id}: {self.name}{default_str}>"
+
+
+
+
+
+
+
 
 class UnassignedPayment(db.Model):
     """Temporary storage for CSV payments that haven't been assigned to tenants yet - with user tracking"""

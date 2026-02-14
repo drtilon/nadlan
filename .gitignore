@@ -46,3 +46,4 @@ backend/uploads/contracts/
 backend/uploads/templates/
 database_backup.sql
 nginx/ssl/
+.cursor/

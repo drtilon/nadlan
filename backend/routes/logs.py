@@ -625,8 +625,64 @@ def get_entity_logs(entity_type, entity_id):
         log_with_user(current_app.logger, 'error', f"Error retrieving entity logs: {e}")
         return jsonify({"message": "Error retrieving entity logs", "error": str(e)}), 500
 
+def is_noisy_log(log_entry: Dict[str, Any]) -> bool:
+    """
+    Check if a log entry is a noisy system/infrastructure log that should be filtered out.
+    These include SQL errors during startup, werkzeug HTTP request logs, CORS config,
+    startup messages, and other internal framework noise.
+    """
+    message = (log_entry.get("message") or "").lower()
+    logger_name = (log_entry.get("logger") or "").lower()
+
+    # Filter out werkzeug HTTP access logs
+    if logger_name == "werkzeug":
+        return True
+
+    # Filter out SQL/database startup errors (CREATE TABLE, connection retries)
+    sql_patterns = [
+        "create table", "alter table", "drop table",
+        "sqlalche.me", "operational error", "operationalerror",
+        "mysql not ready", "retrying in", "auto_increment",
+        "primary key", "varchar(", "integer not null",
+        "background on this error", "[sql:", "(background on",
+        "db.create_all()", "database connection successful",
+        "running db.create_all",
+    ]
+    for pattern in sql_patterns:
+        if pattern in message:
+            return True
+
+    # Filter out startup/initialization noise
+    startup_patterns = [
+        "logging configured successfully",
+        "configuring cors with origins",
+        "extensions initialized",
+        "blueprints registered",
+        "starting flask server",
+        "database schema",
+        "demo database initialization",
+        "demo data already exists",
+        "demo data exists",
+        "ensuring database schema",
+        "starting demo",
+    ]
+    for pattern in startup_patterns:
+        if pattern in message:
+            return True
+
+    # Filter out internal request logs (the middleware logs every request)
+    if message.startswith("[request]"):
+        return True
+
+    # Filter out very short/empty messages
+    if len(message.strip()) < 3:
+        return True
+
+    return False
+
+
 def collect_logs_from_file(file_path) -> List[Dict[str, Any]]:
-    """Parse and collect logs from the log file."""
+    """Parse and collect logs from the log file, filtering out noisy system logs."""
     logs_data = []
     try:
         if not os.path.exists(file_path):
@@ -642,10 +698,13 @@ def collect_logs_from_file(file_path) -> List[Dict[str, Any]]:
                     log_entry = parse_log_line(line)
                     if log_entry:
                         log_entry["id"] = f"file_{i}"
-                        logs_data.append(log_entry)
+                        # Filter out noisy system logs
+                        if not is_noisy_log(log_entry):
+                            logs_data.append(log_entry)
                 elif logs_data and line.strip():
-                    # Continuation line
-                    logs_data[-1]["message"] += "\n" + line.strip()
+                    # Continuation line - check if previous entry was kept
+                    if logs_data:
+                        logs_data[-1]["message"] += "\n" + line.strip()
             except Exception as e:
                 log_with_user(current_app.logger, 'error', f"Error parsing log line: {e}")
                 continue
@@ -687,8 +746,9 @@ def parse_log_line(line: str) -> Dict[str, Any]:
 
 
 def collect_activity_logs_from_file(file_path) -> List[Dict[str, Any]]:
-    """Parse activity logs from file."""
+    """Parse activity logs from file, deduplicating entries."""
     logs_data = []
+    seen_timestamps = set()
 
     try:
         if not os.path.exists(file_path):
@@ -711,6 +771,20 @@ def collect_activity_logs_from_file(file_path) -> List[Dict[str, Any]]:
                         json_str = line[marker_end:].strip()
 
                         activity_data = json.loads(json_str)
+
+                        # Deduplicate: use timestamp + action + entity_type + entity_id as key
+                        dedup_key = (
+                            activity_data.get("timestamp", ""),
+                            activity_data.get("action", ""),
+                            activity_data.get("entity_type", ""),
+                            str(activity_data.get("entity_id", "")),
+                            str(activity_data.get("user", {}).get("id", ""))
+                        )
+
+                        if dedup_key in seen_timestamps:
+                            continue
+                        seen_timestamps.add(dedup_key)
+
                         activity_data["id"] = f"activity_{i}"
 
                         if "level" not in activity_data:

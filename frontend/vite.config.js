@@ -97,10 +97,11 @@ export default defineConfig({
       '@emotion/react',
       '@emotion/styled',
       '@mui/icons-material',
-      'axios'
+      'axios',
+      'recharts'
     ],
-    // Exclude lazy-loaded heavy libs from pre-bundling
-    exclude: ['recharts'],
+    // Note: recharts must be included (not excluded) because it uses
+    // lodash CommonJS modules that need pre-bundling for ESM compatibility
   },
 
   // Define environment variables

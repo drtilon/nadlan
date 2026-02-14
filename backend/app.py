@@ -167,17 +167,16 @@ def create_app():
                     origin = request.headers.get("Origin")
                     if origin in allowed_origins:
                         response.headers.add("Access-Control-Allow-Origin", origin)
-                    else:
-                        response.headers.add("Access-Control-Allow-Origin", "*")
-                    response.headers.add(
-                        "Access-Control-Allow-Headers",
-                        "Content-Type,Authorization,X-Requested-With",
-                    )
-                    response.headers.add(
-                        "Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS"
-                    )
-                    response.headers.add("Access-Control-Allow-Credentials", "true")
-                    response.headers.add("Access-Control-Max-Age", "600")
+                        response.headers.add(
+                            "Access-Control-Allow-Headers",
+                            "Content-Type,Authorization,X-Requested-With",
+                        )
+                        response.headers.add(
+                            "Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS"
+                        )
+                        response.headers.add("Access-Control-Allow-Credentials", "true")
+                        response.headers.add("Access-Control-Max-Age", "600")
+                    # SECURITY: Reject preflight from unknown origins by not setting CORS headers
                     return response
 
             # Add CORS headers and security headers to all responses
@@ -186,16 +185,15 @@ def create_app():
                 origin = request.headers.get("Origin")
                 if origin in allowed_origins:
                     response.headers.add("Access-Control-Allow-Origin", origin)
-                else:
-                    response.headers.add("Access-Control-Allow-Origin", "*")
-                response.headers.add(
-                    "Access-Control-Allow-Headers",
-                    "Content-Type,Authorization,X-Requested-With",
-                )
-                response.headers.add(
-                    "Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS"
-                )
-                response.headers.add("Access-Control-Allow-Credentials", "true")
+                    response.headers.add(
+                        "Access-Control-Allow-Headers",
+                        "Content-Type,Authorization,X-Requested-With",
+                    )
+                    response.headers.add(
+                        "Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS"
+                    )
+                    response.headers.add("Access-Control-Allow-Credentials", "true")
+                # SECURITY: No CORS headers for unknown origins
 
                 # Security headers to prevent common attacks
                 response.headers["X-Content-Type-Options"] = "nosniff"

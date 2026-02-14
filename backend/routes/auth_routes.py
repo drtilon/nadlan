@@ -108,7 +108,9 @@ def register():
     data = request.json
     username = data.get("username")
     password = data.get("password")
-    role = data.get("role", "user")  # Default role is 'user'
+
+    # SECURITY: Never trust client-supplied roles. All new users start as 'user' and unapproved.
+    role = "user"
 
     if not username or not password:
         return jsonify({"message": "Missing username or password"}), 400
@@ -124,8 +126,8 @@ def register():
         )
         return jsonify({"message": "User already exists"}), 409
 
-    # For new users, is_approved is False by default (unless they're an admin)
-    is_approved = True if role == "admin" else False
+    # All new users require admin approval
+    is_approved = False
 
     new_user = User(username=username, role=role, is_approved=is_approved)
     new_user.set_password(password)

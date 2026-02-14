@@ -2,13 +2,15 @@ services:
   mysql:
     image: mysql:8.0
     restart: always
-    ports: ["3306:3306"]
+    ports: ["127.0.0.1:3306:3306"]
     volumes: [mysql_data:/var/lib/mysql]
+    env_file:
+      - .env
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: mydatabase
-      MYSQL_USER: myuser
-      MYSQL_PASSWORD: mypassword
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${DB_NAME}
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASSWORD}
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
@@ -32,7 +34,7 @@ services:
 
   backend:
     build: ./backend
-    ports: ["5001:5001"]
+    ports: ["127.0.0.1:5001:5001"]
     volumes: ["./backend:/app"]
     depends_on:
       mysql:
@@ -48,7 +50,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile       # static build
-    ports: ["3001:3001"]            # host 3001 → container 3001 (vite dev) or 80 (nginx prod)
+    ports: ["127.0.0.1:3001:3001"]            # host 3001 → container 3001 (vite dev) or 80 (nginx prod)
     networks: [app_network]
 
 volumes:

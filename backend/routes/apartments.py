@@ -14,6 +14,7 @@ from datetime import datetime, date, timedelta
 from sqlalchemy import func, or_, and_, desc, asc, case, text
 from sqlalchemy.orm import joinedload
 from activity_logger import ActivityLogger
+from utils.logging_helpers import log_with_user
 import traceback
 import math
 from typing import List
@@ -400,7 +401,7 @@ def list_apartments():
         ), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error listing apartments: {e}")
+        log_with_user(current_app.logger, 'error', f"Error listing apartments: {e}")
         import traceback
 
         traceback.print_exc()
@@ -477,7 +478,7 @@ def get_filter_options():
         ), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error getting filter options: {e}")
+        log_with_user(current_app.logger, 'error', f"Error getting filter options: {e}")
         return jsonify(
             {"error": "Failed to get filter options", "details": str(e)}
         ), 500
@@ -642,7 +643,7 @@ def add_apartment():
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error adding apartment: {e}")
+        log_with_user(current_app.logger, 'error', f"Error adding apartment: {e}")
         import traceback
 
         traceback.print_exc()
@@ -678,8 +679,8 @@ def edit_apartment_common(apartment_id, is_admin=False):
         new_apartment_data = data.get("new_apartment", {})
         new_tenants = data.get("new_tenants", [])
 
-        print(f"Editing apartment {apartment_id}, is_admin: {is_admin}")
-        print(f"Received data: {json.dumps(new_apartment_data, indent=2)}")
+        current_app.logger.debug(f"Editing apartment {apartment_id}, is_admin: {is_admin}")
+        current_app.logger.debug(f"Received data: {json.dumps(new_apartment_data, indent=2)}")
 
         # FIXED: Helper function to handle empty strings for numeric fields
         def safe_numeric(value):
@@ -741,7 +742,7 @@ def edit_apartment_common(apartment_id, is_admin=False):
         # FIXED: Landlord can be edited by ALL users (not admin-only)
         if "landlord_id" in new_apartment_data:
             apartment.landlord_id = new_apartment_data["landlord_id"]
-            print(f"Set landlord_id to: {apartment.landlord_id}")
+            current_app.logger.debug(f"Set landlord_id to: {apartment.landlord_id}")
 
         # FIXED: Handle date fields properly - extract for contract updates
         move_in_date = None
@@ -781,25 +782,25 @@ def edit_apartment_common(apartment_id, is_admin=False):
 
         # FIXED: ONLY managementFee, rentCost, and model are admin-only
         if is_admin:
-            print("Processing admin-only financial fields...")
+            current_app.logger.debug("Processing admin-only financial fields...")
 
             if "model" in new_apartment_data:
                 apartment.model = new_apartment_data["model"]
-                print(f"Set model to: {apartment.model}")
+                current_app.logger.debug(f"Set model to: {apartment.model}")
 
             if "managementFee" in new_apartment_data:
                 apartment.managementFee = safe_numeric(
                     new_apartment_data["managementFee"]
                 )
-                print(f"Set managementFee to: {apartment.managementFee}")
+                current_app.logger.debug(f"Set managementFee to: {apartment.managementFee}")
 
             if "rentCost" in new_apartment_data:
                 apartment.rentCost = safe_numeric(new_apartment_data["rentCost"])
-                print(f"Set rentCost to: {apartment.rentCost}")
+                current_app.logger.debug(f"Set rentCost to: {apartment.rentCost}")
 
         # FIXED: Handle tenant updates using the contract system
         if new_tenants:
-            print(f"Processing {len(new_tenants)} tenants...")
+            current_app.logger.debug(f"Processing {len(new_tenants)} tenants...")
 
             # Get current tenants through the contract system
             current_tenants = apartment.get_current_tenants()
@@ -863,7 +864,7 @@ def edit_apartment_common(apartment_id, is_admin=False):
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error editing apartment {apartment_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error editing apartment {apartment_id}: {e}")
         import traceback
 
         traceback.print_exc()
@@ -896,7 +897,7 @@ def delete_apartment(apartment_id):
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error deleting apartment: {e}")
+        log_with_user(current_app.logger, 'error', f"Error deleting apartment: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -933,7 +934,7 @@ def extend_contract(apartment_id):
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error extending contract: {e}")
+        log_with_user(current_app.logger, 'error', f"Error extending contract: {e}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -1062,7 +1063,7 @@ def get_single_apartment(apartment_id):
         return jsonify(apt_dict), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error getting apartment {apartment_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error getting apartment {apartment_id}: {e}")
         import traceback
 
         traceback.print_exc()
@@ -1156,8 +1157,8 @@ def list_apartments_with_contracts():
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error listing apartments with contracts: {e}")
-        current_app.logger.error(traceback.format_exc())
+        log_with_user(current_app.logger, 'error', f"Error listing apartments with contracts: {e}")
+        log_with_user(current_app.logger, 'error', traceback.format_exc())
         return jsonify({
             "success": False,
             "error": str(e)

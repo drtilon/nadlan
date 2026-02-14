@@ -6,12 +6,12 @@ from models.models import Apartment, Tenant, ContractTemplate
 from extentions import db
 from typing import Tuple, List, Optional
 from schemas import ApartmentData, TenantData
-from flasgger import swag_from
 from pydantic import ValidationError, BaseModel
 from .auth import token_required, role_required
 from docx import Document
 from docx.shared import Pt, Cm
 from num2words import num2words
+from utils.logging_helpers import log_with_user
 import os
 
 documents_bp = Blueprint("documents_bp", __name__)
@@ -86,7 +86,7 @@ def create_contract_route() -> tuple[Response, int]:
         )
 
     except Exception as e:
-        current_app.logger.error(f"Error generating contract: {e}")
+        log_with_user(current_app.logger, 'error', f"Error generating contract: {e}")
         return jsonify({"message": "Error generating contract", "error": str(e)}), 500
 
 
@@ -126,11 +126,11 @@ def get_contract_template_path(template_id=None):
             return legacy_template_path
 
         # No template found
-        current_app.logger.error("No contract template found")
+        log_with_user(current_app.logger, 'error', "No contract template found")
         return None
 
     except Exception as e:
-        current_app.logger.error(f"Error getting contract template: {e}")
+        log_with_user(current_app.logger, 'error', f"Error getting contract template: {e}")
         # Fall back to legacy template as last resort
         legacy_template_path = os.path.join(current_app.root_path, "contract.docx")
         if os.path.exists(legacy_template_path):

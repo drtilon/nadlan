@@ -10,6 +10,7 @@ from models.models import ContractPeriod, ContractTenant, Apartment
 from extentions import db
 from typing import List, Optional
 import uuid
+from utils.logging_helpers import log_with_user
 
 
 def generate_contract_number(apartment_id: int) -> str:
@@ -34,7 +35,7 @@ def create_automatic_contract(
         # Get apartment details
         apartment = Apartment.query.get(apartment_id)
         if not apartment:
-            current_app.logger.error(f"Apartment {apartment_id} not found for contract creation")
+            log_with_user(current_app.logger, 'error', f"Apartment {apartment_id} not found for contract creation")
             return None
 
         # Set defaults
@@ -107,7 +108,7 @@ def create_automatic_contract(
         return contract
 
     except Exception as e:
-        current_app.logger.error(f"Error creating auto-contract for apartment {apartment_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error creating auto-contract for apartment {apartment_id}: {e}")
         return None  # Don't rollback here, let calling function handle it
 
 
@@ -200,7 +201,7 @@ def update_contract_tenants(apartment_id: int, new_tenant_ids: List[int]) -> boo
         return True
 
     except Exception as e:
-        current_app.logger.error(
+        log_with_user(current_app.logger, 'error',
             f"Error updating contract tenants for apartment {apartment_id}: {e}"
         )
         db.session.rollback()
@@ -230,7 +231,7 @@ def get_active_contract_for_apartment(apartment_id: int) -> Optional[ContractPer
         return active_contract
 
     except Exception as e:
-        current_app.logger.error(
+        log_with_user(current_app.logger, 'error',
             f"Error getting active contract for apartment {apartment_id}: {e}"
         )
         return None
@@ -250,12 +251,12 @@ def extend_contract_period(contract_id: int, new_end_date: date) -> bool:
     try:
         contract = ContractPeriod.query.get(contract_id)
         if not contract:
-            current_app.logger.error(f"Contract {contract_id} not found")
+            log_with_user(current_app.logger, 'error', f"Contract {contract_id} not found")
             return False
 
         # Validate new end date
         if new_end_date <= contract.start_date:
-            current_app.logger.error(
+            log_with_user(current_app.logger, 'error',
                 f"New end date {new_end_date} must be after start date {contract.start_date}"
             )
             return False
@@ -274,7 +275,7 @@ def extend_contract_period(contract_id: int, new_end_date: date) -> bool:
         return True
 
     except Exception as e:
-        current_app.logger.error(f"Error extending contract {contract_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error extending contract {contract_id}: {e}")
         db.session.rollback()
         return False
 
@@ -293,7 +294,7 @@ def terminate_contract_period(contract_id: int, termination_date: date = None) -
     try:
         contract = ContractPeriod.query.get(contract_id)
         if not contract:
-            current_app.logger.error(f"Contract {contract_id} not found")
+            log_with_user(current_app.logger, 'error', f"Contract {contract_id} not found")
             return False
 
         if termination_date is None:
@@ -318,7 +319,7 @@ def terminate_contract_period(contract_id: int, termination_date: date = None) -
         return True
 
     except Exception as e:
-        current_app.logger.error(f"Error terminating contract {contract_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error terminating contract {contract_id}: {e}")
         db.session.rollback()
         return False
 
@@ -354,7 +355,7 @@ def calculate_contract_rent_split(contract_id: int) -> dict:
         return rent_split
 
     except Exception as e:
-        current_app.logger.error(
+        log_with_user(current_app.logger, 'error',
             f"Error calculating rent split for contract {contract_id}: {e}"
         )
         return {}

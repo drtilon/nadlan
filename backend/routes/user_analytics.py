@@ -5,6 +5,7 @@ from .auth import token_required
 from datetime import datetime, date, timedelta
 from sqlalchemy import func, or_, and_
 import math
+from utils.logging_helpers import log_with_user
 
 user_analytics_bp = Blueprint("user_analytics", __name__)
 
@@ -112,7 +113,7 @@ def get_user_apartments():
         return jsonify(response), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in user analytics apartments: {e}")
+        log_with_user(current_app.logger, 'error', f"Error in user analytics apartments: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": "Failed to load apartments", "details": str(e)}), 500
@@ -228,7 +229,7 @@ def get_user_summary():
         return jsonify(summary), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in user analytics summary: {e}")
+        log_with_user(current_app.logger, 'error', f"Error in user analytics summary: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": "Failed to load summary", "details": str(e)}), 500
@@ -299,7 +300,7 @@ def get_user_tenants():
         return jsonify(tenants_data), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in user analytics tenants: {e}")
+        log_with_user(current_app.logger, 'error', f"Error in user analytics tenants: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": "Failed to load tenants", "details": str(e)}), 500

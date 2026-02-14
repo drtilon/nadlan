@@ -8,6 +8,7 @@ from models.models import ContractTemplate, Apartment
 from extentions import db
 from .auth import token_required, role_required
 import json
+from utils.logging_helpers import log_with_user
 
 # Create a blueprint for contract template routes
 contract_templates_bp = Blueprint("contract_templates_bp", __name__)
@@ -44,7 +45,7 @@ def get_templates():
         templates_data = [template.to_dict() for template in templates]
         return jsonify(templates_data), 200
     except Exception as e:
-        current_app.logger.error(f"Error fetching contract templates: {e}")
+        log_with_user(current_app.logger, 'error', f"Error fetching contract templates: {e}")
         return jsonify(
             {"message": "Error fetching contract templates", "error": str(e)}
         ), 500
@@ -62,7 +63,7 @@ def get_template(template_id):
             return jsonify({"message": "Template not found"}), 404
         return jsonify(template.to_dict()), 200
     except Exception as e:
-        current_app.logger.error(f"Error fetching contract template: {e}")
+        log_with_user(current_app.logger, 'error', f"Error fetching contract template: {e}")
         return jsonify(
             {"message": "Error fetching contract template", "error": str(e)}
         ), 500
@@ -114,7 +115,7 @@ def add_template():
             }
         ), 201
     except Exception as e:
-        current_app.logger.error(f"Error creating contract template: {e}")
+        log_with_user(current_app.logger, 'error', f"Error creating contract template: {e}")
         db.session.rollback()
         return jsonify(
             {"message": "Error creating contract template", "error": str(e)}
@@ -198,7 +199,7 @@ def upload_template():
             actual_file_size = os.path.getsize(file_path)
 
         except Exception as save_error:
-            current_app.logger.error(f"Error saving template file: {save_error}")
+            log_with_user(current_app.logger, 'error', f"Error saving template file: {save_error}")
             # Clean up partially saved file
             if os.path.exists(file_path):
                 try:
@@ -232,7 +233,7 @@ def upload_template():
             }
         ), 201
     except Exception as e:
-        current_app.logger.error(f"Error uploading contract template: {e}")
+        log_with_user(current_app.logger, 'error', f"Error uploading contract template: {e}")
         db.session.rollback()
         return jsonify(
             {"message": "Error uploading contract template", "error": str(e)}
@@ -288,7 +289,7 @@ def update_template(template_id):
             }
         ), 200
     except Exception as e:
-        current_app.logger.error(f"Error updating contract template: {e}")
+        log_with_user(current_app.logger, 'error', f"Error updating contract template: {e}")
         db.session.rollback()
         return jsonify(
             {"message": "Error updating contract template", "error": str(e)}
@@ -321,7 +322,7 @@ def set_default_template(template_id):
             }
         ), 200
     except Exception as e:
-        current_app.logger.error(f"Error setting default template: {e}")
+        log_with_user(current_app.logger, 'error', f"Error setting default template: {e}")
         db.session.rollback()
         return jsonify(
             {"message": "Error setting default template", "error": str(e)}
@@ -357,7 +358,7 @@ def delete_template(template_id):
                 os.remove(template.file_path)
                 current_app.logger.info(f"Deleted template file: {template.file_path}")
             except Exception as file_error:
-                current_app.logger.error(f"Error deleting template file: {file_error}")
+                log_with_user(current_app.logger, 'error', f"Error deleting template file: {file_error}")
 
         # Delete from database
         db.session.delete(template)
@@ -365,7 +366,7 @@ def delete_template(template_id):
 
         return jsonify({"message": "Contract template deleted successfully"}), 200
     except Exception as e:
-        current_app.logger.error(f"Error deleting contract template: {e}")
+        log_with_user(current_app.logger, 'error', f"Error deleting contract template: {e}")
         db.session.rollback()
         return jsonify(
             {"message": "Error deleting contract template", "error": str(e)}
@@ -390,7 +391,7 @@ def download_template(template_id):
             template.file_path, download_name=template.file_name, as_attachment=True
         )
     except Exception as e:
-        current_app.logger.error(f"Error downloading template: {e}")
+        log_with_user(current_app.logger, 'error', f"Error downloading template: {e}")
         return jsonify({"message": "Error downloading template", "error": str(e)}), 500
 
 
@@ -482,5 +483,5 @@ def create_contract_with_template():
             mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
     except Exception as e:
-        current_app.logger.error(f"Error generating contract: {e}")
+        log_with_user(current_app.logger, 'error', f"Error generating contract: {e}")
         return jsonify({"message": "Error generating contract", "error": str(e)}), 500

@@ -48,7 +48,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile       # static build
-    ports: ["3001:80"]             # host 3001 → container 80
+    ports: ["3001:3001"]            # host 3001 → container 3001 (vite dev) or 80 (nginx prod)
     networks: [app_network]
 
 volumes:

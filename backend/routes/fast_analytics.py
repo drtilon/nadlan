@@ -10,6 +10,7 @@ from typing import Optional, Dict, List, Any, Union
 import json
 from decimal import Decimal
 import math
+from utils.logging_helpers import log_with_user
 
 fast_analytics_bp = Blueprint("fast_analytics_bp", __name__)
 
@@ -59,7 +60,7 @@ def calculate_apartment_profit(apartment: Apartment) -> float:
         return max(0.0, profit)
 
     except Exception as e:
-        current_app.logger.error(f"Error calculating profit for apartment {apartment.id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error calculating profit for apartment {apartment.id}: {e}")
         return 0.0
 
 def get_current_contract_for_apartment(apartment_id: int, target_date: date = None) -> Optional[ContractPeriod]:
@@ -80,7 +81,7 @@ def get_current_contract_for_apartment(apartment_id: int, target_date: date = No
 
         return contract
     except Exception as e:
-        current_app.logger.error(f"Error getting current contract for apartment {apartment_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error getting current contract for apartment {apartment_id}: {e}")
         return None
 
 def get_apartment_tenants(apartment_id: int) -> List[str]:
@@ -113,7 +114,7 @@ def get_apartment_tenants(apartment_id: int) -> List[str]:
         return tenant_names if tenant_names else ["No tenants assigned"]
 
     except Exception as e:
-        current_app.logger.error(f"Error getting tenants for apartment {apartment_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error getting tenants for apartment {apartment_id}: {e}")
         return ["Error loading tenants"]
 
 def get_contract_payments(apartment_id: int, contract_id: int, start_date: date, end_date: date) -> List[Payment]:
@@ -132,7 +133,7 @@ def get_contract_payments(apartment_id: int, contract_id: int, start_date: date,
 
         return payments
     except Exception as e:
-        current_app.logger.error(f"Error getting contract payments: {e}")
+        log_with_user(current_app.logger, 'error', f"Error getting contract payments: {e}")
         return []
 
 def calculate_outstanding_for_contract(apartment: Apartment, contract: ContractPeriod, target_date: date = None) -> float:
@@ -171,7 +172,7 @@ def calculate_outstanding_for_contract(apartment: Apartment, contract: ContractP
 
         return outstanding
     except Exception as e:
-        current_app.logger.error(f"Error calculating outstanding for contract: {e}")
+        log_with_user(current_app.logger, 'error', f"Error calculating outstanding for contract: {e}")
         return 0.0
 
 # ========== FINANCIAL OVERVIEW ENDPOINT ==========
@@ -332,7 +333,7 @@ def get_financial_overview():
         return jsonify(response), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in financial overview: {e}")
+        log_with_user(current_app.logger, 'error', f"Error in financial overview: {e}")
         return jsonify({"message": "Error in financial overview", "error": str(e)}), 500
 
 @fast_analytics_bp.route("/analytics/outstanding-payments", methods=["GET"])
@@ -469,7 +470,7 @@ def get_outstanding_payments():
                 apartments_data.append(apartment_data)
 
             except Exception as e:
-                current_app.logger.error(f"Error processing apartment {apartment.id}: {e}")
+                log_with_user(current_app.logger, 'error', f"Error processing apartment {apartment.id}: {e}")
                 continue
 
         # Apply sorting
@@ -542,7 +543,7 @@ def get_outstanding_payments():
         return jsonify(response), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in outstanding payments: {e}")
+        log_with_user(current_app.logger, 'error', f"Error in outstanding payments: {e}")
         return jsonify({"message": "Error retrieving outstanding payments", "error": str(e)}), 500
 # ========== NET PROFIT DETAILED ENDPOINT ==========
 @fast_analytics_bp.route("/analytics/net-profit-detailed", methods=["GET"])
@@ -626,7 +627,7 @@ def get_net_profit_detailed():
                 apartments_data.append(apartment_data)
 
             except Exception as e:
-                current_app.logger.error(f"Error processing apartment {apartment.id}: {e}")
+                log_with_user(current_app.logger, 'error', f"Error processing apartment {apartment.id}: {e}")
                 continue
 
         # Apply sorting
@@ -685,7 +686,7 @@ def get_net_profit_detailed():
         return jsonify(response), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in detailed net profit calculation: {e}")
+        log_with_user(current_app.logger, 'error', f"Error in detailed net profit calculation: {e}")
         return jsonify({"message": "Error calculating detailed net profit", "error": str(e)}), 500
 
 @fast_analytics_bp.route("/analytics/apartment-outstanding-details/<int:apartment_id>", methods=["GET"])
@@ -865,5 +866,5 @@ def get_apartment_outstanding_details(apartment_id):
         return jsonify(response), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error getting apartment outstanding details: {e}")
+        log_with_user(current_app.logger, 'error', f"Error getting apartment outstanding details: {e}")
         return jsonify({"message": "Error retrieving apartment details", "error": str(e)}), 500

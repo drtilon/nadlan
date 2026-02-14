@@ -6,6 +6,7 @@ from models.models import Apartment, Tenant, ContractPeriod, ContractTenant
 from sqlalchemy import text, and_, or_
 from datetime import datetime, date
 from activity_logger import ActivityLogger
+from utils.logging_helpers import log_with_user
 import json
 
 contract_periods_bp = Blueprint("contract_periods_bp", __name__)
@@ -72,7 +73,7 @@ def get_apartment_contracts(apartment_id):
         return jsonify(contracts_data), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error fetching apartment contracts: {e}")
+        log_with_user(current_app.logger, 'error', f"Error fetching apartment contracts: {e}")
         return jsonify({"message": "Error fetching contracts", "error": str(e)}), 500
 
 @contract_periods_bp.route("/contracts", methods=["POST"])
@@ -154,7 +155,7 @@ def create_contract_period():
         }), 201
 
     except Exception as e:
-        current_app.logger.error(f"Error creating contract period: {e}")
+        log_with_user(current_app.logger, 'error', f"Error creating contract period: {e}")
         db.session.rollback()
         return jsonify({"message": "Error creating contract period", "error": str(e)}), 500
 
@@ -213,7 +214,7 @@ def update_contract_period(contract_id):
         return jsonify({"message": "Contract period updated successfully"}), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error updating contract period: {e}")
+        log_with_user(current_app.logger, 'error', f"Error updating contract period: {e}")
         db.session.rollback()
         return jsonify({"message": "Error updating contract period", "error": str(e)}), 500
 @contract_periods_bp.route("/contracts/<int:contract_id>/add-tenant", methods=["POST"])
@@ -314,7 +315,7 @@ def add_tenant_to_contract(contract_id):
         }), 201
 
     except Exception as e:
-        current_app.logger.error(f"Error adding tenant to contract: {e}")
+        log_with_user(current_app.logger, 'error', f"Error adding tenant to contract: {e}")
         db.session.rollback()
         return jsonify({"message": "Error adding tenant to contract", "error": str(e)}), 500
 
@@ -347,7 +348,7 @@ def delete_contract_period(contract_id):
         return jsonify({"message": "Contract period deleted successfully"}), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error deleting contract period: {e}")
+        log_with_user(current_app.logger, 'error', f"Error deleting contract period: {e}")
         db.session.rollback()
         return jsonify({"message": "Error deleting contract period", "error": str(e)}), 500
 
@@ -429,7 +430,7 @@ def get_tenant_move_history(tenant_id):
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error retrieving tenant move history: {e}")
+        log_with_user(current_app.logger, 'error', f"Error retrieving tenant move history: {e}")
         return jsonify({"message": "Error retrieving tenant move history", "error": str(e)}), 500
 # routes/contract_periods.py - ADD THESE MISSING ENDPOINTS
 
@@ -506,7 +507,7 @@ def move_out_tenant(contract_tenant_id):
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error moving out tenant: {e}")
+        log_with_user(current_app.logger, 'error', f"Error moving out tenant: {e}")
         return jsonify({"message": "Error moving out tenant", "error": str(e)}), 500
 
 
@@ -628,7 +629,7 @@ def transfer_tenant_to_apartment(tenant_id):
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error transferring tenant: {e}")
+        log_with_user(current_app.logger, 'error', f"Error transferring tenant: {e}")
         return jsonify({"message": "Error transferring tenant", "error": str(e)}), 500
 
 @contract_periods_bp.route("/apartments/<int:apartment_id>/active-tenants", methods=["GET"])
@@ -685,7 +686,7 @@ def get_active_tenants_for_apartment(apartment_id):
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error retrieving active tenants: {e}")
+        log_with_user(current_app.logger, 'error', f"Error retrieving active tenants: {e}")
         return jsonify({"message": "Error retrieving active tenants", "error": str(e)}), 500
 
 # ================ UPDATED TENANT ENDPOINTS ================
@@ -752,7 +753,7 @@ def get_tenant_current_contract(tenant_id):
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error getting tenant current contract: {e}")
+        log_with_user(current_app.logger, 'error', f"Error getting tenant current contract: {e}")
         return jsonify({"message": "Error getting tenant current contract", "error": str(e)}), 500
 
 # ================ HELPER FUNCTIONS ================
@@ -878,7 +879,7 @@ def check_overlapping_contracts(apartment_id, start_date, end_date):
         return None
 
     except Exception as e:
-        current_app.logger.error(f"Error checking overlapping contracts: {e}")
+        log_with_user(current_app.logger, 'error', f"Error checking overlapping contracts: {e}")
         return None
 @contract_periods_bp.route("/apartments/<int:apartment_id>/active-tenants-detailed", methods=["GET"])
 @token_required
@@ -939,7 +940,7 @@ def get_active_tenants_detailed_for_apartment(apartment_id):
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error retrieving detailed active tenants: {e}")
+        log_with_user(current_app.logger, 'error', f"Error retrieving detailed active tenants: {e}")
         return jsonify({"message": "Error retrieving detailed active tenants", "error": str(e)}), 500
 
 
@@ -1063,5 +1064,5 @@ def get_tenant_move_history_enhanced(tenant_id):
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error retrieving tenant move history: {e}")
+        log_with_user(current_app.logger, 'error', f"Error retrieving tenant move history: {e}")
         return jsonify({"message": "Error retrieving tenant move history", "error": str(e)}), 500

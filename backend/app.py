@@ -1,9 +1,8 @@
 # app.py - FIXED VERSION with proper logging configuration
-from flask import Flask, current_app, request, Response
+from flask import Flask, current_app, request, Response, g
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from config import Config
-from flasgger import Swagger
 from extentions import db, jwt, bcrypt
 from sqlalchemy.exc import OperationalError
 import time
@@ -181,7 +180,7 @@ def create_app():
                     response.headers.add("Access-Control-Max-Age", "600")
                     return response
 
-            # Add CORS headers to all responses
+            # Add CORS headers and security headers to all responses
             @app.after_request
             def after_request(response):
                 origin = request.headers.get("Origin")
@@ -197,6 +196,57 @@ def create_app():
                     "Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS"
                 )
                 response.headers.add("Access-Control-Allow-Credentials", "true")
+
+                # Security headers to prevent common attacks
+                response.headers["X-Content-Type-Options"] = "nosniff"
+                response.headers["X-Frame-Options"] = "DENY"
+                response.headers["X-XSS-Protection"] = "1; mode=block"
+                response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+                response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+                response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+                # Remove server header to hide implementation details
+                response.headers.pop("Server", None)
+
+                return response
+
+            # Request-level logging middleware
+            @app.before_request
+            def log_request_start():
+                if request.method == "OPTIONS":
+                    return
+                g._request_start_time = time.time()
+
+            @app.after_request
+            def log_request_info(response):
+                # Skip OPTIONS and health/ping endpoints
+                if request.method == "OPTIONS":
+                    return response
+                path = request.path
+                if path in ('/api/health', '/api/ping', '/api/health/'):
+                    return response
+
+                duration_ms = 0
+                start_time = getattr(g, '_request_start_time', None)
+                if start_time:
+                    duration_ms = int((time.time() - start_time) * 1000)
+
+                user = getattr(g, 'user', None)
+                if user:
+                    username = user.get('sub', 'unknown')
+                    role = user.get('role', 'unknown')
+                    user_str = f"user={username}(role:{role})"
+                else:
+                    user_str = "user=anonymous"
+
+                ip = request.headers.get('X-Forwarded-For',
+                     request.headers.get('X-Real-IP', request.remote_addr))
+                if ip:
+                    ip = ip.split(',')[0].strip()
+
+                app.logger.info(
+                    f"[REQUEST] {user_str} {request.method} {path} "
+                    f"{response.status_code} {duration_ms}ms ip={ip}"
+                )
                 return response
 
         except Exception as e:
@@ -221,7 +271,6 @@ def create_app():
             db.init_app(app)
             jwt.init_app(app)
             bcrypt.init_app(app)
-            Swagger(app)
             # Activity logger is now configured through the root logger
             app.logger.info("Extensions initialized")
 

@@ -122,11 +122,46 @@ function OutstandingPaymentsTab({
   const [detailDialog, setDetailDialog] = useState({ open: false, apartment: null, details: null });
   const [detailLoading, setDetailLoading] = useState(false);
   const [showOnlyDebt, setShowOnlyDebt] = useState(false);
+  const [allTimeOutstanding, setAllTimeOutstanding] = useState(0);
+
+  const currentDate = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(currentDate.getMonth() + 1);
+  const [selectedYear, setSelectedYear] = useState(currentDate.getFullYear());
+  const [periodType, setPeriodType] = useState('current_month');
+
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const getAvailableYears = () => {
+    const years = [];
+    const startYear = 2020;
+    const endYear = currentDate.getFullYear();
+    for (let year = endYear; year >= startYear; year--) {
+      years.push(year);
+    }
+    return years;
+  };
 
   useEffect(() => {
     setData(outstandingData);
     setLoading(outstandingLoading);
   }, [outstandingData, outstandingLoading]);
+
+  const fetchAllTimeOutstanding = async () => {
+    try {
+      const response = await api.get('/analytics/outstanding-payments', {
+        params: {
+          period_type: 'all_time',
+          limit: 1
+        }
+      });
+      setAllTimeOutstanding(response.data?.summary?.total_outstanding || 0);
+    } catch (error) {
+      console.error('Error fetching all-time outstanding:', error);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -134,10 +169,19 @@ function OutstandingPaymentsTab({
       const params = {
         page: outstandingPage,
         limit: outstandingRowsPerPage,
-        period_type: 'current_month',
         sort: outstandingSort
       };
+
+      if (periodType === 'current_month') {
+        params.period_type = 'current_month';
+      } else if (periodType === 'specific_month') {
+        params.period_type = 'specific_month';
+        params.month = selectedMonth;
+        params.year = selectedYear;
+      }
+
       if (outstandingSearch) params.search = outstandingSearch;
+
       const response = await api.get('/analytics/outstanding-payments', { params });
       setData(response.data);
     } catch (error) {
@@ -150,13 +194,21 @@ function OutstandingPaymentsTab({
   const fetchApartmentPaymentDetails = async (apartment) => {
     try {
       setDetailLoading(true);
+      const detailParams = {
+        period_type: periodType
+      };
+
+      if (periodType === 'specific_month') {
+        detailParams.month = selectedMonth;
+        detailParams.year = selectedYear;
+      }
+
       const detailsResponse = await api.get(`/analytics/apartment-outstanding-details/${apartment.apartment_id}`, {
-        params: { period_type: 'current_month' }
+        params: detailParams
       });
       setDetailDialog({ open: true, apartment, details: detailsResponse.data });
     } catch (error) {
       console.error('Error fetching apartment details:', error);
-      // Fallback data if API fails
       const currentDate = new Date();
       const currentMonth = currentDate.toLocaleDateString('en-US', { month: 'long' });
       const currentYear = currentDate.getFullYear();
@@ -235,7 +287,8 @@ function OutstandingPaymentsTab({
     fetchApartmentPaymentDetails(apartment);
   };
 
-  const handleTenantClick = (tenantId, tenantName) => {
+  const handleTenantClick = (e, tenantId, tenantName) => {
+    e.stopPropagation();
     if (tenantId) {
       navigate(`/tenants/${tenantId}`);
     } else {
@@ -243,148 +296,201 @@ function OutstandingPaymentsTab({
     }
   };
 
+  const handlePeriodTypeChange = (newPeriodType) => {
+    setPeriodType(newPeriodType);
+  };
+
+  const handleMonthChange = (month) => {
+    setSelectedMonth(month);
+  };
+
+  const handleYearChange = (year) => {
+    setSelectedYear(year);
+  };
+
   useEffect(() => {
     fetchData();
-  }, [outstandingPage, outstandingRowsPerPage, outstandingSearch, outstandingSort]);
+    fetchAllTimeOutstanding();
+  }, [outstandingPage, outstandingRowsPerPage, outstandingSearch, outstandingSort, periodType, selectedMonth, selectedYear]);
 
   const filteredData = showOnlyDebt && data?.apartments
     ? { ...data, apartments: data.apartments.filter(apt => apt.total_outstanding > 0) }
     : data;
 
+  const getSelectedPeriodLabel = () => {
+    if (periodType === 'current_month') {
+      return `${monthNames[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
+    } else {
+      return `${monthNames[selectedMonth - 1]} ${selectedYear}`;
+    }
+  };
+
   return (
-    <Box sx={{ p: 3 }}>
-      {/* Header */}
-      <Grid container spacing={2} sx={{ mb: 4 }}>
-        <Grid item xs={12} md={3}>
-          <Typography variant="h5" fontWeight={700} color={COLORS.text}>
-            Outstanding Payments
-          </Typography>
-          <Typography variant="body2" color={COLORS.muted}>
-            {new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-          </Typography>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <TextField
-            size="small"
-            fullWidth
-            placeholder="Search by apartment or tenant"
-            value={outstandingSearch}
-            onChange={(e) => setOutstandingSearch(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchIcon sx={{ color: COLORS.muted }} />
-                </InputAdornment>
-              ),
-            }}
-            sx={{
-              bgcolor: COLORS.surface,
-              borderRadius: 2,
-              '& .MuiOutlinedInput-root': {
-                '& fieldset': { borderColor: COLORS.border },
-                '&:hover fieldset': { borderColor: COLORS.primary },
-                '&.Mui-focused fieldset': { borderColor: COLORS.primary }
-              }
-            }}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <FormControl size="small" fullWidth>
-            <InputLabel sx={{ color: COLORS.muted }}>Sort By</InputLabel>
-            <Select
-              value={outstandingSort}
-              label="Sort By"
-              onChange={(e) => setOutstandingSort(e.target.value)}
+    <Box>
+      {/* Stats Cards */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        {[
+          {
+            title: 'Total Outstanding (All Time)',
+            value: formatCurrency(allTimeOutstanding),
+            color: COLORS.error,
+            bgcolor: '#ffebee',
+            icon: <WarningIcon sx={{ fontSize: 28, color: COLORS.error }} />
+          },
+          {
+            title: `Outstanding (${getSelectedPeriodLabel()})`,
+            value: formatCurrency(data?.summary?.total_outstanding || 0),
+            color: COLORS.warning,
+            bgcolor: '#fff3e0',
+            icon: <CalendarIcon sx={{ fontSize: 28, color: COLORS.warning }} />
+          },
+          {
+            title: `Collected (${getSelectedPeriodLabel()})`,
+            value: formatCurrency(data?.summary?.total_collected || 0),
+            color: COLORS.success,
+            bgcolor: '#e8f5e9',
+            icon: <BarChartIcon sx={{ fontSize: 28, color: COLORS.success }} />
+          }
+        ].map((card, index) => (
+          <Grid item xs={12} sm={6} md={4} key={index}>
+            <Paper
+              elevation={0}
               sx={{
-                bgcolor: COLORS.surface,
+                p: 3,
                 borderRadius: 2,
-                '& .MuiOutlinedInput-notchedOutline': { borderColor: COLORS.border },
-                '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: COLORS.primary }
+                border: `1px solid ${COLORS.border}`,
+                bgcolor: card.bgcolor,
+                transition: 'all 0.3s ease',
+                '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 8px 16px rgba(0,0,0,0.1)' }
               }}
             >
-              <MenuItem value="outstanding_desc">Outstanding: High to Low</MenuItem>
-              <MenuItem value="outstanding_asc">Outstanding: Low to High</MenuItem>
-              <MenuItem value="address_asc">Address: A-Z</MenuItem>
-              <MenuItem value="rent_desc">Rent: High to Low</MenuItem>
-            </Select>
-          </FormControl>
-        </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <FormControl size="small" fullWidth>
-            <InputLabel sx={{ color: COLORS.muted }}>Filter</InputLabel>
-            <Select
-              value={showOnlyDebt ? 'debt' : 'all'}
-              label="Filter"
-              onChange={(e) => setShowOnlyDebt(e.target.value === 'debt')}
-              sx={{
-                bgcolor: COLORS.surface,
-                borderRadius: 2,
-                '& .MuiOutlinedInput-notchedOutline': { borderColor: COLORS.border },
-                '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: COLORS.primary }
-              }}
-            >
-              <MenuItem value="all">All Apartments</MenuItem>
-              <MenuItem value="debt">Unpaid Only</MenuItem>
-            </Select>
-          </FormControl>
-        </Grid>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 1 }}>
+                <Typography variant="subtitle2" color={COLORS.muted} fontWeight={600}>
+                  {card.title}
+                </Typography>
+                {card.icon}
+              </Box>
+              <Typography variant="h4" fontWeight={700} color={card.color}>
+                {card.value}
+              </Typography>
+            </Paper>
+          </Grid>
+        ))}
       </Grid>
 
-      {/* Summary Cards - FIXED */}
-      {data?.summary && (
-        <Grid container spacing={2} sx={{ mb: 4 }}>
-          {[
-            {
-              title: 'Total Outstanding (All Time)',
-              value: formatCurrency(data.summary.total_outstanding),
-              color: COLORS.error,
-              icon: <WarningIcon />
-            },
-            {
-              title: 'Paid This Month',
-              value: formatCurrency(data.summary.total_paid_this_month),
-              color: COLORS.success,
-              icon: <CalendarIcon />
-            },
-            {
-              title: 'Outstanding This Month',
-              value: formatCurrency(data.summary.total_outstanding_this_month), // FIXED: Use correct field
-              color: data.summary.total_outstanding_this_month > 0 ? COLORS.error : COLORS.success,
-              icon: <WarningIcon />
-            },
-            {
-              title: 'Collection Rate',
-              value: `${(data.summary.collection_rate || 0).toFixed(1)}%`,
-              color: (data.summary.collection_rate || 0) >= 80 ? COLORS.success : COLORS.warning,
-              icon: <BarChartIcon />
-            }
-          ].map((card, idx) => (
-            <Grid item xs={12} sm={6} md={3} key={idx}>
-              <Paper
-                elevation={0}
-                sx={{
-                  p: 3,
-                  borderRadius: 2,
-                  bgcolor: COLORS.surface,
-                  border: `1px solid ${COLORS.border}`,
-                  transition: 'all 0.2s',
-                  '&:hover': { transform: 'translateY(-2px)', boxShadow: 2 }
-                }}
+      {/* Filters & Actions */}
+      <Paper elevation={0} sx={{ p: 3, mb: 3, borderRadius: 2, border: `1px solid ${COLORS.border}` }}>
+        <Grid container spacing={2} alignItems="center">
+          <Grid item xs={12} md={3}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Period Type</InputLabel>
+              <Select
+                value={periodType}
+                label="Period Type"
+                onChange={(e) => handlePeriodTypeChange(e.target.value)}
               >
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
-                  <Box sx={{ color: card.color }}>{card.icon}</Box>
-                  <Typography variant="body2" color={COLORS.muted} fontWeight={500}>
-                    {card.title}
-                  </Typography>
-                </Box>
-                <Typography variant="h5" fontWeight={700} color={card.color}>
-                  {card.value}
-                </Typography>
-              </Paper>
-            </Grid>
-          ))}
+                <MenuItem value="current_month">Current Month</MenuItem>
+                <MenuItem value="specific_month">Specific Month</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+
+          {periodType === 'specific_month' && (
+            <>
+              <Grid item xs={12} md={2}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Month</InputLabel>
+                  <Select
+                    value={selectedMonth}
+                    label="Month"
+                    onChange={(e) => handleMonthChange(e.target.value)}
+                  >
+                    {monthNames.map((month, index) => (
+                      <MenuItem key={index + 1} value={index + 1}>
+                        {month}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+
+              <Grid item xs={12} md={2}>
+                <FormControl fullWidth size="small">
+                  <InputLabel>Year</InputLabel>
+                  <Select
+                    value={selectedYear}
+                    label="Year"
+                    onChange={(e) => handleYearChange(e.target.value)}
+                  >
+                    {getAvailableYears().map((year) => (
+                      <MenuItem key={year} value={year}>
+                        {year}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
+            </>
+          )}
+
+          <Grid item xs={12} md={periodType === 'specific_month' ? 3 : 4}>
+            <TextField
+              fullWidth
+              size="small"
+              placeholder="Search by address..."
+              value={outstandingSearch}
+              onChange={(e) => setOutstandingSearch(e.target.value)}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchIcon sx={{ color: COLORS.muted }} />
+                  </InputAdornment>
+                )
+              }}
+              sx={{
+                '& .MuiOutlinedInput-root': { bgcolor: COLORS.surface }
+              }}
+            />
+          </Grid>
+
+          <Grid item xs={12} md={2}>
+            <FormControl fullWidth size="small">
+              <InputLabel>Sort By</InputLabel>
+              <Select
+                value={outstandingSort}
+                label="Sort By"
+                onChange={(e) => setOutstandingSort(e.target.value)}
+              >
+                <MenuItem value="outstanding_desc">Outstanding (High to Low)</MenuItem>
+                <MenuItem value="outstanding_asc">Outstanding (Low to High)</MenuItem>
+                <MenuItem value="address_asc">Address (A-Z)</MenuItem>
+                <MenuItem value="address_desc">Address (Z-A)</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={12} md={2}>
+            <Button
+              fullWidth
+              variant={showOnlyDebt ? 'contained' : 'outlined'}
+              onClick={() => setShowOnlyDebt(!showOnlyDebt)}
+              sx={{
+                height: '40px',
+                bgcolor: showOnlyDebt ? COLORS.error : 'transparent',
+                color: showOnlyDebt ? '#fff' : COLORS.error,
+                borderColor: COLORS.error,
+                '&:hover': {
+                  bgcolor: showOnlyDebt ? COLORS.error : 'rgba(211, 47, 47, 0.04)',
+                  borderColor: COLORS.error,
+                  opacity: 0.9
+                }
+              }}
+            >
+              {showOnlyDebt ? 'Show All' : 'Only Debts'}
+            </Button>
+          </Grid>
         </Grid>
-      )}
+      </Paper>
 
       {/* Table */}
       <Paper elevation={0} sx={{ borderRadius: 2, border: `1px solid ${COLORS.border}`, overflow: 'hidden' }}>
@@ -392,12 +498,12 @@ function OutstandingPaymentsTab({
           <Table>
             <TableHead sx={{ bgcolor: COLORS.background }}>
               <TableRow>
-                <TableCell><Typography variant="subtitle2" fontWeight={700}>Apartment</Typography></TableCell>
-                <TableCell><Typography variant="subtitle2" fontWeight={700}>Tenants</Typography></TableCell>
-                <TableCell align="right"><Typography variant="subtitle2" fontWeight={700}>Monthly Rent</Typography></TableCell>
-                <TableCell align="right"><Typography variant="subtitle2" fontWeight={700}>Paid This Month</Typography></TableCell>
-                <TableCell align="right"><Typography variant="subtitle2" fontWeight={700}>Total Outstanding</Typography></TableCell>
-                <TableCell align="center"><Typography variant="subtitle2" fontWeight={700}>Actions</Typography></TableCell>
+                <TableCell sx={{ fontWeight: 700, color: COLORS.text }}>Apartment</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700, color: COLORS.text }}>Expected</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700, color: COLORS.text }}>Collected</TableCell>
+                <TableCell align="right" sx={{ fontWeight: 700, color: COLORS.text }}>Outstanding</TableCell>
+                <TableCell align="center" sx={{ fontWeight: 700, color: COLORS.text }}>Status</TableCell>
+                <TableCell align="center" sx={{ fontWeight: 700, color: COLORS.text }}>Actions</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -421,45 +527,40 @@ function OutstandingPaymentsTab({
                     sx={{
                       cursor: 'pointer',
                       '&:hover': { bgcolor: COLORS.highlight },
-                      transition: 'background-color 0.2s'
+                      transition: 'background-color 0.2s ease'
                     }}
-                    onClick={() => handleRowClick(apartment)}
                   >
-                    <TableCell>
+                    <TableCell onClick={() => handleRowClick(apartment)}>
                       <Typography variant="body2" fontWeight={600}>
-                        {apartment.address}
+                        {apartment.address || 'N/A'}
                       </Typography>
+                      {apartment.tenants && apartment.tenants.length > 0 && (
+                        <Typography variant="caption" color={COLORS.muted}>
+                          {apartment.tenants.join(', ')}
+                        </Typography>
+                      )}
                     </TableCell>
-                    <TableCell>
-                      <Typography variant="body2" color={COLORS.muted}>
-                        {apartment.tenants && apartment.tenants.length > 0
-                          ? apartment.tenants.join(', ')
-                          : 'No Tenants'}
-                      </Typography>
-                    </TableCell>
-                    <TableCell align="right">
+                    <TableCell align="right" onClick={() => handleRowClick(apartment)}>
                       <Typography variant="body2" fontWeight={600}>
-                        {formatCurrency(apartment.monthly_rent)}
+                        {formatCurrency(apartment.total_expected || 0)}
                       </Typography>
                     </TableCell>
-                    <TableCell align="right">
+                    <TableCell align="right" onClick={() => handleRowClick(apartment)}>
+                      <Typography variant="body2" fontWeight={600} color={COLORS.success}>
+                        {formatCurrency(apartment.total_collected || 0)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right" onClick={() => handleRowClick(apartment)}>
                       <Typography
                         variant="body2"
-                        fontWeight={600}
-                        color={apartment.paid_this_month > 0 ? COLORS.success : COLORS.muted}
+                        fontWeight={700}
+                        color={(apartment.total_outstanding || 0) > 0 ? COLORS.error : COLORS.success}
                       >
-                        {formatCurrency(apartment.paid_this_month)}
+                        {formatCurrency(apartment.total_outstanding || 0)}
                       </Typography>
                     </TableCell>
-                    <TableCell align="right">
-                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
-                        <Typography
-                          variant="body2"
-                          fontWeight={600}
-                          color={apartment.total_outstanding > 0 ? COLORS.error : COLORS.success}
-                        >
-                          {formatCurrency(apartment.total_outstanding)}
-                        </Typography>
+                    <TableCell align="center" onClick={() => handleRowClick(apartment)}>
+                      <Box sx={{ display: 'flex', justifyContent: 'center' }}>
                         {getOutstandingChip(apartment.total_outstanding)}
                       </Box>
                     </TableCell>
@@ -617,9 +718,25 @@ function OutstandingPaymentsTab({
                       </TableHead>
                       <TableBody>
                         {detailDialog.details.tenant_breakdown.map((tenant, idx) => (
-                          <TableRow key={idx} hover>
+                          <TableRow
+                            key={idx}
+                            hover
+                            onClick={(e) => handleTenantClick(e, tenant.tenant_id, tenant.tenant_name)}
+                            sx={{
+                              cursor: tenant.tenant_id ? 'pointer' : 'default',
+                              '&:hover': { bgcolor: tenant.tenant_id ? COLORS.highlight : 'inherit' }
+                            }}
+                          >
                             <TableCell>
-                              <Typography variant="body2" fontWeight={600}>
+                              <Typography
+                                variant="body2"
+                                fontWeight={600}
+                                sx={{
+                                  color: tenant.tenant_id ? COLORS.primary : COLORS.text,
+                                  textDecoration: 'none',
+                                  '&:hover': { textDecoration: tenant.tenant_id ? 'underline' : 'none' }
+                                }}
+                              >
                                 {tenant.tenant_name || 'Unknown'}
                               </Typography>
                             </TableCell>

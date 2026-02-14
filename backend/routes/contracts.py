@@ -8,6 +8,7 @@ from werkzeug.utils import secure_filename
 from models.models import Apartment, Contract
 from extentions import db
 from .auth import token_required, role_required
+from utils.logging_helpers import log_with_user
 
 # Create a blueprint for contract management routes
 contracts_bp = Blueprint("contracts_bp", __name__)
@@ -94,7 +95,7 @@ def get_contracts(apartment_id):
         return jsonify(contracts_data), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error fetching contracts for apartment {apartment_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error fetching contracts for apartment {apartment_id}: {e}")
         return jsonify({"message": "Error fetching contracts", "error": str(e)}), 500
 
 
@@ -231,7 +232,7 @@ def upload_contract():
                 current_app.logger.info(f"Successfully processed file: {original_filename} ({get_file_size_mb(actual_file_size)}MB) for apartment {apartment_id}")
 
             except Exception as save_error:
-                current_app.logger.error(f"Error processing file {file.filename}: {save_error}")
+                log_with_user(current_app.logger, 'error', f"Error processing file {file.filename}: {save_error}")
                 # Clean up partially saved file
                 if 'file_path' in locals() and os.path.exists(file_path):
                     try:
@@ -264,7 +265,7 @@ def upload_contract():
         return jsonify(response_data), 201
 
     except Exception as e:
-        current_app.logger.error(f"Error uploading contracts: {e}")
+        log_with_user(current_app.logger, 'error', f"Error uploading contracts: {e}")
         db.session.rollback()
         return jsonify({"message": "Error uploading contracts", "error": str(e)}), 500
 
@@ -281,7 +282,7 @@ def download_contract(contract_id):
 
         # Check if file exists
         if not os.path.exists(contract.file_path):
-            current_app.logger.error(f"Contract file not found: {contract.file_path}")
+            log_with_user(current_app.logger, 'error', f"Contract file not found: {contract.file_path}")
             return jsonify({"message": "Contract file not found on server"}), 404
 
         # Return the file
@@ -293,7 +294,7 @@ def download_contract(contract_id):
         )
 
     except Exception as e:
-        current_app.logger.error(f"Error downloading contract {contract_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error downloading contract {contract_id}: {e}")
         return jsonify({"message": "Error downloading contract", "error": str(e)}), 500
 
 
@@ -317,7 +318,7 @@ def delete_contract(contract_id):
                 os.remove(file_path)
                 current_app.logger.info(f"Deleted contract file: {file_path}")
             except Exception as file_error:
-                current_app.logger.error(f"Error deleting contract file {file_path}: {file_error}")
+                log_with_user(current_app.logger, 'error', f"Error deleting contract file {file_path}: {file_error}")
                 # Continue with database deletion even if file deletion fails
 
         # Delete from database
@@ -329,7 +330,7 @@ def delete_contract(contract_id):
         return jsonify({"message": "Contract deleted successfully"}), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error deleting contract {contract_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error deleting contract {contract_id}: {e}")
         db.session.rollback()
         return jsonify({"message": "Error deleting contract", "error": str(e)}), 500
 
@@ -370,7 +371,7 @@ def update_contract(contract_id):
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error updating contract {contract_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error updating contract {contract_id}: {e}")
         db.session.rollback()
         return jsonify({"message": "Error updating contract", "error": str(e)}), 500
 
@@ -404,7 +405,7 @@ def get_contract_info(contract_id):
         return jsonify(contract_info), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error getting contract info {contract_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error getting contract info {contract_id}: {e}")
         return jsonify({"message": "Error getting contract information", "error": str(e)}), 500
 
 
@@ -441,7 +442,7 @@ def get_contracts_stats():
         return jsonify(stats), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error getting contracts stats: {e}")
+        log_with_user(current_app.logger, 'error', f"Error getting contracts stats: {e}")
         return jsonify({"message": "Error getting contract statistics", "error": str(e)}), 500
 
 

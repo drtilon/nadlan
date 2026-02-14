@@ -1,31 +1,41 @@
-// Updated AppRouter.jsx with admin access to UserAnalyticsPanel
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+// AppRouter.jsx - Lazy loaded routes for performance
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { Box, CircularProgress, Snackbar, Alert, Dialog, DialogTitle, DialogContent, DialogActions, Button } from '@mui/material';
 import { ThemeProvider } from '@mui/material/styles';
 
-// Components
-import LoginPage from './components/auth/LoginPage';
-import RegisterPage from './components/auth/RegisterPage';
-import ApartmentList from './components/apartment/ApartmentList';
-import ApartmentForm from './components/apartment/ApartmentForm';
-import PaymentScreen from './components/payment/PaymentScreen';
-import AdminPanel from './components/admin/AdminPanel';
-import AnalyticsPanel from './components/analytics/AnalyticsPanel'; // ADMIN Analytics Panel
-import TenantsPanel from './components/tenant/TenantsPanel';
-import LandlordsPanel from './components/landlord/LandlordsPanel';
-import ContractGenerator from './components/contract/ContractGenerator';
-import ContractManager from './components/contract/ContractManager';
-import LogsViewer from './components/analytics/LogsViewer';
+// MainLayout is NOT lazy - it's the app shell rendered on every page
 import MainLayout from './components/layout/MainLayout';
-import TenantDetails from './components/tenant/TenantDetails';
-import LandlordDetails from './components/landlord/LandlordDetails';
-import CSVPaymentProcessor from './components/payment/CSVPaymentProcessor';
-import UserAnalyticsPanel from './components/analytics/UserAnalyticsPanel'; // FIXED: User Analytics Panel
+
+// Lazy-loaded page components (code-split into separate chunks)
+const LoginPage = lazy(() => import('./components/auth/LoginPage'));
+const RegisterPage = lazy(() => import('./components/auth/RegisterPage'));
+const ApartmentList = lazy(() => import('./components/apartment/ApartmentList'));
+const ApartmentForm = lazy(() => import('./components/apartment/ApartmentForm'));
+const PaymentScreen = lazy(() => import('./components/payment/PaymentScreen'));
+const AdminPanel = lazy(() => import('./components/admin/AdminPanel'));
+const AnalyticsPanel = lazy(() => import('./components/analytics/AnalyticsPanel'));
+const TenantsPanel = lazy(() => import('./components/tenant/TenantsPanel'));
+const LandlordsPanel = lazy(() => import('./components/landlord/LandlordsPanel'));
+const ContractGenerator = lazy(() => import('./components/contract/ContractGenerator'));
+const ContractManager = lazy(() => import('./components/contract/ContractManager'));
+const LogsViewer = lazy(() => import('./components/analytics/LogsViewer'));
+const TenantDetails = lazy(() => import('./components/tenant/TenantDetails'));
+const LandlordDetails = lazy(() => import('./components/landlord/LandlordDetails'));
+const CSVPaymentProcessor = lazy(() => import('./components/payment/CSVPaymentProcessor'));
+const UserAnalyticsPanel = lazy(() => import('./components/analytics/UserAnalyticsPanel'));
+
 // Utils and theme
 import theme from './theme';
 import { setAuthToken, verifyToken, getUserData } from './utils/api';
 import sessionManager from './utils/SessionManager';
+
+// Shared loading fallback for Suspense boundaries
+const PageLoader = () => (
+  <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+    <CircularProgress />
+  </Box>
+);
 
 // Protected Route wrapper component
 const ProtectedRoute = ({ children, adminOnly = false }) => {
@@ -206,168 +216,170 @@ const AppRouterContainer = () => {
 
   return (
     <>
-      <Routes>
-        {/* Public Routes */}
-        <Route path="/login" element={
-          <LoginPage
-            showNotification={showNotification}
-          />
-        } />
-
-        <Route path="/register" element={
-          <RegisterPage
-            showNotification={showNotification}
-          />
-        } />
-
-        {/* Root redirect */}
-        <Route path="/" element={
-          <Navigate to={localStorage.getItem('token') ? "/dashboard" : "/login"} />
-        } />
-
-        {/* Protected Routes inside MainLayout */}
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <MainLayout
-                onLogout={handleLogout}
-                showNotification={showNotification}
-              />
-            </ProtectedRoute>
-          }
-        >
-          {/* Dashboard/Apartment List */}
-          <Route path="dashboard" element={
-            <ApartmentList
-              showNotification={showNotification}
-              onEdit={(apartment) => {
-                setEditingApartment(apartment);
-                navigate(apartment ? '/apartments/edit' : '/apartments/add');
-              }}
-              onGoToPayments={(apartmentId) => {
-                navigate(`/payments/${apartmentId}`);
-              }}
-            />
-          } />
-
-          {/* Tenants Routes */}
-          <Route path="tenants" element={
-            <TenantsPanel
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          {/* Public Routes */}
+          <Route path="/login" element={
+            <LoginPage
               showNotification={showNotification}
             />
           } />
 
-          <Route path="tenants/:tenantId" element={
-            <TenantDetails
+          <Route path="/register" element={
+            <RegisterPage
               showNotification={showNotification}
             />
           } />
 
-          {/* Landlords Routes */}
-          <Route path="landlords" element={
-            <LandlordsPanel
-              showNotification={showNotification}
-            />
+          {/* Root redirect */}
+          <Route path="/" element={
+            <Navigate to={localStorage.getItem('token') ? "/dashboard" : "/login"} />
           } />
 
-          <Route path="landlords/:landlordId" element={
-            <LandlordDetails
-              showNotification={showNotification}
-            />
-          } />
-
-          {/* Payments Route */}
-          <Route path="payments" element={
-            <PaymentScreen
-              showNotification={showNotification}
-            />
-          } />
-
-          <Route path="payments/:apartmentId" element={
-            <PaymentScreen
-              showNotification={showNotification}
-            />
-          } />
-
-          {/* Apartment Management Routes - Admin Only */}
-          <Route path="apartments/add" element={
-            <ProtectedRoute adminOnly={false}>
-              <ApartmentForm
+          {/* Protected Routes inside MainLayout */}
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <MainLayout
+                  onLogout={handleLogout}
+                  showNotification={showNotification}
+                />
+              </ProtectedRoute>
+            }
+          >
+            {/* Dashboard/Apartment List */}
+            <Route path="dashboard" element={
+              <ApartmentList
                 showNotification={showNotification}
-                onSuccess={() => navigate('/dashboard')}
+                onEdit={(apartment) => {
+                  setEditingApartment(apartment);
+                  navigate(apartment ? '/apartments/edit' : '/apartments/add');
+                }}
+                onGoToPayments={(apartmentId) => {
+                  navigate(`/payments/${apartmentId}`);
+                }}
               />
-            </ProtectedRoute>
-          } />
+            } />
 
-          <Route path="apartments/edit" element={
-            <ProtectedRoute adminOnly={false}>
-              <ApartmentForm
-                isEdit={true}
-                initialData={editingApartment}
-                showNotification={showNotification}
-                onSuccess={() => navigate('/dashboard')}
-              />
-            </ProtectedRoute>
-          } />
-
-          {/* Analytics Panel Routes */}
-          <Route path="analytics" element={
-            <ProtectedRoute adminOnly={true}>
-              <AnalyticsPanel showNotification={showNotification} />
-            </ProtectedRoute>
-          } />
-
-          <Route path="user-analytics" element={
-            <ProtectedRoute>
-              <UserAnalyticsPanel showNotification={showNotification} />
-            </ProtectedRoute>
-          } />
-
-          {/* Contract Routes - Available to all users */}
-          <Route path="contracts/generate" element={
-            <ProtectedRoute adminOnly={false}>
-              <ContractGenerator
+            {/* Tenants Routes */}
+            <Route path="tenants" element={
+              <TenantsPanel
                 showNotification={showNotification}
               />
-            </ProtectedRoute>
-          } />
+            } />
 
-          <Route path="contracts/manage" element={
-            <ProtectedRoute adminOnly={false}>
-              <ContractManager
+            <Route path="tenants/:tenantId" element={
+              <TenantDetails
                 showNotification={showNotification}
               />
-            </ProtectedRoute>
-          } />
+            } />
 
-          {/* Admin Only Routes */}
-          <Route path="admin" element={
-            <ProtectedRoute adminOnly={true}>
-              <AdminPanel
+            {/* Landlords Routes */}
+            <Route path="landlords" element={
+              <LandlordsPanel
                 showNotification={showNotification}
               />
-            </ProtectedRoute>
-          } />
-          <Route path="csv-payments" element={
-            <ProtectedRoute adminOnly={true}>
-              <CSVPaymentProcessor
-                showNotification={showNotification}
-              />
-            </ProtectedRoute>
-          } />
-          <Route path="logs" element={
-            <ProtectedRoute adminOnly={true}>
-              <LogsViewer
-                showNotification={showNotification}
-              />
-            </ProtectedRoute>
-          } />
-        </Route>
+            } />
 
-        {/* Catch-all route */}
-        <Route path="*" element={<Navigate to="/dashboard" />} />
-      </Routes>
+            <Route path="landlords/:landlordId" element={
+              <LandlordDetails
+                showNotification={showNotification}
+              />
+            } />
+
+            {/* Payments Route */}
+            <Route path="payments" element={
+              <PaymentScreen
+                showNotification={showNotification}
+              />
+            } />
+
+            <Route path="payments/:apartmentId" element={
+              <PaymentScreen
+                showNotification={showNotification}
+              />
+            } />
+
+            {/* Apartment Management Routes */}
+            <Route path="apartments/add" element={
+              <ProtectedRoute adminOnly={false}>
+                <ApartmentForm
+                  showNotification={showNotification}
+                  onSuccess={() => navigate('/dashboard')}
+                />
+              </ProtectedRoute>
+            } />
+
+            <Route path="apartments/edit" element={
+              <ProtectedRoute adminOnly={false}>
+                <ApartmentForm
+                  isEdit={true}
+                  initialData={editingApartment}
+                  showNotification={showNotification}
+                  onSuccess={() => navigate('/dashboard')}
+                />
+              </ProtectedRoute>
+            } />
+
+            {/* Analytics Panel Routes */}
+            <Route path="analytics" element={
+              <ProtectedRoute adminOnly={true}>
+                <AnalyticsPanel showNotification={showNotification} />
+              </ProtectedRoute>
+            } />
+
+            <Route path="user-analytics" element={
+              <ProtectedRoute>
+                <UserAnalyticsPanel showNotification={showNotification} />
+              </ProtectedRoute>
+            } />
+
+            {/* Contract Routes - Available to all users */}
+            <Route path="contracts/generate" element={
+              <ProtectedRoute adminOnly={false}>
+                <ContractGenerator
+                  showNotification={showNotification}
+                />
+              </ProtectedRoute>
+            } />
+
+            <Route path="contracts/manage" element={
+              <ProtectedRoute adminOnly={false}>
+                <ContractManager
+                  showNotification={showNotification}
+                />
+              </ProtectedRoute>
+            } />
+
+            {/* Admin Only Routes */}
+            <Route path="admin" element={
+              <ProtectedRoute adminOnly={true}>
+                <AdminPanel
+                  showNotification={showNotification}
+                />
+              </ProtectedRoute>
+            } />
+            <Route path="csv-payments" element={
+              <ProtectedRoute adminOnly={true}>
+                <CSVPaymentProcessor
+                  showNotification={showNotification}
+                />
+              </ProtectedRoute>
+            } />
+            <Route path="logs" element={
+              <ProtectedRoute adminOnly={true}>
+                <LogsViewer
+                  showNotification={showNotification}
+                />
+              </ProtectedRoute>
+            } />
+          </Route>
+
+          {/* Catch-all route */}
+          <Route path="*" element={<Navigate to="/dashboard" />} />
+        </Routes>
+      </Suspense>
 
       {/* Session timeout warning dialog */}
       <SessionTimeoutWarning

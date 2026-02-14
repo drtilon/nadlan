@@ -4,8 +4,9 @@ from flask import Blueprint, request, jsonify, current_app
 from .auth import token_required, role_required
 from extentions import db
 from models.models import Payment, Apartment, Tenant, ContractPeriod, ContractTenant
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from activity_logger import ActivityLogger
+from utils.logging_helpers import log_with_user
 import json
 import calendar
 from sqlalchemy import case, func
@@ -18,7 +19,7 @@ payments_bp = Blueprint("payments_bp", __name__)
 @token_required
 def get_payment_history(apartment_id):
     """
-    Get comprehensive payment history for an apartment - FIXED for tenant_payments field
+    Get comprehensive payment history for an apartment - FIXED to prioritize tenant_name field
     """
     try:
         apartment = Apartment.query.get(apartment_id)
@@ -31,33 +32,43 @@ def get_payment_history(apartment_id):
         if year_filter:
             query = query.filter_by(year=year_filter)
 
-        # FIXED: MySQL-compatible NULL handling instead of .nullslast()
         payments = query.order_by(
             case(
-                (Payment.payment_date.is_(None), 1),  # NULLs get value 1 (sorted last)
-                else_=0,  # Non-NULLs get value 0 (sorted first)
+                (Payment.payment_date.is_(None), 1),
+                else_=0,
             ).asc(),
-            Payment.payment_date.desc(),  # Then by actual date descending
-            Payment.updated_at.desc(),  # Finally by updated_at
+            Payment.payment_date.desc(),
+            Payment.updated_at.desc(),
         ).all()
 
         history = []
 
         for payment in payments:
-            # Skip payments without payment date (these are unpaid monthly records)
+            # Skip payments without payment date
             if (
                 not payment.payment_date
                 or getattr(payment, "status", "") == "not_applicable"
             ):
                 continue
 
-            # FIXED: Handle both old and new payment formats properly
             amount_paid = 0
             tenant_name = ""
             tenant_names = []
 
-            # FIXED: Check tenant_payments field first (correct field name)
-            if hasattr(payment, "tenant_payments") and payment.tenant_payments:
+            # FIXED: Check dedicated tenant_name field FIRST (for individual payments)
+            if hasattr(payment, "tenant_name") and payment.tenant_name:
+                tenant_name = payment.tenant_name
+                tenant_names = [tenant_name]
+                # Also get amount from the amount field for individual payments
+                if hasattr(payment, "amount") and payment.amount:
+                    amount_paid = float(payment.amount)
+
+            # If no dedicated tenant_name, check tenant_payments JSON field
+            if (
+                not tenant_names
+                and hasattr(payment, "tenant_payments")
+                and payment.tenant_payments
+            ):
                 try:
                     tenants_data = json.loads(payment.tenant_payments)
                     amount_paid = sum(
@@ -71,8 +82,9 @@ def get_payment_history(apartment_id):
                     tenant_name = tenant_names[0] if tenant_names else ""
                 except json.JSONDecodeError:
                     pass
+
             # Fallback to legacy tenants field
-            elif hasattr(payment, "tenants") and payment.tenants:
+            if not tenant_names and hasattr(payment, "tenants") and payment.tenants:
                 try:
                     tenants_data = json.loads(payment.tenants)
                     amount_paid = sum(
@@ -87,16 +99,7 @@ def get_payment_history(apartment_id):
                 except json.JSONDecodeError:
                     pass
 
-            # Use amount field if available (for individual payments)
-            if hasattr(payment, "amount") and payment.amount:
-                amount_paid = float(payment.amount)
-
-            # Use tenant_name field if available (legacy support)
-            if hasattr(payment, "tenant_name") and payment.tenant_name:
-                tenant_name = payment.tenant_name
-                tenant_names = [tenant_name]
-
-            # FIXED: Ensure we always have tenant names, never "N/A" empty
+            # FIXED: Only set N/A if we truly have no tenant information
             if not tenant_names:
                 tenant_names = ["N/A"]
                 tenant_name = "N/A"
@@ -112,8 +115,8 @@ def get_payment_history(apartment_id):
                 else None,
                 "paymentMethod": getattr(payment, "payment_method", "bank_transfer"),
                 "paymentType": getattr(payment, "payment_type", "rent"),
-                "tenant_name": tenant_name,  # FIXED: This should now show the actual tenant name
-                "tenant_names": tenant_names,  # FIXED: This should now show the actual tenant names
+                "tenant_name": tenant_name,
+                "tenant_names": tenant_names,
                 "notes": getattr(payment, "notes", ""),
                 "isIndividual": bool(hasattr(payment, "amount") and payment.amount),
             }
@@ -122,7 +125,7 @@ def get_payment_history(apartment_id):
         return jsonify(history), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error retrieving payment history: {e}")
+        log_with_user(current_app.logger, 'error', f"Error retrieving payment history: {e}")
         return jsonify(
             {"message": "Error retrieving payment history", "error": str(e)}
         ), 500
@@ -237,8 +240,8 @@ def add_individual_payment():
             extraPayments=json.dumps({}),  # FIXED: Use extraPayments
             status="paid",
             notes=notes,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
         )
 
         db.session.add(new_payment)
@@ -276,7 +279,7 @@ def add_individual_payment():
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error adding individual payment: {e}")
+        log_with_user(current_app.logger, 'error', f"Error adding individual payment: {e}")
         return jsonify(
             {"message": "Error adding individual payment", "error": str(e)}
         ), 500
@@ -359,7 +362,7 @@ def update_individual_payment(payment_id):
         if "payment_type" in data and hasattr(payment, "payment_type"):
             payment.payment_type = data["payment_type"]
 
-        payment.updated_at = datetime.utcnow()
+        payment.updated_at = datetime.now(timezone.utc)
         db.session.commit()
 
         # Log the payment update
@@ -374,7 +377,7 @@ def update_individual_payment(payment_id):
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error updating payment: {e}")
+        log_with_user(current_app.logger, 'error', f"Error updating payment: {e}")
         return jsonify({"message": "Error updating payment", "error": str(e)}), 500
 
 
@@ -419,7 +422,7 @@ def delete_individual_payment(payment_id):
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error deleting payment: {e}")
+        log_with_user(current_app.logger, 'error', f"Error deleting payment: {e}")
         return jsonify({"message": "Error deleting payment", "error": str(e)}), 500
 
 
@@ -502,8 +505,8 @@ def create_individual_payment():
             year=year or datetime.now().year,
             amount=float(amount),  # Required field in your model
             status="paid",
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
         )
 
         # Set optional fields based on what exists in your Payment model
@@ -587,7 +590,7 @@ def create_individual_payment():
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error creating individual payment: {e}")
+        log_with_user(current_app.logger, 'error', f"Error creating individual payment: {e}")
         return jsonify(
             {"message": "Error creating individual payment", "error": str(e)}
         ), 500
@@ -665,7 +668,7 @@ def update_batch_payments(apartment_id):
                             payment_date_str, "%Y-%m-%d"
                         ).date()
                     except:
-                        payment_date = datetime.utcnow().date()
+                        payment_date = datetime.now(timezone.utc).date()
 
             # Prepare data
             tenants_json = json.dumps(tenants)
@@ -727,7 +730,7 @@ def update_batch_payments(apartment_id):
                 ):
                     existing_payment.contract_period_id = contract_period_id
 
-                existing_payment.updated_at = datetime.utcnow()
+                existing_payment.updated_at = datetime.now(timezone.utc)
                 updated_count += 1
 
                 # Log payment update
@@ -753,8 +756,8 @@ def update_batch_payments(apartment_id):
                     year=selected_year,
                     status=status,
                     amount=total_amount,
-                    created_at=datetime.utcnow(),
-                    updated_at=datetime.utcnow(),
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
                 )
 
                 # Set optional fields
@@ -837,7 +840,7 @@ def update_batch_payments(apartment_id):
 
     except Exception as e:
         db.session.rollback()
-        current_app.logger.error(f"Error updating batch payments: {e}")
+        log_with_user(current_app.logger, 'error', f"Error updating batch payments: {e}")
         return jsonify(
             {"message": "Error updating batch payments", "error": str(e)}
         ), 500
@@ -939,21 +942,9 @@ def get_batch_payments_data(apartment_id):
         return jsonify(history), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error retrieving payment history: {e}")
+        log_with_user(current_app.logger, 'error', f"Error retrieving payment history: {e}")
         return jsonify(
             {"message": "Error retrieving payment history", "error": str(e)}
         ), 500
 
 
-@payments_bp.route("/payments/<int:apartment_id>", methods=["GET", "POST"])
-@token_required
-def handle_batch_payments(apartment_id):
-    """
-    Handle both GET and POST for batch payments
-    GET: Load existing payment data
-    POST: Update/create batch payments
-    """
-    if request.method == "GET":
-        return get_batch_payments_data(apartment_id)
-    else:  # POST
-        return update_batch_payments(apartment_id)

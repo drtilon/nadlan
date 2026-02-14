@@ -3,6 +3,7 @@ from extentions import db
 from models.models import User
 from flask import Blueprint, request, jsonify, current_app, g
 from activity_logger import ActivityLogger
+from utils.logging_helpers import log_with_user
 
 adminPanel_bp = Blueprint("adminPanel_bp", __name__)
 
@@ -54,7 +55,7 @@ def get_all_users():
         users = User.query.all()
         return jsonify([user.to_dict() for user in users]), 200
     except Exception as e:
-        current_app.logger.error(f"Error fetching users: {e}")
+        log_with_user(current_app.logger, 'error', f"Error fetching users: {e}")
         return jsonify({"message": "Error fetching users", "error": str(e)}), 500
 
 
@@ -95,7 +96,7 @@ def update_user(user_id):
             {"message": "User updated successfully", "user": user.to_dict()}
         ), 200
     except Exception as e:
-        current_app.logger.error(f"Error updating user: {e}")
+        log_with_user(current_app.logger, 'error', f"Error updating user: {e}")
         db.session.rollback()
         
         # Log failure
@@ -145,7 +146,7 @@ def delete_user(user_id):
         
         return jsonify({"message": "User deleted successfully"}), 200
     except Exception as e:
-        current_app.logger.error(f"Error deleting user: {e}")
+        log_with_user(current_app.logger, 'error', f"Error deleting user: {e}")
         db.session.rollback()
         
         # Log failure
@@ -192,7 +193,7 @@ def change_user_password(user_id):
         
         return jsonify({"message": "Password changed successfully"}), 200
     except Exception as e:
-        current_app.logger.error(f"Error changing password: {e}")
+        log_with_user(current_app.logger, 'error', f"Error changing password: {e}")
         db.session.rollback()
         
         # Log failure

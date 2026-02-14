@@ -1,6 +1,7 @@
 # auth.py
 import jwt
 import datetime
+from datetime import timezone
 from functools import wraps
 from flask import request, jsonify, g, current_app
 
@@ -63,8 +64,8 @@ def create_token(username, role, expiration_hours=None):
     payload = {
         "sub": username,
         "role": role,
-        "iat": datetime.datetime.utcnow(),
-        "exp": datetime.datetime.utcnow() + datetime.timedelta(hours=expiration_hours),
+        "iat": datetime.datetime.now(timezone.utc),
+        "exp": datetime.datetime.now(timezone.utc) + datetime.timedelta(hours=expiration_hours),
     }
     token = jwt.encode(payload, current_app.config["SECRET_KEY"], algorithm="HS256")
     return token

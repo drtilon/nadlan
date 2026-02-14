@@ -9,6 +9,7 @@ from activity_logger import ActivityLogger
 import json
 import traceback
 from sqlalchemy import case, func
+from utils.logging_helpers import log_with_user
 
 
 payment_history_bp = Blueprint("payment_history_bp", __name__)
@@ -71,7 +72,7 @@ def get_payment_receipt(payment_id):
         return jsonify(receipt_data), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error generating receipt: {e}")
+        log_with_user(current_app.logger, 'error', f"Error generating receipt: {e}")
         return jsonify({"message": "Error generating receipt", "error": str(e)}), 500
 
 
@@ -242,8 +243,8 @@ def get_tenant_payment_history(tenant_id):
         ), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error retrieving tenant payment history: {e}")
-        current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+        log_with_user(current_app.logger, 'error', f"Error retrieving tenant payment history: {e}")
+        log_with_user(current_app.logger, 'error', f"Traceback: {traceback.format_exc()}")
         return jsonify(
             {"message": "Error retrieving tenant payment history", "error": str(e)}
         ), 500
@@ -354,7 +355,7 @@ def get_apartment_tenant_payments(apartment_id):
         return jsonify(history), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error retrieving payment history: {e}")
+        log_with_user(current_app.logger, 'error', f"Error retrieving payment history: {e}")
         return jsonify(
             {"message": "Error retrieving payment history", "error": str(e)}
         ), 500
@@ -452,8 +453,8 @@ def get_tenant_payments_history(tenant_id):
         ), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error getting tenant payment history: {e}")
-        current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+        log_with_user(current_app.logger, 'error', f"Error getting tenant payment history: {e}")
+        log_with_user(current_app.logger, 'error', f"Traceback: {traceback.format_exc()}")
         return jsonify(
             {
                 "message": "Error getting tenant payment history",

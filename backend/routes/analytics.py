@@ -10,6 +10,7 @@ from itertools import groupby
 from operator import itemgetter
 from extentions import db
 from decimal import Decimal
+from utils.logging_helpers import log_with_user
 
 analytics_bp = Blueprint("analytics_bp", __name__)
 
@@ -89,7 +90,7 @@ def get_analytics_summary():
         return jsonify(summary), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in analytics summary: {e}")
+        log_with_user(current_app.logger, 'error', f"Error in analytics summary: {e}")
         return jsonify({"message": "Error retrieving analytics summary", "error": str(e)}), 500
 
 
@@ -148,7 +149,7 @@ def get_monthly_revenue():
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in monthly revenue: {e}")
+        log_with_user(current_app.logger, 'error', f"Error in monthly revenue: {e}")
         return jsonify({"message": "Error retrieving monthly revenue", "error": str(e)}), 500
 
 
@@ -237,7 +238,7 @@ def get_apartment_performance():
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in apartment performance: {e}")
+        log_with_user(current_app.logger, 'error', f"Error in apartment performance: {e}")
         return jsonify({"message": "Error retrieving apartment performance", "error": str(e)}), 500
 
 
@@ -316,7 +317,7 @@ def get_payment_trends():
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in payment trends: {e}")
+        log_with_user(current_app.logger, 'error', f"Error in payment trends: {e}")
         return jsonify({"message": "Error retrieving payment trends", "error": str(e)}), 500
 
 
@@ -424,7 +425,7 @@ def get_financial_overview():
         return jsonify(response), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in financial overview: {e}")
+        log_with_user(current_app.logger, 'error', f"Error in financial overview: {e}")
         return jsonify({"message": "Error in financial overview", "error": str(e)}), 500
 
 
@@ -507,5 +508,5 @@ def get_outstanding_summary():
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in outstanding summary: {e}")
+        log_with_user(current_app.logger, 'error', f"Error in outstanding summary: {e}")
         return jsonify({"message": "Error retrieving outstanding summary", "error": str(e)}), 500

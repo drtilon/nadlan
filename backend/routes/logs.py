@@ -8,6 +8,7 @@ import re
 from typing import List, Dict, Any, Union
 import logging
 import math
+from utils.logging_helpers import log_with_user
 
 logs_bp = Blueprint("logs_bp", __name__)
 
@@ -118,7 +119,7 @@ def safe_get_timestamp(log_entry):
             return (datetime.min, timestamp)
 
     except Exception as e:
-        current_app.logger.error(f"Unexpected error parsing timestamp '{timestamp}' (type: {type(timestamp)}): {e}")
+        log_with_user(current_app.logger, 'error', f"Unexpected error parsing timestamp '{timestamp}' (type: {type(timestamp)}): {e}")
         return (datetime.min, timestamp)
 
 @logs_bp.route("/logs", methods=["GET"])
@@ -177,7 +178,7 @@ def get_logs():
             # Use a custom sort key that extracts just the datetime part
             filtered_logs.sort(key=lambda log: safe_get_timestamp(log)[0], reverse=True)
         except Exception as e:
-            current_app.logger.error(f"Error sorting logs: {e}")
+            log_with_user(current_app.logger, 'error', f"Error sorting logs: {e}")
             # If sorting still fails, try a more defensive approach
             try:
                 # Sort only logs that have valid timestamps
@@ -196,7 +197,7 @@ def get_logs():
                 filtered_logs = [log for _, log in valid_logs] + invalid_logs
 
             except Exception as e2:
-                current_app.logger.error(f"Fallback sorting also failed: {e2}")
+                log_with_user(current_app.logger, 'error', f"Fallback sorting also failed: {e2}")
                 # If even fallback fails, just return unsorted logs
                 pass
 
@@ -225,7 +226,7 @@ def get_logs():
         return jsonify(response_data), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error retrieving logs: {e}")
+        log_with_user(current_app.logger, 'error', f"Error retrieving logs: {e}")
         return jsonify({"message": "Error retrieving logs", "error": str(e)}), 500
 
 def apply_filters(logs_data, level, entity_type, user_id, action, search, hours):
@@ -370,7 +371,7 @@ def clear_logs():
         return jsonify({"message": f"{log_type.capitalize()} logs cleared successfully"}), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error clearing logs: {e}")
+        log_with_user(current_app.logger, 'error', f"Error clearing logs: {e}")
         return jsonify({"message": "Error clearing logs", "error": str(e)}), 500
 
 @logs_bp.route("/logs/search", methods=["GET"])
@@ -424,7 +425,7 @@ def search_logs():
             # Use a custom sort key that extracts just the datetime part
             results.sort(key=lambda log: safe_get_timestamp(log)[0], reverse=True)
         except Exception as e:
-            current_app.logger.error(f"Error sorting search results: {e}")
+            log_with_user(current_app.logger, 'error', f"Error sorting search results: {e}")
             # If sorting still fails, try a more defensive approach
             try:
                 # Sort only logs that have valid timestamps
@@ -443,7 +444,7 @@ def search_logs():
                 results = [log for _, log in valid_logs] + invalid_logs
 
             except Exception as e2:
-                current_app.logger.error(f"Fallback sorting also failed: {e2}")
+                log_with_user(current_app.logger, 'error', f"Fallback sorting also failed: {e2}")
                 # If even fallback fails, just return unsorted results
                 pass
 
@@ -467,7 +468,7 @@ def search_logs():
         return jsonify(response_data), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error searching logs: {e}")
+        log_with_user(current_app.logger, 'error', f"Error searching logs: {e}")
         return jsonify({"message": "Error searching logs", "error": str(e)}), 500
 
 @logs_bp.route("/logs/stats", methods=["GET"])
@@ -544,7 +545,7 @@ def get_log_stats():
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error generating log statistics: {e}")
+        log_with_user(current_app.logger, 'error', f"Error generating log statistics: {e}")
         return jsonify({"message": "Error generating log statistics", "error": str(e)}), 500
 
 @logs_bp.route("/logs/entity/<entity_type>/<entity_id>", methods=["GET"])
@@ -578,7 +579,7 @@ def get_entity_logs(entity_type, entity_id):
             # Use a custom sort key that extracts just the datetime part
             entity_logs.sort(key=lambda log: safe_get_timestamp(log)[0], reverse=True)
         except Exception as e:
-            current_app.logger.error(f"Error sorting entity logs: {e}")
+            log_with_user(current_app.logger, 'error', f"Error sorting entity logs: {e}")
             # If sorting still fails, try a more defensive approach
             try:
                 # Sort only logs that have valid timestamps
@@ -597,7 +598,7 @@ def get_entity_logs(entity_type, entity_id):
                 entity_logs = [log for _, log in valid_logs] + invalid_logs
 
             except Exception as e2:
-                current_app.logger.error(f"Fallback sorting also failed: {e2}")
+                log_with_user(current_app.logger, 'error', f"Fallback sorting also failed: {e2}")
                 # If even fallback fails, just return unsorted logs
                 pass
 
@@ -621,7 +622,7 @@ def get_entity_logs(entity_type, entity_id):
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error retrieving entity logs: {e}")
+        log_with_user(current_app.logger, 'error', f"Error retrieving entity logs: {e}")
         return jsonify({"message": "Error retrieving entity logs", "error": str(e)}), 500
 
 def collect_logs_from_file(file_path) -> List[Dict[str, Any]]:
@@ -646,12 +647,12 @@ def collect_logs_from_file(file_path) -> List[Dict[str, Any]]:
                     # Continuation line
                     logs_data[-1]["message"] += "\n" + line.strip()
             except Exception as e:
-                current_app.logger.error(f"Error parsing log line: {e}")
+                log_with_user(current_app.logger, 'error', f"Error parsing log line: {e}")
                 continue
 
         return logs_data
     except Exception as e:
-        current_app.logger.error(f"Error collecting logs from file: {e}")
+        log_with_user(current_app.logger, 'error', f"Error collecting logs from file: {e}")
         return []
 
 
@@ -681,7 +682,7 @@ def parse_log_line(line: str) -> Dict[str, Any]:
             "message": line.strip(),
         }
     except Exception as e:
-        current_app.logger.error(f"Error parsing log line: {e}")
+        log_with_user(current_app.logger, 'error', f"Error parsing log line: {e}")
         return None
 
 
@@ -718,13 +719,13 @@ def collect_activity_logs_from_file(file_path) -> List[Dict[str, Any]]:
                         logs_data.append(activity_data)
 
             except Exception as e:
-                current_app.logger.error(f"Error parsing activity log: {e}")
+                log_with_user(current_app.logger, 'error', f"Error parsing activity log: {e}")
                 continue
 
         return logs_data
 
     except Exception as e:
-        current_app.logger.error(f"Error collecting activity logs: {e}")
+        log_with_user(current_app.logger, 'error', f"Error collecting activity logs: {e}")
         return []
 
 

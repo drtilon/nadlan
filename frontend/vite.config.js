@@ -33,40 +33,40 @@ export default defineConfig({
     // Use faster minifier
     minify: 'esbuild',
 
-    // Disable sourcemaps in production (huge speedup)
+    // Disable sourcemaps in production (huge speedup + security)
     sourcemap: false,
 
-    // Modern target
-    target: 'esnext',
+    // Modern target - smaller bundles
+    target: 'es2022',
 
-    // Optimize chunk splitting for MUI v5
+    // Optimize chunk splitting for lazy-loaded routes
     rollupOptions: {
       output: {
         manualChunks: {
-          // React core
+          // React core - loaded on every page
           'react-vendor': ['react', 'react-dom'],
 
-          // Router
+          // Router - loaded on every page
           'router': ['react-router-dom'],
 
-          // MUI v5 core
+          // MUI core - loaded on every page
           'mui-core': [
             '@mui/material',
             '@emotion/react',
             '@emotion/styled'
           ],
 
-          // MUI icons (tree-shaken properly in v5)
+          // MUI icons - tree-shaken, separate chunk
           'mui-icons': ['@mui/icons-material'],
 
-          // MUI date pickers
+          // MUI date pickers - only loaded when needed
           'mui-pickers': ['@mui/x-date-pickers'],
 
-          // Charts
+          // Charts - only loaded on analytics pages
           'charts': ['recharts'],
 
           // Utilities
-          'utils': ['axios', 'dotenv'],
+          'utils': ['axios'],
         }
       }
     },
@@ -74,6 +74,9 @@ export default defineConfig({
     // Performance settings
     chunkSizeWarningLimit: 1000,
     assetsInlineLimit: 4096,
+
+    // CSS code splitting - each lazy route gets its own CSS
+    cssCodeSplit: true,
 
     // Disable bundle analysis for faster builds
     reportCompressedSize: false,
@@ -84,7 +87,7 @@ export default defineConfig({
     drop: process.env.NODE_ENV === 'production' ? ['console', 'debugger'] : [],
   },
 
-  // OPTIMIZED FOR MUI v5 - much better than v6
+  // Pre-bundle heavy dependencies for faster dev server startup
   optimizeDeps: {
     include: [
       'react',
@@ -92,10 +95,12 @@ export default defineConfig({
       'react-router-dom',
       '@mui/material',
       '@emotion/react',
-      '@emotion/styled'
+      '@emotion/styled',
+      '@mui/icons-material',
+      'axios'
     ],
-    // MUI v5 handles icons much better - no need to exclude
-    force: true
+    // Exclude lazy-loaded heavy libs from pre-bundling
+    exclude: ['recharts'],
   },
 
   // Define environment variables

@@ -15,7 +15,9 @@ from models.models import User
 from extentions import db
 from .auth import token_required, role_required
 from activity_logger import ActivityLogger
-from datetime import datetime
+from datetime import datetime, timezone
+from sqlalchemy import text
+from utils.logging_helpers import log_with_user
 
 auth_bp = Blueprint("auth_bp", __name__)
 bcrypt = Bcrypt()
@@ -182,7 +184,7 @@ def verify_token():
         return response, 200
 
     except Exception as e:
-        current_app.logger.error(f"Error in token verification: {e}")
+        log_with_user(current_app.logger, 'error', f"Error in token verification: {e}")
         return jsonify({"valid": False, "message": "Token verification failed"}), 401
 
 
@@ -209,12 +211,12 @@ def auth_health():
     """Simple health check for auth service"""
     try:
         # Quick database connectivity check
-        db.session.execute("SELECT 1")
+        db.session.execute(text("SELECT 1"))
         return jsonify(
             {
                 "status": "healthy",
                 "service": "auth",
-                "timestamp": int(datetime.utcnow().isoformat()),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         ), 200
     except Exception as e:

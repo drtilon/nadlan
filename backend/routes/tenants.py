@@ -10,6 +10,7 @@ from datetime import datetime, date, timedelta
 from activity_logger import ActivityLogger
 from sqlalchemy import func, and_, or_
 import traceback
+from utils.logging_helpers import log_with_user
 
 tenants_bp = Blueprint("tenants_bp", __name__)
 
@@ -28,7 +29,7 @@ def add_tenant() -> Tuple[Response, int]:
         try:
             tenant_data = TenantData(**data)
         except ValidationError as e:
-            current_app.logger.error(f"Validation error adding tenant: {e}")
+            log_with_user(current_app.logger, 'error', f"Validation error adding tenant: {e}")
             return jsonify({"message": "Validation error", "errors": e.errors()}), 400
 
         # Check if tenant with this name already exists
@@ -92,8 +93,8 @@ def add_tenant() -> Tuple[Response, int]:
         }), 201
 
     except Exception as e:
-        current_app.logger.error(f"Error adding tenant: {str(e)}")
-        current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+        log_with_user(current_app.logger, 'error', f"Error adding tenant: {str(e)}")
+        log_with_user(current_app.logger, 'error', f"Traceback: {traceback.format_exc()}")
         db.session.rollback()
         return jsonify({"message": "Error adding tenant", "error": str(e)}), 500
 
@@ -118,7 +119,7 @@ def update_tenant(tenant_id) -> Tuple[Response, int]:
         try:
             tenant_update_data = TenantUpdateData(**data)
         except ValidationError as e:
-            current_app.logger.error(f"Validation error updating tenant: {e}")
+            log_with_user(current_app.logger, 'error', f"Validation error updating tenant: {e}")
             return jsonify({"message": "Validation error", "errors": e.errors()}), 400
 
         # Check for name conflicts if name is being updated
@@ -187,8 +188,8 @@ def update_tenant(tenant_id) -> Tuple[Response, int]:
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error updating tenant: {str(e)}")
-        current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+        log_with_user(current_app.logger, 'error', f"Error updating tenant: {str(e)}")
+        log_with_user(current_app.logger, 'error', f"Traceback: {traceback.format_exc()}")
         db.session.rollback()
         return jsonify({"message": "Error updating tenant", "error": str(e)}), 500
 
@@ -235,8 +236,8 @@ def delete_tenant(tenant_id) -> Tuple[Response, int]:
         return jsonify({"message": "Tenant deleted successfully"}), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error deleting tenant: {str(e)}")
-        current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+        log_with_user(current_app.logger, 'error', f"Error deleting tenant: {str(e)}")
+        log_with_user(current_app.logger, 'error', f"Traceback: {traceback.format_exc()}")
         db.session.rollback()
         return jsonify({"message": "Error deleting tenant", "error": str(e)}), 500
 
@@ -298,8 +299,8 @@ def list_tenants() -> Tuple[Response, int]:
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error listing tenants: {str(e)}")
-        current_app.logger.error(f"Traceback: {traceback.format_exc()}")
+        log_with_user(current_app.logger, 'error', f"Error listing tenants: {str(e)}")
+        log_with_user(current_app.logger, 'error', f"Traceback: {traceback.format_exc()}")
         return jsonify({"message": "Error listing tenants", "error": str(e)}), 500
 
 @tenants_bp.route("/tenants/available", methods=["GET"])
@@ -347,7 +348,7 @@ def get_available_tenants():
         return jsonify(tenants_data), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error listing available tenants: {e}")
+        log_with_user(current_app.logger, 'error', f"Error listing available tenants: {e}")
         return jsonify({"message": "Error listing available tenants", "error": str(e)}), 500
 
 
@@ -436,7 +437,7 @@ def get_tenant_details(tenant_id):
         return jsonify(tenant_data), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error getting tenant details: {e}")
+        log_with_user(current_app.logger, 'error', f"Error getting tenant details: {e}")
         return jsonify({"message": "Error getting tenant details", "error": str(e)}), 500
 
 
@@ -493,7 +494,7 @@ def get_tenant_analytics():
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error getting tenant analytics: {e}")
+        log_with_user(current_app.logger, 'error', f"Error getting tenant analytics: {e}")
         return jsonify({"message": "Error getting tenant analytics", "error": str(e)}), 500
 
 
@@ -627,7 +628,7 @@ def add_tenant_payment(tenant_id):
         }), 201
 
     except Exception as e:
-        current_app.logger.error(f"Error adding payment for tenant {tenant_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error adding payment for tenant {tenant_id}: {e}")
         db.session.rollback()
         return jsonify({"message": "Error adding payment", "error": str(e)}), 500
 
@@ -745,7 +746,7 @@ def transfer_tenant(tenant_id):
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error transferring tenant {tenant_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error transferring tenant {tenant_id}: {e}")
         db.session.rollback()
         return jsonify({"message": "Error transferring tenant", "error": str(e)}), 500
 
@@ -809,6 +810,6 @@ def move_out_tenant(tenant_id):
         }), 200
 
     except Exception as e:
-        current_app.logger.error(f"Error moving out tenant {tenant_id}: {e}")
+        log_with_user(current_app.logger, 'error', f"Error moving out tenant {tenant_id}: {e}")
         db.session.rollback()
         return jsonify({"message": "Error processing move out", "error": str(e)}), 500

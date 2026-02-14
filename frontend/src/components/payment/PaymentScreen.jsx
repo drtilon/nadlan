@@ -492,48 +492,55 @@ function PaymentScreen({ showNotification }) {
   };
 
   const handleSubmitPayment = async () => {
-    if (paymentMode === 1) {
-      // Individual payment submission
-      if (!individualPaymentForm.amount || !individualPaymentForm.tenant_name || !individualPaymentForm.month) {
-        showNotification?.('Please fill in all required fields', 'error');
-        return;
+  if (paymentMode === 1) {
+    // Individual payment submission
+    if (!individualPaymentForm.amount || !individualPaymentForm.tenant_name || !individualPaymentForm.month) {
+      showNotification?.('Please fill in all required fields', 'error');
+      return;
+    }
+
+    try {
+      setLoading(true);
+
+      // FIXED: Find the tenant_id based on tenant_name
+      const tenants = getCurrentTenants();
+      const selectedTenant = tenants.find(t => t.name === individualPaymentForm.tenant_name);
+
+      const paymentData = {
+        apartment_id: parseInt(selectedApartment),
+        tenant_id: selectedTenant?.id, // FIXED: Include tenant_id
+        tenant_name: individualPaymentForm.tenant_name,
+        amount: parseFloat(individualPaymentForm.amount),
+        payment_method: individualPaymentForm.payment_method,
+        payment_date: individualPaymentForm.payment_date,
+        payment_type: individualPaymentForm.payment_type,
+        month: individualPaymentForm.month,
+        year: individualPaymentForm.year,
+        notes: individualPaymentForm.notes,
+        contract_period_id: individualPaymentForm.contract_period_id
+      };
+
+      if (editingPayment && editingPayment.isIndividual) {
+        await api.put(`/payment/${editingPayment.id}`, paymentData);
+        showNotification?.('Payment updated successfully', 'success');
+      } else {
+        // FIXED: Use the /payment/individual endpoint instead of /payment
+        await api.post('/payment/individual', paymentData);
+        showNotification?.('Payment added successfully', 'success');
       }
 
-      try {
-        setLoading(true);
-        const paymentData = {
-          apartment_id: parseInt(selectedApartment),
-          amount: parseFloat(individualPaymentForm.amount),
-          tenant_name: individualPaymentForm.tenant_name,
-          payment_method: individualPaymentForm.payment_method,
-          payment_date: individualPaymentForm.payment_date,
-          payment_type: individualPaymentForm.payment_type,
-          month: individualPaymentForm.month,
-          year: individualPaymentForm.year,
-          notes: individualPaymentForm.notes,
-          contract_period_id: individualPaymentForm.contract_period_id
-        };
-
-        if (editingPayment && editingPayment.isIndividual) {
-          await api.put(`/payment/${editingPayment.id}`, paymentData);
-          showNotification?.('Payment updated successfully', 'success');
-        } else {
-          await api.post('/payment', paymentData);
-          showNotification?.('Payment added successfully', 'success');
-        }
-
-        setDialogOpen(false);
-        setEditingPayment(null);
-        await loadPaymentHistory();
-        await loadContracts(); // Refresh stats
-      } catch (error) {
-        console.error('Error saving individual payment:', error);
-        const errorMessage = error.response?.data?.message || 'Error saving payment';
-        showNotification?.(errorMessage, 'error');
-      } finally {
-        setLoading(false);
-      }
-    } else {
+      setDialogOpen(false);
+      setEditingPayment(null);
+      await loadPaymentHistory();
+      await loadContracts(); // Refresh stats
+    } catch (error) {
+      console.error('Error saving individual payment:', error);
+      const errorMessage = error.response?.data?.message || 'Error saving payment';
+      showNotification?.(errorMessage, 'error');
+    } finally {
+      setLoading(false);
+    }
+  } else {
       // Batch payment submission (legacy)
       if (!paymentForm.amount || !paymentForm.paidBy || paymentForm.paidFor.length === 0) {
         showNotification?.('Please fill in all required fields', 'error');

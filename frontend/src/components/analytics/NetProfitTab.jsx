@@ -1,4 +1,4 @@
-// src/components/NetProfitTab.jsx - SIMPLIFIED VERSION WITH PAGINATION
+// src/components/NetProfitTab.jsx - FIXED VERSION
 import React, { useState, useEffect } from 'react';
 import {
   Box,
@@ -65,59 +65,64 @@ function NetProfitTab() {
   const [minProfit, setMinProfit] = useState('');
 
   const fetchNetProfitData = async () => {
-    try {
-      setLoading(true);
-      const params = new URLSearchParams({
-        page: page.toString(),
-        limit: pageSize.toString(),
-        sort: sortBy,
-        status: statusFilter,
-      });
+  try {
+    setLoading(true);
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: pageSize.toString(),
+      sort: sortBy,
+      status: statusFilter === 'all' ? '' : statusFilter,
+    });
 
-      if (searchTerm.trim()) {
-        params.append('search', searchTerm.trim());
-      }
-
-      if (minProfit && !isNaN(parseFloat(minProfit))) {
-        params.append('min_profit', parseFloat(minProfit).toString());
-      }
-
-      const response = await fetch(`/api/analytics/detailed-net-profit?${params}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setNetProfitData(data);
-      } else {
-        console.error('Failed to fetch net profit data');
-      }
-    } catch (error) {
-      console.error('Error fetching net profit data:', error);
-    } finally {
-      setLoading(false);
+    if (searchTerm.trim()) {
+      params.append('search', searchTerm.trim());
     }
-  };
+
+    if (minProfit && !isNaN(parseFloat(minProfit))) {
+      params.append('min_profit', parseFloat(minProfit).toString());
+    }
+
+    const response = await fetch(`/api/analytics/net-profit-detailed?${params}`, {
+      headers: {
+        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      console.log('Net profit data:', data);
+      console.log('Response status:', response.status);
+      console.log('Response data:', data);
+      console.log('Apartments array:', data?.apartments);
+      console.log('Array length:', data?.apartments?.length);
+      setNetProfitData(data);
+    } else {
+      console.error('Failed to fetch net profit data');
+    }
+  } catch (error) {
+    console.error('Error fetching net profit data:', error);
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => {
     fetchNetProfitData();
   }, [page, pageSize, sortBy, statusFilter]);
 
   const handleSearch = () => {
-    setPage(0); // Reset to first page
+    setPage(0);
     fetchNetProfitData();
   };
 
   const handlePageChange = (event, newPage) => {
-    setPage(newPage - 1); // MUI Pagination is 1-based, our API is 0-based
+    setPage(newPage - 1);
   };
 
   const handlePageSizeChange = (event) => {
     setPageSize(event.target.value);
-    setPage(0); // Reset to first page
+    setPage(0);
   };
 
   const resetFilters = () => {
@@ -144,7 +149,7 @@ function NetProfitTab() {
           <Grid item xs={12} md={3}>
             <Card sx={{ textAlign: 'center', p: 2 }}>
               <Typography variant="h4" color="primary.main" fontWeight={600}>
-                {formatCurrency(netProfitData.summary.total_net_profit || 0)}
+                {formatCurrency(netProfitData.summary.total_monthly_profit || 0)}
               </Typography>
               <Typography variant="body2" color="textSecondary">
                 Total Net Profit
@@ -154,20 +159,20 @@ function NetProfitTab() {
           <Grid item xs={12} md={3}>
             <Card sx={{ textAlign: 'center', p: 2 }}>
               <Typography variant="h4" color="success.main" fontWeight={600}>
-                {netProfitData.summary.profitable_apartments || 0}
+                {netProfitData.summary.total_apartments || 0}
               </Typography>
               <Typography variant="body2" color="textSecondary">
-                Profitable Apartments
+                Total Apartments
               </Typography>
             </Card>
           </Grid>
           <Grid item xs={12} md={3}>
             <Card sx={{ textAlign: 'center', p: 2 }}>
               <Typography variant="h4" color="info.main" fontWeight={600}>
-                {netProfitData.summary.occupied_apartments || 0}
+                {formatCurrency(netProfitData.summary.total_monthly_rent || 0)}
               </Typography>
               <Typography variant="body2" color="textSecondary">
-                Occupied Apartments
+                Total Monthly Rent
               </Typography>
             </Card>
           </Grid>
@@ -193,7 +198,7 @@ function NetProfitTab() {
               label="Search"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
@@ -295,8 +300,7 @@ function NetProfitTab() {
                   <TableCell align="right">Monthly Rent</TableCell>
                   <TableCell align="right">Collected</TableCell>
                   <TableCell align="right">Net Profit</TableCell>
-
-                  <TableCell align="center">Collection %</TableCell>
+                  <TableCell align="center">Profit Margin %</TableCell>
                   <TableCell align="center">Status</TableCell>
                 </TableRow>
               </TableHead>
@@ -339,19 +343,18 @@ function NetProfitTab() {
                         <Typography
                           variant="body2"
                           fontWeight={600}
-                          color={apartment.actual_profit > 0 ? 'success.main' : apartment.actual_profit < 0 ? 'error.main' : 'warning.main'}
+                          color={apartment.monthly_profit > 0 ? 'success.main' : apartment.monthly_profit < 0 ? 'error.main' : 'warning.main'}
                         >
-                          {formatCurrency(apartment.actual_profit || 0)}
+                          {formatCurrency(apartment.monthly_profit || 0)}
                         </Typography>
                       </TableCell>
-
                       <TableCell align="center">
                         <Typography variant="body2">
-                          {apartment.collection_rate?.toFixed(1) || 0}%
+                          {apartment.profit_margin?.toFixed(1) || 0}%
                         </Typography>
                       </TableCell>
                       <TableCell align="center">
-                        {getStatusChip(apartment.status, apartment.actual_profit || 0)}
+                        {getStatusChip(apartment.status, apartment.monthly_profit || 0)}
                       </TableCell>
                     </TableRow>
                   ))
@@ -388,7 +391,7 @@ function NetProfitTab() {
 
             <Pagination
               count={netProfitData.pagination.total_pages}
-              page={page + 1} // MUI Pagination is 1-based
+              page={page + 1}
               onChange={handlePageChange}
               color="primary"
               showFirstButton

@@ -6,6 +6,7 @@ import re
 from datetime import datetime, timedelta, date
 from flask import Blueprint, request, jsonify, current_app, g
 from werkzeug.utils import secure_filename
+from utils.logging_helpers import log_with_user
 from .auth import token_required, role_required
 from models.models import (
     Tenant,

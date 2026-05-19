@@ -4,16 +4,15 @@ import sessionManager from './SessionManager';
 
 // Define base URL with protocol and host detection
 const getBaseUrl = () => {
-  // Check if running in production (on the digital ocean server)
   const hostname = window.location.hostname;
 
-  // Production domains
-  if (hostname === '207.154.221.54' || hostname === 'shefaug.com' || hostname === 'www.shefaug.com') {
-    return 'https://www.shefaug.com/api'; // Use HTTPS and your domain
+  // Local development — Vite/nginx proxy serves /api
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return '/api';
   }
 
-  // Local development - use relative path to go through proxy
-  return '/api';
+  // Production — same origin (works for old.shefaug.com, shefaug.com, IP, etc.)
+  return `${window.location.origin}/api`;
 };
 
 // API service with dynamic base URL configuration

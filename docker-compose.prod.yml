@@ -1,4 +1,5 @@
-version: '3.8'
+# Production stack for old.shefaug.com (and other hosts).
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 services:
   nginx:
@@ -10,15 +11,16 @@ services:
 
   backend:
     restart: unless-stopped
+    volumes: []  # do not mount source over the image on production
     environment:
       - FLASK_ENV=production
+      - FLASK_DEBUG=0
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile  # Force production Dockerfile
-    volumes: []  # Remove development volume mounts
+      dockerfile: Dockerfile
+    volumes: []  # no live source mount — use built static assets
     environment:
       - NODE_ENV=production
     restart: unless-stopped
-    ports: ["3001:80"]  # Nginx serves on port 80 inside container

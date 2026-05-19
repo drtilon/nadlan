@@ -12,6 +12,7 @@ export default defineConfig({
       '127.0.0.1',
       'shefaug.com',
       'www.shefaug.com',
+      'old.shefaug.com',
       '207.154.221.54',
       '.shefaug.com'
     ],

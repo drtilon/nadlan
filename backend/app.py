@@ -133,7 +133,7 @@ def create_app():
             # For production, specify your frontend domain
             allowed_origins = os.environ.get(
                 "CORS_ALLOWED_ORIGINS",
-                "https://www.shefaug.com,https://shefaug.com,http://localhost,http://localhost:80,http://localhost:3001,http://207.154.221.54",
+                "https://old.shefaug.com,https://www.shefaug.com,https://shefaug.com,http://old.shefaug.com,http://localhost,http://localhost:80,http://localhost:3001,http://207.154.221.54",
             ).split(",")
             # Strip whitespace from origins
             allowed_origins = [origin.strip() for origin in allowed_origins]

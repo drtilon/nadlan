@@ -1,3 +1,6 @@
+# Local development only — NOT loaded automatically.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
 services:
   nginx:
     volumes:
